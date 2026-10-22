@@ -22,12 +22,17 @@
   //==========================================================================
   // Stage scaling
   function rescale() {
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const s = Math.min(vw / 1448, vh / 1086);
+    const preview = !SC.isPlugin;
+    const panel = document.getElementById("previewPanel");
+    const gutter = preview ? 16 : 0;
+    const panelH = preview && panel ? panel.offsetHeight + 12 : 0;
+    const vw = window.innerWidth - 2 * gutter, vh = window.innerHeight - panelH - (preview ? 12 : 0);
+    const s = Math.max(0.05, Math.min(vw / 1448, vh / 1086));
     const stage = $("stage");
     stage.style.transform = "scale(" + s + ")";
-    stage.style.left = Math.max(0, (vw - 1448 * s) / 2) + "px";
-    stage.style.top = Math.max(0, (vh - 1086 * s) / 2) + "px";
+    stage.style.left = (gutter + Math.max(0, (vw - 1448 * s) / 2)) + "px";
+    stage.style.top = (preview ? 8 : Math.max(0, (vh - 1086 * s) / 2)) + "px";
+    if (panel) panel.style.top = (8 + 1086 * s + 10) + "px";
     const changed = Math.abs((window.SC_STAGE_SCALE || 0) - s) > 0.01;
     window.SC_STAGE_SCALE = s;
     if (changed) {
@@ -444,15 +449,27 @@
   }
 
   //==========================================================================
-  // Browser preview only: listen to audio rendered by the engine.
+  // Browser preview only: a panel under the plugin window to hear audio rendered by the engine.
   function buildDemoPlayer() {
-    if (SC.isPlugin) return;
-    const demos = [["demo-input.mp3", "SOLO VOICE"], ["demo-ah.mp3", "SACRED \u00b7 AH"], ["demo-gospel.mp3", "GOSPEL \u00b7 WORDS"]];
-    const bar = document.createElement("div");
-    bar.id = "demoBar";
-    bar.innerHTML = '<span class="demo-title">HEAR THE ENGINE</span>';
+    if (SC.isPlugin || $("previewPanel")) return;
+    const demos = [["demo-input.mp3", "Solo voice"], ["demo-ah.mp3", "Sacred choir \u00b7 Ah"], ["demo-gospel.mp3", "Gospel choir \u00b7 Words"]];
+    const panel = document.createElement("div");
+    panel.id = "previewPanel";
+    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir.</div>';
+    const row = panel.querySelector(".pp-demos");
     const audio = new Audio();
     audio.preload = "none";
+    const urls = {};
+    const urlFor = (file) => {
+      if (urls[file]) return urls[file];
+      const b64 = window.SC_DEMO_AUDIO && window.SC_DEMO_AUDIO[file];
+      if (!b64) return "demo/" + file;
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; ++i) bytes[i] = bin.charCodeAt(i);
+      urls[file] = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+      return urls[file];
+    };
     let ctx = null, analyser = null, data = null, current = null;
     const buttons = demos.map(([file, label]) => {
       const b = document.createElement("button");
@@ -463,45 +480,51 @@
         if (!ctx) {
           const AC = window.AudioContext || window.webkitAudioContext;
           if (AC) {
-            ctx = new AC();
-            const src = ctx.createMediaElementSource(audio);
-            analyser = ctx.createAnalyser();
-            analyser.fftSize = 1024;
-            data = new Float32Array(analyser.fftSize);
-            src.connect(analyser);
-            analyser.connect(ctx.destination);
+            try {
+              ctx = new AC();
+              const src = ctx.createMediaElementSource(audio);
+              analyser = ctx.createAnalyser();
+              analyser.fftSize = 1024;
+              data = new Float32Array(analyser.fftSize);
+              src.connect(analyser);
+              analyser.connect(ctx.destination);
+            } catch (e) { ctx = null; analyser = null; }
           }
         }
         if (ctx && ctx.state === "suspended") ctx.resume();
         current = file;
-        audio.src = "demo/" + file;
+        audio.src = urlFor(file);
         audio.play().catch(() => toast("Tap again to play"));
-        // Learned harmony for the demo is in G major.
         if (file !== "demo-input.mp3") Params.set("choirSize", file === "demo-ah.mp3" ? 70 : 45);
       });
-      bar.appendChild(b);
-      return [b, file];
+      row.appendChild(b);
+      return [b, file, label];
     });
-    const sync = () => buttons.forEach(([b, f]) => {
+    const sync = () => buttons.forEach(([b, f, label]) => {
       const playing = current === f && !audio.paused;
       b.classList.toggle("on", playing);
-      b.textContent = (playing ? "\u25A0 " : "\u25B6 ") + demos.find((d) => d[0] === f)[1];
+      b.textContent = (playing ? "\u25A0 " : "\u25B6 ") + label;
     });
     audio.addEventListener("play", sync);
     audio.addEventListener("pause", sync);
     audio.addEventListener("ended", () => { sync(); window.SC_DEMO_LEVEL = undefined; });
     (function level() {
-      if (analyser && !audio.paused) {
-        analyser.getFloatTimeDomainData(data);
-        let sum = 0;
-        for (let i = 0; i < data.length; ++i) sum += data[i] * data[i];
-        window.SC_DEMO_LEVEL = Math.sqrt(sum / data.length);
-      } else if (audio.paused) {
+      if (!audio.paused) {
+        if (analyser) {
+          analyser.getFloatTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; ++i) sum += data[i] * data[i];
+          window.SC_DEMO_LEVEL = Math.sqrt(sum / data.length);
+        } else {
+          window.SC_DEMO_LEVEL = 0.15;
+        }
+      } else {
         window.SC_DEMO_LEVEL = undefined;
       }
       requestAnimationFrame(level);
     })();
-    $("stage").appendChild(bar);
+    document.body.appendChild(panel);
+    rescale();
   }
 
   SC.on("init", buildDemoPlayer);

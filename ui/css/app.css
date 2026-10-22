@@ -6,6 +6,7 @@
 @font-face { font-family: "Montserrat"; src: url("../assets/fonts/Montserrat.woff2") format("woff2"); font-weight: 100 900; }
 
 :root {
+  color-scheme: dark;
   --gold: #e8c98a;
   --gold-bright: #ffe7b0;
   --gold-deep: #b48a4a;
@@ -317,18 +318,28 @@ html, body {
 }
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* ---------- Browser preview demo player ---------- */
-#demoBar {
-  position: absolute; left: 50%; top: 96px; transform: translateX(-50%); z-index: 20;
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 16px;
-  background: linear-gradient(180deg, rgba(16,11,9,0.88), rgba(16,11,9,0.74));
-  border: 1px solid rgba(232, 201, 138, 0.55); border-radius: 22px; box-shadow: 0 6px 22px rgba(0,0,0,0.55);
+/* ---------- Browser preview panel (not shown in the plugin) ---------- */
+#previewPanel {
+  position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 30;
+  padding: 12px 16px; text-align: center;
+  font-family: "Cormorant", Georgia, serif; font-size: 17px; color: #e9dcc4;
+  background: linear-gradient(180deg, #17110e, #0f0b09);
+  border: 1px solid rgba(232, 201, 138, 0.45); border-radius: 14px;
 }
-#demoBar .demo-title { font-family: "Cinzel", serif; font-size: 13px; letter-spacing: 2px; color: var(--gold-bright); margin-right: 4px; }
+#previewPanel b { color: var(--gold-bright); font-weight: 600; }
+.pp-text { max-width: 760px; line-height: 1.3; }
+.pp-demos { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+.pp-label { font-family: "Cinzel", serif; font-size: 13px; letter-spacing: 2px; color: var(--gold-bright); margin-right: 4px; }
+.pp-note { font-size: 14px; color: var(--muted); }
 .demo-btn {
-  height: 30px; padding: 0 14px; border-radius: 15px; cursor: pointer;
-  font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 11.5px; letter-spacing: 1.4px;
-  color: #f2e4c6; background: #17110e; border: 1px solid rgba(232, 201, 138, 0.45);
+  min-height: 34px; padding: 4px 14px; border-radius: 17px; cursor: pointer;
+  font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 12.5px; letter-spacing: 0.8px;
+  color: #f2e4c6; background: #17110e; border: 1px solid rgba(232, 201, 138, 0.5);
 }
-.demo-btn:hover { border-color: var(--gold); }
+.demo-btn:hover, .demo-btn:focus-visible { border-color: var(--gold); outline: none; }
 .demo-btn.on { color: #1b1209; background: linear-gradient(180deg, #ffe3a3, #c69a52); border-color: #ffe9b8; box-shadow: 0 0 12px rgba(255, 210, 140, 0.5); }
+@media (max-height: 520px) {
+  .pp-text, .pp-note { display: none; }
+  #previewPanel { padding: 8px 12px; }
+}

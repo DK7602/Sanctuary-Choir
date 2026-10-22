@@ -1,6 +1,6 @@
 # Browser preview
 
-`tools/preview/build_preview.sh <dir>` copies the plugin UI plus these demo renders into a folder that runs
+`python3 tools/preview/build_preview.py <dir>` copies the plugin UI plus these demo renders into a folder that runs
 in any browser. Without the plugin, `ui/js/bridge.js` switches to a simulated engine.
 
 The demo MP3s were made with `sanctuary_render --synth-demo` ("Amazing Grace" sung by the built-in
