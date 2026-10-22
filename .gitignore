@@ -1,0 +1,28 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+out/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.xcodeproj/xcuserdata/
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Art pipeline caches (model weights, intermediate files)
+tools/art/.cache/
+tools/art/.work/
+
+# Node
+node_modules/
