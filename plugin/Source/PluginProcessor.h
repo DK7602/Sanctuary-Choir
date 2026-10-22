@@ -100,6 +100,7 @@ private:
     // Dry delay used while bypassed
     juce::AudioBuffer<float> bypassDelay;
     int bypassPos = 0;
+    void writeBypassDelay (const juce::AudioBuffer<float>& buffer, int n, int numIn);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SanctuaryProcessor)
 };

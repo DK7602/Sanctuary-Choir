@@ -12,6 +12,7 @@
 #include <complex>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <map>
 
 using namespace sc;
@@ -730,6 +731,106 @@ TEST (learnAndRender)
     auto mix = mixdownStems (stems, p, false);
     maybeWrite ("amazing_grace_input", x, x, sr);
     maybeWrite ("amazing_grace_choir", mix[0], mix[1], sr);
+}
+
+TEST (badInputAndParametersNeverStick)
+{
+    // One NaN or infinite input sample (a glitching host or plug-in upstream) and nonsense
+    // parameter values must never leave the choir silent or the output non-finite.
+    const double sr = 48000.0;
+    auto x = test::singMelody (test::cMajorScale (57.0f, 0.4f), sr, Tenor, 20.0f);
+    for (int run = 0; run < 3; ++run)
+    {
+        const VocalType vt = run == 1 ? VocalType::Words : VocalType::Ah;
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (vt, HarmonyMode::FullChoir);
+        eng.setParams (p);
+        std::vector<float> in (x);
+        in[(size_t) (0.5 * sr)] = std::numeric_limits<float>::quiet_NaN();
+        in[(size_t) (0.9 * sr)] = std::numeric_limits<float>::infinity();
+        if (run == 2)
+        {
+            p.vibrato = std::numeric_limits<float>::quiet_NaN();
+            p.volumeDb = std::numeric_limits<float>::infinity();
+            p.formant = -std::numeric_limits<float>::infinity();
+            p.sections[0].level = std::numeric_limits<float>::quiet_NaN();
+            eng.setParams (p);
+        }
+        auto y = runEngine (eng, in, sr);
+        bool finite = true;
+        for (float v : y) finite = finite && std::isfinite (v);
+        double e = 0;
+        const size_t a = (size_t) (3.5 * sr), b = std::min (y.size(), (size_t) (5.5 * sr));
+        for (size_t i = a; i < b; ++i) e += (double) y[i] * y[i];
+        const double late = std::sqrt (e / (double) std::max<size_t> (1, b - a));
+        std::printf ("  run %d: output finite %d, choir level long after the bad sample %.4f\n", run, (int) finite, late);
+        CHECK (finite);
+        CHECK (late > 0.01);
+    }
+}
+
+TEST (echoPhrasesBackToBackWithoutClicks)
+{
+    // Two phrases with a short breath between: the second answer starts on time and the
+    // hand-over between answers is smooth (it used to restart every singer mid-note).
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 55, 0.8f, 0.05f }, { 57, 0.8f, 0.05f }, { 59, 0.9f, 0.6f },
+                                 { 62, 0.8f, 0.05f }, { 60, 0.8f, 0.05f }, { 59, 0.9f, 4.0f } }, sr, Tenor);
+    for (VocalType vt : { VocalType::Words, VocalType::Ah })
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 64);
+        EngineParams p;   // the default choir, answering each phrase
+        p.vocalType = vt;
+        p.response = 1;
+        eng.setParams (p);
+        std::array<std::vector<float>, NumSections * 2> stems;
+        float* taps[NumSections * 2];
+        for (size_t i = 0; i < stems.size(); ++i) { stems[i].assign (x.size() + 64, 0.0f); taps[i] = stems[i].data(); }
+        eng.setStemTap (taps);
+        std::vector<float> l (64), r (64);
+        for (size_t pos = 0; pos + 64 <= x.size(); pos += 64)
+            eng.process (x.data() + pos, nullptr, l.data(), r.data(), 64);
+        std::vector<float> bus (x.size(), 0.0f);
+        for (size_t i = 0; i < x.size(); ++i)
+            for (int s = 0; s < NumSections; ++s) bus[i] += stems[(size_t) s * 2][i];
+        float maxStep = 0.0f, peak = 0.0f;
+        for (size_t i = 1; i < bus.size(); ++i)
+        {
+            maxStep = std::max (maxStep, std::abs (bus[i] - bus[i - 1]));
+            peak = std::max (peak, std::abs (bus[i]));
+        }
+        // The second answer is sung from about 6.3 s (stem timeline, i.e. after the latency).
+        const float pitch = medianPitch (bus, sr, 6.6 + eng.getLatencySamples() / sr, 7.2 + eng.getLatencySamples() / sr);
+        std::printf ("  %s: peak %.3f, largest sample step %.3f, second answer pitch %.1f\n", vt == VocalType::Words ? "words" : "ah", peak, maxStep, pitch);
+        CHECK (maxStep < 0.4f * std::max (peak, 0.1f));
+        CHECK (pitch > 0.0f);
+    }
+}
+
+TEST (wideRangesKeepChordSearchFast)
+{
+    // Drone / MIDI-only chords search every voicing: with very wide section ranges that used to
+    // take milliseconds per chord change on the audio thread.
+    VoicingRequest req;
+    req.scale = Scale { 0, ScaleType::Major };
+    req.mode = HarmonyMode::Drone;
+    req.style = Style::Gospel;
+    for (auto& r : req.ranges) r = SectionRange { 24, 96 };
+    const auto vocab = buildChordVocabulary (req.scale, Style::Gospel);
+    const auto t0 = std::chrono::steady_clock::now();
+    int voiced = 0;
+    for (int i = 0; i < 50; ++i)
+    {
+        req.chord = vocab[(size_t) i % vocab.size()];
+        const Voicing v = voiceChord (req);
+        voiced += v.count[Bass] > 0 ? 1 : 0;
+    }
+    const double ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - t0).count() / 50.0;
+    std::printf ("  %.3f ms per chord\n", ms);
+    CHECK (voiced == 50);
+    CHECK (ms < 1.5);
 }
 
 TEST (performanceBudget)

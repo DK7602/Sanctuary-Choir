@@ -432,6 +432,7 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
 
     auto work = [&] (int section)
     {
+        ScopedFlushDenormals noDenormals;
         ChoirEngine engine;
         engine.prepare (sampleRate, block);
         engine.setParams (params);
@@ -499,6 +500,7 @@ std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, cons
     std::array<std::vector<float>, 2> result;
     if (stems.isEmpty())
         return result;
+    ScopedFlushDenormals noDenormals;
 
     EngineParams params = paramsIn;
     params.freeze = false;

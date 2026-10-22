@@ -43,7 +43,7 @@ void LiveHarmonizer::ensureVocabulary (const HarmonyContext& ctx)
 {
     if (vocabTonic == ctx.scale.tonic && vocabScale == ctx.scale.type && vocabStyle == ctx.style)
         return;
-    vocab = buildChordVocabulary (ctx.scale, ctx.style);
+    buildChordVocabulary (ctx.scale, ctx.style, vocab);
     vocabTonic = ctx.scale.tonic;
     vocabScale = ctx.scale.type;
     vocabStyle = ctx.style;

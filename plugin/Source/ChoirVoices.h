@@ -37,6 +37,9 @@ public:
     /** The user switched to the built-in voices on purpose (saved with the project). */
     bool userChoseBuiltIn() const noexcept { return choseBuiltIn; }
 
+    /** Still loading, or loaded but not yet handed to the audio thread. */
+    bool isBusy() const;
+
     /** The set the audio thread should sing with, or nullptr (audio thread, lock-free). */
     const sc::SampleSet* getLive() const noexcept { return live.load (std::memory_order_acquire); }
 

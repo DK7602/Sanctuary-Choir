@@ -204,11 +204,14 @@ void SanctuaryEditor::sendMeters()
     o->setProperty ("out", snap.outputPeak);
     o->setProperty ("frozen", snap.frozen);
     // Beat now, extrapolated from the last audio block, for singers that move with the song.
-    const double bpm = processor.songBpm.load (std::memory_order_relaxed);
+    // No audio for a moment (host stopped, plug-in bypassed or suspended) means no beat.
+    double bpm = processor.songBpm.load (std::memory_order_acquire);
+    const double sinceBlock = Time::getMillisecondCounterHiRes() - processor.songBeatTime.load (std::memory_order_relaxed);
+    if (sinceBlock > 250.0)
+        bpm = 0.0;
     o->setProperty ("bpm", bpm);
     if (bpm > 0.0)
-        o->setProperty ("beat", processor.songBeat.load (std::memory_order_relaxed)
-                                    + (Time::getMillisecondCounterHiRes() - processor.songBeatTime.load (std::memory_order_relaxed)) / 60000.0 * bpm);
+        o->setProperty ("beat", processor.songBeat.load (std::memory_order_relaxed) + sinceBlock / 60000.0 * bpm);
     web->emitEventIfBrowserIsVisible ("meters", var (o.release()));
 }
 

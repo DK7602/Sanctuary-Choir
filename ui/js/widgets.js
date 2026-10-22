@@ -355,7 +355,10 @@
       m.style.left = x + "px";
       m.style.top = y + "px";
       this.current = m;
-      setTimeout(() => document.addEventListener("pointerdown", this._outside = (e) => { if (!m.contains(e.target)) this.close(); }), 0);
+      setTimeout(() => {
+        if (this.current !== m) return;   // already closed or replaced
+        document.addEventListener("pointerdown", this._outside = (e) => { if (!m.contains(e.target)) this.close(); });
+      }, 0);
       document.addEventListener("keydown", this._esc = (e) => { if (e.key === "Escape") this.close(); });
       const sel = m.querySelector(".selected");
       if (sel) sel.scrollIntoView({ block: "nearest" });
@@ -366,6 +369,7 @@
       this.current = null;
       if (this._outside) document.removeEventListener("pointerdown", this._outside);
       if (this._esc) document.removeEventListener("keydown", this._esc);
+      this._outside = this._esc = null;
     },
     item(m, label, selected, onClick, cls = "") {
       const it = document.createElement("div");

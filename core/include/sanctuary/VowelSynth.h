@@ -78,6 +78,8 @@ public:
     void render (const GlottalTables& tables, float f0, float softness, float breath, Rng& rng,
                  const float* amp, float* out, int n)
     {
+        if (! (f0 > 1.0f && f0 < 20000.0f))
+            f0 = 100.0f;   // NaN or nonsense: never index the tables with it
         const int band = tables.bandFor (f0);
         const float* br = tables.bright (band);
         const float* so = tables.soft (band);

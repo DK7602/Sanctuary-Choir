@@ -75,3 +75,23 @@ target_link_libraries(SanctuaryChoir
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# Tests for the LEARN / RENDER session logic (needs JUCE, so it lives with the plug-in).
+if(SANCTUARY_BUILD_TESTS)
+    juce_add_console_app(SanctuarySessionTests PRODUCT_NAME "SanctuarySessionTests")
+    target_sources(SanctuarySessionTests PRIVATE
+        Tests/SessionTests.cpp
+        Source/LearnSession.cpp
+        "${PROJECT_SOURCE_DIR}/tests/TestSignals.cpp")
+    target_include_directories(SanctuarySessionTests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+    target_compile_definitions(SanctuarySessionTests PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(SanctuarySessionTests PRIVATE
+        sanctuary_core
+        juce::juce_audio_formats
+        juce::juce_audio_processors
+        juce::juce_recommended_config_flags)
+    add_test(NAME sanctuary_session_tests COMMAND SanctuarySessionTests)
+endif()

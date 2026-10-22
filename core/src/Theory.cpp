@@ -225,6 +225,13 @@ static bool keyPrefersFlats (const Scale& s)
 std::vector<Chord> buildChordVocabulary (const Scale& scale, Style style)
 {
     std::vector<Chord> v;
+    buildChordVocabulary (scale, style, v);
+    return v;
+}
+
+void buildChordVocabulary (const Scale& scale, Style style, std::vector<Chord>& v)
+{
+    v.clear();
     const auto dia = scale.diatonic();
     const bool minor = scale.isMinorFamily();
     const bool flats = keyPrefersFlats (scale);
@@ -280,8 +287,6 @@ std::vector<Chord> buildChordVocabulary (const Scale& scale, Style style)
 
     if (minor && style == Style::Cinematic)
         v.push_back (makeChord (t + 5, { 0, 4, 7 }, 17, 0.2f, flats)); // major IV (dorian colour)
-
-    return v;
 }
 
 Chord chordFromPitchClasses (const int* notes, int count)
@@ -589,6 +594,19 @@ Voicing voiceChord (const VoicingRequest& req)
                 cands[(size_t) s].push (n);
         if (cands[(size_t) s].n == 0)
             cands[(size_t) s].push (placeInRange (chord.root, R[(size_t) s], R[(size_t) s].centre()));
+
+        // Very wide ranges give dozens of candidates per part and the search below grows with
+        // the fourth power: keep the ones nearest the middle of the range (the far ones lose on
+        // tessitura anyway), so a chord change never stalls the audio thread.
+        constexpr int kMaxCands = 10;
+        auto& c = cands[(size_t) s];
+        if (c.n > kMaxCands)
+        {
+            const float centre = R[(size_t) s].centre();
+            std::sort (c.v.begin(), c.v.begin() + c.n, [centre] (int a, int b) { return std::abs ((float) a - centre) < std::abs ((float) b - centre); });
+            c.n = kMaxCands;
+            std::sort (c.v.begin(), c.v.begin() + c.n);
+        }
     }
 
     Cands none;

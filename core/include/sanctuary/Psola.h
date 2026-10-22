@@ -110,6 +110,7 @@ private:
     std::vector<float> accum;
     int64_t accumMask = 0;
     double nextSynth = 0.0;
+    int64_t readFrom = 0;   // output before this was already played: grains must not write there
     int64_t cursor = 0;
     int frozenIndex = 0;
     float maxHalf = 740.0f;

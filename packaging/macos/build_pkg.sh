@@ -9,7 +9,15 @@ ID=com.sanctuaryaudio.sanctuarychoir
 stage() { # name, bundle, install location
   mkdir -p "$WORK/$1/root"
   cp -R "$SRC/$2" "$WORK/$1/root/"
-  pkgbuild --root "$WORK/$1/root" --identifier "$ID.$1" --version "$VERSION" \
+  local plist=()
+  if [[ "$2" == *.component || "$2" == *.vst3 || "$2" == *.app ]]; then
+    # Bundles are "relocatable" by default: Installer would update a copy it finds anywhere on
+    # the disk (e.g. the unzipped download) instead of installing where we say.
+    pkgbuild --analyze --root "$WORK/$1/root" "$WORK/$1.plist"
+    /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/$1.plist"
+    plist=(--component-plist "$WORK/$1.plist")
+  fi
+  pkgbuild --root "$WORK/$1/root" ${plist[@]+"${plist[@]}"} --identifier "$ID.$1" --version "$VERSION" \
            --install-location "$3" "$WORK/$1.pkg"
 }
 stage au "Sanctuary Choir.component" "/Library/Audio/Plug-Ins/Components"

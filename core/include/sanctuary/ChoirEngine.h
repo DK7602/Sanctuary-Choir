@@ -190,6 +190,7 @@ private:
     GlottalTables glottal;
     const ScoreSource* scoreSource = nullptr;
     const SampleSet* sampleSet = nullptr;
+    uint64_t sampleSetId = 0;
     float* const* stemTap = nullptr;
     int64_t stemTapOffset = 0;
     uint8_t renderMask = 0x0F;
@@ -205,6 +206,8 @@ private:
     VocalType lastVocal = VocalType::Count;
     float lastFormantParam = 1.0e9f;
     float lastHumanize = -1.0f;
+    float lastSpace = -1.0f;
+    std::array<float, NumSections> sectionNorm { -1.0f, -1.0f, -1.0f, -1.0f };   // smoothed 1/sqrt(singers)
     Style lastStyle = Style::Count;
     bool wasFrozen = false;
 
@@ -256,6 +259,7 @@ private:
     int replayCount = 0;
     int64_t phraseStart = -1, lastVoicedTime = 0;
     int64_t activeEchoOffset = 0;
+    float echoDuck = 1.0f;   // quick fade before the singers jump to another phrase
     void scheduleReplay (int64_t start, int64_t end);
     const Replay* findReplay (int64_t t) const;
 

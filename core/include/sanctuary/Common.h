@@ -7,7 +7,13 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
+
+#if defined(__SSE__) || defined(__x86_64__) || defined(_M_X64) || defined(_M_IX86)
+ #include <xmmintrin.h>
+ #define SC_HAS_SSE_CSR 1
+#endif
 
 namespace sc
 {
@@ -27,6 +33,46 @@ template <typename T>
 inline T clampv (T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 inline int wrapPc (int pc) { return ((pc % 12) + 12) % 12; }
+
+/** False for NaN and infinities. Tests the bits, so fast-math flags can't optimise it away. */
+inline bool isFiniteSample (float x) noexcept
+{
+    uint32_t bits;
+    std::memcpy (&bits, &x, sizeof bits);
+    return (bits & 0x7f800000u) != 0x7f800000u;
+}
+
+/** Flushes denormals to zero on this thread while in scope. Plug-in hosts do this for the audio
+    thread; offline render threads need it themselves, or silent tails get very slow. */
+class ScopedFlushDenormals
+{
+public:
+    ScopedFlushDenormals() noexcept
+    {
+       #if defined(SC_HAS_SSE_CSR)
+        previous = _mm_getcsr();
+        _mm_setcsr ((unsigned) previous | 0x8040u);   // FTZ | DAZ
+       #elif defined(__aarch64__)
+        uint64_t fpcr;
+        asm volatile ("mrs %0, fpcr" : "=r" (fpcr));
+        previous = fpcr;
+        asm volatile ("msr fpcr, %0" : : "r" (fpcr | (1ull << 24)));   // FZ
+       #endif
+    }
+    ~ScopedFlushDenormals() noexcept
+    {
+       #if defined(SC_HAS_SSE_CSR)
+        _mm_setcsr ((unsigned) previous);
+       #elif defined(__aarch64__)
+        asm volatile ("msr fpcr, %0" : : "r" (previous));
+       #endif
+    }
+    ScopedFlushDenormals (const ScopedFlushDenormals&) = delete;
+    ScopedFlushDenormals& operator= (const ScopedFlushDenormals&) = delete;
+
+private:
+    uint64_t previous = 0;
+};
 
 /** One-pole coefficient for a time constant in seconds. */
 inline float onePoleCoeff (float seconds, double sampleRate)

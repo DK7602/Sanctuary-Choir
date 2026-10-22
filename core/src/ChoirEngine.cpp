@@ -132,20 +132,21 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     reverb.prepare (sr);
     limiter.prepare (sr);
 
+    // Smoothed per sample, advanced a chunk at a time (chunks are shorter with small host blocks).
     const float smoothS = 0.03f;
-    volume.prepare (sr / kChunk, smoothS, 1.0f);
-    leadGain.prepare (sr / kChunk, smoothS, 1.0f);
-    choirGain.prepare (sr / kChunk, smoothS, 1.0f);
-    wetGain.prepare (sr / kChunk, smoothS, 0.6f);
-    dryChoirGain.prepare (sr / kChunk, smoothS, 0.7f);
-    leadSend.prepare (sr / kChunk, smoothS, 0.1f);
-    warmthAmt.prepare (sr / kChunk, smoothS, 0.0f);
+    volume.prepare (sr, smoothS, 1.0f);
+    leadGain.prepare (sr, smoothS, 1.0f);
+    choirGain.prepare (sr, smoothS, 1.0f);
+    wetGain.prepare (sr, smoothS, 0.6f);
+    dryChoirGain.prepare (sr, smoothS, 0.7f);
+    leadSend.prepare (sr, smoothS, 0.1f);
+    warmthAmt.prepare (sr, smoothS, 0.0f);
     for (int s = 0; s < NumSections; ++s)
     {
-        sectionGain[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
-        sectionPanL[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
-        sectionPanR[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
-        sectionWidth[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
+        sectionGain[(size_t) s].prepare (sr, smoothS, 1.0f);
+        sectionPanL[(size_t) s].prepare (sr, smoothS, 1.0f);
+        sectionPanR[(size_t) s].prepare (sr, smoothS, 1.0f);
+        sectionWidth[(size_t) s].prepare (sr, smoothS, 1.0f);
     }
 
     prepared = true;
@@ -154,6 +155,7 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     lastStyle = Style::Count;
     lastFormantParam = 1.0e9f;
     lastHumanize = -1.0f;
+    lastSpace = -1.0f;
     reset();
     setParams (params);
 }
@@ -197,6 +199,8 @@ void ChoirEngine::reset()
     phraseStart = -1;
     lastVoicedTime = 0;
     activeEchoOffset = 0;
+    echoDuck = 1.0f;
+    sectionNorm.fill (-1.0f);
 }
 
 void ChoirEngine::scheduleReplay (int64_t start, int64_t end)
@@ -208,8 +212,9 @@ void ChoirEngine::scheduleReplay (int64_t start, int64_t end)
     int64_t offset = end - start + gap;
     if (replayCount > 0)
     {
+        // After the previous answer, with a moment for its last note to die away.
         const Replay& prev = replays[(size_t) ((replayCount - 1) % (int) replays.size())];
-        offset = std::max (offset, prev.srcEnd + prev.offset + (int64_t) (0.05 * sr) - start);
+        offset = std::max (offset, prev.srcEnd + prev.offset + (int64_t) (0.25 * sr) - start);
     }
     // The phrase end is only known a moment later; start the answer from its beginning anyway.
     offset = std::max (offset, analyzer.getWritten() - choirLatency() + kChunk - start);
@@ -221,8 +226,9 @@ void ChoirEngine::scheduleReplay (int64_t start, int64_t end)
 
 const ChoirEngine::Replay* ChoirEngine::findReplay (int64_t t) const
 {
+    // Newest first: once the next answer starts, it takes over from the previous one's tail.
     const int64_t tail = (int64_t) (1.5 * sr);
-    for (int i = std::max (0, replayCount - (int) replays.size()); i < replayCount; ++i)
+    for (int i = replayCount - 1; i >= std::max (0, replayCount - (int) replays.size()); --i)
     {
         const Replay& r = replays[(size_t) (i % (int) replays.size())];
         if (t >= r.srcStart + r.offset && t <= r.srcEnd + r.offset + tail)
@@ -233,9 +239,11 @@ const ChoirEngine::Replay* ChoirEngine::findReplay (int64_t t) const
 
 void ChoirEngine::setSampleSet (const SampleSet* set) noexcept
 {
-    if (set == sampleSet)
+    const uint64_t id = set != nullptr ? set->id : 0;
+    if (set == sampleSet && id == sampleSetId)
         return;
     sampleSet = set;
+    sampleSetId = id;
     for (auto& s : singers)
         s->sampler.reset();   // they may point into the previous set
 }
@@ -265,15 +273,19 @@ void ChoirEngine::updateVoiceCharacter()
         const Shape& sh = table[s];
         vocalTract[(size_t) s] = sh.tract;
         auto& vs = voiceShape[(size_t) s];
+        const bool wasActive = vs.active;
         vs.active = sh.highDb != 0.0f || sh.ringDb != 0.0f || sh.lowDb != 0.0f;
         for (int ch = 0; ch < 2; ++ch)
         {
             vs.high[(size_t) ch].highShelf (sr, sh.shelfHz, sh.highDb, 0.8);
             vs.ring[(size_t) ch].peak (sr, sh.ringHz, 1.4, sh.ringDb);
             vs.low[(size_t) ch].lowShelf (sr, 220.0, sh.lowDb);
-            vs.high[(size_t) ch].reset();
-            vs.ring[(size_t) ch].reset();
-            vs.low[(size_t) ch].reset();
+            if (! wasActive)   // stale memory from long ago; a running filter keeps its state (no click)
+            {
+                vs.high[(size_t) ch].reset();
+                vs.ring[(size_t) ch].reset();
+                vs.low[(size_t) ch].reset();
+            }
         }
     }
 }
@@ -291,8 +303,31 @@ Scale ChoirEngine::currentScale() const
     return s;
 }
 
-void ChoirEngine::setParams (const EngineParams& p)
+void ChoirEngine::setParams (const EngineParams& in)
 {
+    // A host can send anything: no NaN or infinity may reach the DSP (it would stay there).
+    EngineParams p = in;
+    {
+        const EngineParams d;
+        auto fix = [] (float& v, float def) { if (! isFiniteSample (v)) v = def; };
+        fix (p.volumeDb, d.volumeDb); fix (p.choirSize, d.choirSize); fix (p.space, d.space);
+        fix (p.reverb, d.reverb); fix (p.toneDb, d.toneDb); fix (p.presence, d.presence);
+        fix (p.leadDb, d.leadDb); fix (p.choirDb, d.choirDb); fix (p.humanize, d.humanize);
+        fix (p.vibrato, d.vibrato); fix (p.glide, d.glide); fix (p.formant, d.formant);
+        fix (p.pitchCorrection, d.pitchCorrection); fix (p.breath, d.breath); fix (p.harmonySpeed, d.harmonySpeed);
+        fix (p.decay, d.decay); fix (p.preDelayMs, d.preDelayMs); fix (p.brightness, d.brightness);
+        fix (p.leadReverb, d.leadReverb); fix (p.lowCutHz, d.lowCutHz); fix (p.highCutHz, d.highCutHz);
+        fix (p.warmth, d.warmth); fix (p.glue, d.glue); fix (p.a4, d.a4);
+        p.a4 = clampv (p.a4, 380.0f, 480.0f);
+        p.volumeDb = clampv (p.volumeDb, -96.0f, 24.0f);
+        p.leadDb = std::min (p.leadDb, 24.0f);
+        p.choirDb = std::min (p.choirDb, 24.0f);
+        for (size_t s = 0; s < p.sections.size(); ++s)
+        {
+            fix (p.sections[s].level, d.sections[s].level);
+            fix (p.sections[s].pan, d.sections[s].pan);
+        }
+    }
     params = p;
     style = getStyleProfile (p.style);
 
@@ -452,7 +487,7 @@ void ChoirEngine::allocateSingers()
                     const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f
                                         + ((s == Tenor || s == Bass) ? 2.5f : 0.0f) * params.space / 100.0f;
                     singer.delay = singer.pendingDelay = (int) (delayMs * 0.001f * (float) sr);
-                    singer.psola.reset ((double) (analyzer.getWritten() - latency - singer.delay));
+                    singer.psola.reset ((double) (analyzer.getWritten() - latency - activeEchoOffset - singer.delay));
                 }
                 singer.active = true;
             }
@@ -653,7 +688,7 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
     if (s.pendingDelay != s.delay && s.gate < 0.001f && s.amp < 0.001f)
     {
         s.delay = s.pendingDelay;
-        s.psola.reset ((double) (analyzer.getWritten() - latency - s.delay));
+        s.psola.reset ((double) (analyzer.getWritten() - latency - activeEchoOffset - s.delay));
     }
 
     const int sec = s.section;
@@ -762,9 +797,10 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         lastFormantParam = params.formant;
         refreshVowelFormants();
     }
-    if (params.humanize != lastHumanize || styleChanged)
+    if (params.humanize != lastHumanize || params.space != lastSpace || styleChanged)
     {
         lastHumanize = params.humanize;
+        lastSpace = params.space;
         lastStyle = params.style;
         for (auto& sp : singers)
         {
@@ -798,6 +834,17 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 {
     const float dt = (float) c / (float) sr;
     ++chunkCounter;
+
+    // One NaN or infinite input sample would stay in the filters and reverb for good.
+    float safeL[kChunk], safeR[kChunk];
+    for (int i = 0; i < c; ++i)
+    {
+        safeL[i] = isFiniteSample (inL[i]) ? inL[i] : 0.0f;
+        safeR[i] = inR == nullptr ? safeL[i] : (isFiniteSample (inR[i]) ? inR[i] : 0.0f);
+    }
+    inL = safeL;
+    if (inR != nullptr)
+        inR = safeR;
 
     for (int i = 0; i < c; ++i)
     {
@@ -851,23 +898,40 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 
         // Echo: singers perform a phrase from the past, right after it was sung.
         bool silent = false;
-        int64_t echoOffset = 0;
+        int64_t wantedOffset = 0;
         if (params.response == 1 && ! params.freeze)
         {
             if (const Replay* r = findReplay (tOut))
-                echoOffset = r->offset;
+                wantedOffset = r->offset;
             else if (! (controlCount > 0 && control[(size_t) ((controlCount - 1) & controlMask)].midiInstrument))
                 silent = true;
         }
-        if (echoOffset != activeEchoOffset)
+        // Moving to another phrase: fade the singers out over ~12 ms, then restart them there.
+        const float duckStep = (float) c / (0.012f * (float) sr);
+        float duckFrom = echoDuck, duckTo = echoDuck;
+        if (wantedOffset != activeEchoOffset)
         {
-            activeEchoOffset = echoOffset;
-            for (auto& sp : singers)
+            if (echoDuck <= 0.0f)
             {
-                sp->psola.reset ((double) (tWords - echoOffset - sp->delay));
-                sp->amp = sp->gate = 0.0f;
+                activeEchoOffset = wantedOffset;
+                for (auto& sp : singers)
+                {
+                    sp->psola.reset ((double) (tWords - wantedOffset - sp->delay));
+                    sp->amp = sp->gate = 0.0f;
+                }
+                duckFrom = duckTo = 1.0f;
+            }
+            else
+            {
+                duckTo = std::max (0.0f, echoDuck - duckStep);
             }
         }
+        else
+        {
+            duckTo = std::min (1.0f, echoDuck + duckStep);
+        }
+        echoDuck = duckTo;
+        const int64_t echoOffset = activeEchoOffset;
 
         std::array<const SampleLayer*, NumSections> sampleLayers {};
         if (sampleSet != nullptr)
@@ -877,9 +941,21 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 sampleLayers[(size_t) s] = sampleSet->layerFor (s, vt);
         }
 
-        std::array<float, NumSections> norm {};
+        // Section level by head count, eased so singers joining or leaving don't step the level
+        // of the others (a section going silent keeps its last value while it fades out).
+        std::array<float, NumSections> normFrom {}, normTo {};
+        const float normK = 1.0f - std::exp (-dt / 0.06f);
         for (int s = 0; s < NumSections; ++s)
-            norm[(size_t) s] = sectionCount[(size_t) s] > 0 ? 0.8f / std::sqrt ((float) sectionCount[(size_t) s]) : 0.5f;
+        {
+            float& cur = sectionNorm[(size_t) s];
+            const int count = sectionCount[(size_t) s];
+            const float target = count > 0 ? 0.8f / std::sqrt ((float) count) : (cur > 0.0f ? cur : 0.5f);
+            if (cur <= 0.0f)
+                cur = target;
+            normFrom[(size_t) s] = cur;
+            cur += (target - cur) * normK;
+            normTo[(size_t) s] = cur;
+        }
 
         for (auto& sp : singers)
         {
@@ -929,15 +1005,17 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 s.gate = 0.0f;
             }
 
-            const float g = norm[(size_t) s.section];
             float* L = sec (s.section, 0);
             float* R = sec (s.section, 1);
-            const float fadeInc = (fadeEnd - fadeStart) / (float) c;
-            float fade = fadeStart;
+            // Fade (joining/leaving), section level and echo hand-over, each ramped over the chunk.
+            const float gFrom = normFrom[(size_t) s.section] * fadeStart * duckFrom;
+            const float gTo = normTo[(size_t) s.section] * fadeEnd * duckTo;
+            const float gInc = (gTo - gFrom) / (float) c;
+            float gain = gFrom;
             for (int i = 0; i < c; ++i)
             {
-                fade += fadeInc;
-                const float v = scratch[(size_t) i] * g * fade;
+                gain += gInc;
+                const float v = scratch[(size_t) i] * gain;
                 L[i] += v * s.panL;
                 R[i] += v * s.panR;
             }
@@ -975,9 +1053,9 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
     std::fill (choirR.begin(), choirR.end(), 0.0f);
     for (int s = 0; s < NumSections; ++s)
     {
-        const float g = sectionGain[(size_t) s].next();
-        const float pl = sectionPanL[(size_t) s].next(), pr = sectionPanR[(size_t) s].next();
-        const float w = sectionWidth[(size_t) s].next();
+        const float g = sectionGain[(size_t) s].advance (c);
+        const float pl = sectionPanL[(size_t) s].advance (c), pr = sectionPanR[(size_t) s].advance (c);
+        const float w = sectionWidth[(size_t) s].advance (c);
         const float* L = sec (s, 0);
         const float* R = sec (s, 1);
         float peak = 0.0f;
@@ -994,7 +1072,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 
     // Choir bus processing.
     tone.process (choirL.data(), choirR.data(), c);
-    const float warmth = warmthAmt.next();
+    const float warmth = warmthAmt.advance (c);
     if (warmth > 0.001f)
     {
         for (int i = 0; i < c; ++i)
@@ -1005,8 +1083,8 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
     }
     glue.process (choirL.data(), choirR.data(), c, clampv (params.glue / 100.0f, 0.0f, 1.0f));
 
-    const float cg = choirGain.next(), lg = leadGain.next(), ls = leadSend.next();
-    const float wet = wetGain.next(), dry = dryChoirGain.next(), vol = volume.next();
+    const float cg = choirGain.advance (c), lg = leadGain.advance (c), ls = leadSend.advance (c);
+    const float wet = wetGain.advance (c), dry = dryChoirGain.advance (c), vol = volume.advance (c);
     for (int i = 0; i < c; ++i)
     {
         choirL[(size_t) i] *= cg;
@@ -1030,7 +1108,11 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         limiter.process (outL, outL, c);
 
     for (int i = 0; i < c; ++i)
+    {
+        if (! isFiniteSample (outL[i])) outL[i] = 0.0f;   // last line of defence for the host
+        if (outR != nullptr && ! isFiniteSample (outR[i])) outR[i] = 0.0f;
         outPeakAccum = std::max (outPeakAccum, std::max (std::abs (outL[i]), outR != nullptr ? std::abs (outR[i]) : 0.0f));
+    }
 }
 
 //==============================================================================

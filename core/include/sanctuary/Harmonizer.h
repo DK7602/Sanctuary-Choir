@@ -53,6 +53,7 @@ float passingNoteTime (float speed);
 class LiveHarmonizer
 {
 public:
+    LiveHarmonizer() { vocab.reserve (32); }   // rebuilt on the audio thread when the key changes
     void reset();
 
     /** Process one pitch frame (midi already relative to the tuning reference). */

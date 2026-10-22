@@ -308,7 +308,9 @@ void PsolaVoice::reset (double startTime)
 void PsolaVoice::addGrain (const PsolaAnalyzer& an, double centre, double src, float halfLen,
                            float formant, float gain, bool frozenSrc)
 {
-    const int64_t j0 = (int64_t) std::ceil (centre - halfLen);
+    // The head of a grain that starts before the output read position (the first grain after a
+    // reset) would only sit in the ring and play one lap later as a stale click.
+    const int64_t j0 = std::max ((int64_t) std::ceil (centre - halfLen), readFrom);
     const int64_t j1 = (int64_t) std::floor (centre + halfLen);
     if (j1 < j0)
         return;
@@ -337,6 +339,7 @@ void PsolaVoice::addGrain (const PsolaAnalyzer& an, double centre, double src, f
 void PsolaVoice::render (const PsolaAnalyzer& an, int64_t t0, int n, float* out, const PsolaControl& ctl, Rng& rng)
 {
     const double horizon = (double) (t0 + n) + maxHalf + 1.0;
+    readFrom = t0;
 
     // If we fell behind (e.g. after a reset), jump forward rather than synthesising history.
     if (nextSynth < (double) t0 - maxHalf * 2.0)

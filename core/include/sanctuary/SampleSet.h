@@ -62,6 +62,8 @@ public:
     std::string describe() const;
 
     std::string name;
+    /** Unique per set, so a new set that happens to reuse an old one's address is still new. */
+    const uint64_t id = nextId();
 
     /** Section (0-3) or vowel (0-5) named in a file path, -1 if none. */
     static int sectionFromPath (const std::string& path);
@@ -71,6 +73,7 @@ public:
     static float rootFromPath (const std::string& path);
 
 private:
+    static uint64_t nextId() noexcept;
     std::array<std::array<SampleLayer, kVowels>, NumSections> layers;
 };
 

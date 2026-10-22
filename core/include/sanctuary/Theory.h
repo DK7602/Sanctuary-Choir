@@ -71,6 +71,8 @@ struct Chord
 
 /** Chord vocabulary for a scale and style (diatonic triads/sevenths plus a few borrowed chords). */
 std::vector<Chord> buildChordVocabulary (const Scale& scale, Style style);
+/** The same, into an existing vector (no allocation once it has room for ~20 chords). */
+void buildChordVocabulary (const Scale& scale, Style style, std::vector<Chord>& out);
 /** Build a chord from arbitrary pitch classes (e.g. MIDI chord input). */
 Chord chordFromPitchClasses (const int* notes, int count);
 /** Functional progression bonus (positive = idiomatic) between chord degrees. */

@@ -15,6 +15,7 @@ namespace
     {
         std::mutex lock;
         std::map<String, std::weak_ptr<sc::SampleSet>> sets;
+        std::map<String, std::shared_ptr<std::mutex>> loading;   // one load per folder at a time
     };
     Cache& cache()
     {
@@ -94,6 +95,38 @@ void ChoirVoices::loadFolder (const File& dir)
 
     worker = std::make_unique<std::thread> ([this, dir]
     {
+        // Several instances opening with a project would otherwise each decode (and keep) their
+        // own copy: wait for whichever started first, then share its set.
+        const String key = dir.getFullPathName();
+        std::shared_ptr<std::mutex> folderLock;
+        {
+            std::lock_guard<std::mutex> g (cache().lock);
+            auto& m = cache().loading[key];
+            if (m == nullptr)
+                m = std::make_shared<std::mutex>();
+            folderLock = m;
+        }
+        std::unique_lock<std::mutex> busy (*folderLock, std::defer_lock);
+        while (! busy.try_lock())
+        {
+            if (cancel)
+            {
+                loading = false;
+                return;
+            }
+            Thread::sleep (20);
+        }
+        {
+            std::lock_guard<std::mutex> g (cache().lock);
+            if (auto shared = cache().sets[key].lock())
+            {
+                std::lock_guard<std::mutex> g2 (lock);
+                pending = shared;
+                loading = false;
+                return;
+            }
+        }
+
         AudioFormatManager formats;
         formats.registerBasicFormats();
         auto files = dir.findChildFiles (File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
@@ -140,7 +173,7 @@ void ChoirVoices::loadFolder (const File& dir)
             if (! set->isEmpty())
             {
                 std::lock_guard<std::mutex> g (cache().lock);
-                cache().sets[dir.getFullPathName()] = set;
+                cache().sets[key] = set;
             }
             std::lock_guard<std::mutex> g (lock);
             if (set->isEmpty())
@@ -180,6 +213,14 @@ void ChoirVoices::publish (std::shared_ptr<sc::SampleSet> set)
         onSetChanged();
     if (onStatusChanged)
         onStatusChanged();
+}
+
+bool ChoirVoices::isBusy() const
+{
+    if (loading.load())
+        return true;
+    std::lock_guard<std::mutex> g (lock);
+    return pending != nullptr;
 }
 
 std::shared_ptr<const sc::SampleSet> ChoirVoices::getCurrent() const

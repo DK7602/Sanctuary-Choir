@@ -178,8 +178,11 @@ void VowelSinger::setFormants (const FormantSpec& spec, float formantScale)
 
 void VowelSinger::normalise (const GlottalTables& tables, float f0, float softness)
 {
+    // Loudness is decided below ~10 kHz; summing every harmonic up to Nyquist made this take
+    // milliseconds per change at high sample rates.
     double power = 0.0;
-    for (int k = 1; (double) k * f0 < 0.46 * sr; ++k)
+    const double top = std::min (0.46 * sr, 10000.0);
+    for (int k = 1; (double) k * f0 < top; ++k)
     {
         const double w = 2.0 * kPiD * k * f0 / sr;
         const std::complex<double> z1 = std::polar (1.0, -w), z2 = std::polar (1.0, -2.0 * w);

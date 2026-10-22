@@ -56,6 +56,7 @@ To re-pitch your voice, the choir has to hear a little of it first, so it runs a
    - From now on, when the song plays, the choir uses this smarter harmony. It sees each phrase in advance, lands cadences on the right chord, and keeps the voices moving smoothly.
 4. Press **RENDER** to sing every voice at the highest quality. Playback then uses the rendered choir, in sync with your song, and costs almost no CPU.
    - If you later change the harmony or choir settings, RENDER glows again. Press it to update.
+   - You can press **RENDER** while still learning: Sanctuary finishes the take, studies it, then renders it.
 
 Other buttons:
 
@@ -63,10 +64,11 @@ Other buttons:
 - **CLEAR** forgets the take.
 - **Settings → Export Stems** writes Sopranos, Altos, Tenors, Basses, Room and Full Choir WAVs to *Documents/Sanctuary Choir/Exports*.
 
-The learned take is saved inside your project.
+The learned take is saved inside your project. If you reopen the project at another sample rate, Sanctuary converts the take so it stays in tune and in time.
 
 ## 5. More things to try
 
+- **Presets** change the choir's sound, not your song: the Key and Scale you set stay as they are.
 - **FREEZE**: hold a big final chord, then keep it ringing while you sing over it.
 - **Chord Speed** (MIX page) sets how often the choir changes chord. Turn it down and quick passing notes ride over one chord, like a real choir; turn it up and every note gets its own chord.
 - **Response: Echo** (MIX page, or the *Call & Response* preset): the choir answers each phrase right after you sing it.

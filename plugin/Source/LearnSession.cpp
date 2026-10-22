@@ -117,6 +117,7 @@ LearnSession::~LearnSession()
 void LearnSession::prepare (double sampleRate)
 {
     sr = sampleRate;
+    prepared = true;
     for (auto& ch : stemScratch)
         ch.assign (16384, 0.0f);
 }
@@ -226,6 +227,8 @@ const sc::StemPlayback* LearnSession::preparePlayback (const BlockInfo& info, in
     PlaybackData* d = live.load (std::memory_order_acquire);
     if (d == nullptr || d->analysis == nullptr || d->analysis->isEmpty())
         return nullptr;
+    if (std::abs (d->sampleRate - sr) > 1.0)
+        return nullptr;   // learned at another sample rate: being converted (see matchSessionRate)
 
     const bool preview = previewPlaying.load (std::memory_order_relaxed);
     const int64_t timelineStart = preview ? 0 : d->timelineStart;
@@ -282,9 +285,10 @@ void LearnSession::startRecording()
 {
     cancelWork();
     previewPlaying = false;
+    renderWhenReady = false;
 
     // Pre-allocate the first few chunks; the timer keeps allocating ahead.
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < kChunksAhead; ++i)
     {
         if (chunks[(size_t) i].load() == nullptr)
         {
@@ -322,13 +326,11 @@ void LearnSession::finishRecording()
         if (float* src = chunks[(size_t) c].load())
             std::memcpy (audio.data() + i, src, sizeof (float) * (size_t) len);
     }
-    // Release capture memory.
-    for (auto& c : chunks) c.store (nullptr);
-    chunkStorage.clear();
-    captured = 0;
+    releaseCapture();
 
     if (n < (int64_t) (captureSampleRate * 0.5))
     {
+        renderWhenReady = false;
         lastError = captureStarted.load() ? "Take too short - sing for a little longer" : "Nothing was captured - press play in your DAW while LEARN is lit";
         setPhase (live.load() != nullptr ? Phase::Learned : Phase::Empty);
         return;
@@ -337,11 +339,25 @@ void LearnSession::finishRecording()
     startAnalysis (std::move (audio), captureSampleRate, start >= 0 ? start : -1, false);
 }
 
+void LearnSession::releaseCapture()
+{
+    // The audio thread may still be inside a block that is writing to the chunks, so keep the
+    // memory for a moment instead of freeing it here.
+    for (auto& c : chunks) c.store (nullptr, std::memory_order_release);
+    if (! chunkStorage.empty())
+        chunkGraveyard.push_back ({ std::move (chunkStorage), Time::getMillisecondCounter() });
+    chunkStorage.clear();
+    captured = 0;
+}
+
 void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter)
 {
     cancelWork();
     setPhase (Phase::Analysing);
     progress = 0.0f;
+    changedDuringWork = false;
+    if (renderAfter)
+        renderWhenReady = true;
     const sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
 
     auto result = std::make_shared<std::unique_ptr<PlaybackData>>();
@@ -365,10 +381,11 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
         workDone = true;
     });
 
-    onWorkDone = [this, result, renderAfter]
+    onWorkDone = [this, result]
     {
         if (*result == nullptr)
         {
+            renderWhenReady = false;
             setPhase (live.load() != nullptr ? Phase::Learned : Phase::Empty);
             return;
         }
@@ -377,13 +394,15 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
         renderStale = false;
         if (empty)
         {
+            renderWhenReady = false;
             lastError = "No singing found in the take";
             setPhase (Phase::Failed);
             return;
         }
         setPhase (Phase::Learned);
-        if (renderAfter)
-            render();
+        if (std::exchange (changedDuringWork, false))
+            harmonySettingsChanged();   // the harmony was written with the settings from before the edit
+        // A pending render starts from the timer, once any recorded voices have loaded.
     };
 }
 
@@ -408,7 +427,7 @@ void LearnSession::loadFile (const File& file)
     AudioFormatManager fm;
     fm.registerBasicFormats();
     std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (file));
-    if (reader == nullptr)
+    if (reader == nullptr || reader->sampleRate < 1000.0 || reader->lengthInSamples <= 0)
     {
         lastError = "Could not open " + file.getFileName();
         setPhase (Phase::Failed);
@@ -434,6 +453,7 @@ void LearnSession::loadFile (const File& file)
         mono = std::move (out);
     }
     previewPlaying = false;
+    renderWhenReady = false;
     startAnalysis (std::move (mono), sr, -1, false);
 }
 
@@ -441,11 +461,11 @@ void LearnSession::clear()
 {
     cancelWork();
     previewPlaying = false;
+    renderWhenReady = false;
     if (phase.load() == Phase::Recording)
     {
         stopRequested = true;
-        for (auto& c : chunks) c.store (nullptr);
-        chunkStorage.clear();
+        releaseCapture();
     }
     live.store (nullptr, std::memory_order_release);
     if (owned != nullptr)
@@ -457,6 +477,20 @@ void LearnSession::clear()
 
 void LearnSession::render()
 {
+    // Pressed while a new take is still being learned: render that take once it is ready,
+    // rather than throwing it away for the previous one.
+    if (phase.load() == Phase::Recording)
+    {
+        renderWhenReady = true;
+        stopRecording();
+        return;
+    }
+    if (phase.load() == Phase::Analysing)
+    {
+        renderWhenReady = true;
+        return;
+    }
+    renderWhenReady = false;
     if (owned == nullptr || owned->analysis == nullptr || owned->analysis->isEmpty())
     {
         lastError = "Learn or load a vocal take first";
@@ -466,6 +500,7 @@ void LearnSession::render()
     cancelWork();
     setPhase (Phase::Rendering);
     progress = 0.0f;
+    changedDuringWork = false;
 
     sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
     auto voices = getVoices ? getVoices() : nullptr;   // held for the whole render
@@ -508,6 +543,8 @@ void LearnSession::render()
         renderedSingers = sc::singersForChoirSize (params.choirSize);
         renderStale = false;
         setPhase (Phase::Rendered);
+        if (std::exchange (changedDuringWork, false))
+            harmonySettingsChanged();   // edited while rendering: these stems are already out of date
     };
 }
 
@@ -550,7 +587,12 @@ void LearnSession::harmonySettingsChanged()
     if (owned == nullptr || owned->analysis == nullptr)
         return;
     const Phase p = phase.load();
-    if (p == Phase::Recording || p == Phase::Analysing || p == Phase::Rendering)
+    if (p == Phase::Analysing || p == Phase::Rendering)
+    {
+        changedDuringWork = true;   // applied when the work finishes
+        return;
+    }
+    if (p == Phase::Recording)
         return;
 
     const sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
@@ -568,6 +610,8 @@ void LearnSession::harmonySettingsChanged()
 
 void LearnSession::renderSettingsChanged()
 {
+    if (phase.load() == Phase::Analysing || phase.load() == Phase::Rendering)
+        changedDuringWork = true;
     if (owned == nullptr || owned->stems == nullptr)
         return;
     owned->stale = true;
@@ -627,7 +671,7 @@ void LearnSession::timerCallback()
     if (phase.load() == Phase::Recording)
     {
         const int64_t c = captured.load() / chunkSize;
-        for (int64_t k = c; k < std::min<int64_t> (maxChunks, c + 8); ++k)
+        for (int64_t k = c; k < std::min<int64_t> (maxChunks, c + kChunksAhead); ++k)
         {
             if (chunks[(size_t) k].load() == nullptr)
             {
@@ -660,11 +704,51 @@ void LearnSession::timerCallback()
     if (previewPlaying.load() && onStatusChanged)
         onStatusChanged();
 
-    // Free old playback data once the audio thread can no longer be using it.
+    matchSessionRate();
+
+    if (renderWhenReady)
+    {
+        const Phase p = phase.load();
+        if (p == Phase::Learned || p == Phase::Rendered)
+        {
+            if (! (voicesBusy && voicesBusy()))
+                render();
+        }
+        else if (p != Phase::Recording && p != Phase::Analysing && p != Phase::Rendering)
+        {
+            renderWhenReady = false;
+        }
+    }
+
+    // Free old playback data and capture memory once the audio thread can no longer be using it.
     const auto now = Time::getMillisecondCounter();
     graveyard.erase (std::remove_if (graveyard.begin(), graveyard.end(),
                                      [now] (const auto& g) { return now - g.second > 2000; }),
                      graveyard.end());
+    chunkGraveyard.erase (std::remove_if (chunkGraveyard.begin(), chunkGraveyard.end(),
+                                          [now] (const auto& g) { return now - g.second > 2000; }),
+                          chunkGraveyard.end());
+}
+
+void LearnSession::matchSessionRate()
+{
+    // A take learned at another sample rate (project reopened at 48 kHz after 44.1 kHz, or the
+    // audio device changed): convert it, so it stays in tune and in time with the song.
+    const Phase p = phase.load();
+    if (! prepared || owned == nullptr || owned->take == nullptr || owned->take->empty()
+        || std::abs (owned->sampleRate - sr) <= 1.0
+        || p == Phase::Recording || p == Phase::Analysing || p == Phase::Rendering)
+        return;
+
+    const double ratio = owned->sampleRate / sr;
+    const auto& take = *owned->take;
+    const int outLen = (int) std::floor ((double) take.size() / ratio);
+    std::vector<float> out ((size_t) std::max (0, outLen), 0.0f);
+    LagrangeInterpolator interp;
+    interp.process (ratio, take.data(), out.data(), outLen, (int) take.size(), 0);
+    const int64_t start = owned->timelineStart >= 0 ? (int64_t) std::llround ((double) owned->timelineStart / ratio) : -1;
+    const bool wasRendered = owned->stems != nullptr && ! owned->stale.load();
+    startAnalysis (std::move (out), sr, start, wasRendered || renderWhenReady);
 }
 
 //==============================================================================
@@ -747,10 +831,14 @@ void LearnSession::writeState (OutputStream& out) const
     out.writeInt64 (owned->timelineStart);
     out.writeBool (owned->stems != nullptr && ! owned->stale.load());
 
-    MemoryBlock flacData;
+    // Hosts ask for the state often (some on every parameter change, for undo), so the take is
+    // encoded once and reused for as long as it does not change.
+    const std::lock_guard<std::mutex> g (encodeLock);
+    if (encodedTake.lock() != owned->take)
     {
+        encodedFlac.reset();
         FlacAudioFormat flac;
-        std::unique_ptr<OutputStream> stream = std::make_unique<MemoryOutputStream> (flacData, false);
+        std::unique_ptr<OutputStream> stream = std::make_unique<MemoryOutputStream> (encodedFlac, false);
         auto writer = flac.createWriterFor (stream, AudioFormatWriterOptions{}.withSampleRate (owned->sampleRate).withNumChannels (1).withBitsPerSample (24));
         if (writer != nullptr)
         {
@@ -762,9 +850,11 @@ void LearnSession::writeState (OutputStream& out) const
                 writer->writeFromFloatArrays (p, 1, (int) std::min<int64_t> (65536, len - pos));
             }
         }
+        writer.reset();   // flushes into encodedFlac
+        encodedTake = owned->take;
     }
-    out.writeInt64 ((int64) flacData.getSize());
-    out.write (flacData.getData(), flacData.getSize());
+    out.writeInt64 ((int64) encodedFlac.getSize());
+    out.write (encodedFlac.getData(), encodedFlac.getSize());
 }
 
 void LearnSession::readState (InputStream& in)
@@ -782,18 +872,33 @@ void LearnSession::readState (InputStream& in)
     const int64_t timelineStart = in.readInt64();
     const bool wasRendered = in.readBool();
     const int64_t size = in.readInt64();
-    if (size <= 0 || size > in.getNumBytesRemaining())
+    if (size <= 0 || size > in.getNumBytesRemaining() || ! (rate >= 8000.0 && rate <= 768000.0))
         return;
 
     MemoryBlock block;
     in.readIntoMemoryBlock (block, (ssize_t) size);
     FlacAudioFormat flac;
     std::unique_ptr<AudioFormatReader> reader (flac.createReaderFor (new MemoryInputStream (block, false), true));
-    if (reader == nullptr)
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->lengthInSamples > (int64) (rate * 60.0 * 15.0))
         return;
     std::vector<float> audio ((size_t) reader->lengthInSamples);
     float* dest[] = { audio.data() };
     reader->read (dest, 1, 0, (int) reader->lengthInSamples);
+
+    // The same take we already have (undo, A/B compare, a host restoring what it just saved):
+    // keep the analysis and stems; changed settings are picked up as usual.
+    const Phase p = phase.load();
+    if (hasTake() && p != Phase::Recording && p != Phase::Analysing && p != Phase::Rendering
+        && std::abs (owned->sampleRate - rate) < 1.0 && owned->timelineStart == timelineStart
+        && owned->take->size() == audio.size())
+    {
+        const auto& cur = *owned->take;
+        bool same = true;
+        for (size_t i = 0; i < audio.size() && same; ++i)
+            same = std::abs (cur[i] - audio[i]) < 1.0e-5f;
+        if (same)
+            return;
+    }
     startAnalysis (std::move (audio), rate, timelineStart, wasRendered);
 }
 } // namespace sanctuary

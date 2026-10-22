@@ -9,6 +9,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <sanctuary/Learn.h>
 
+#include <mutex>
+
 namespace sanctuary
 {
 class LearnSession : private juce::Timer
@@ -21,6 +23,7 @@ public:
 
     std::function<sc::EngineParams()> getParams;   // set by the processor
     std::function<std::shared_ptr<const sc::SampleSet>()> getVoices;   // recorded choir voices, if any
+    std::function<bool()> voicesBusy;               // recorded voices still loading: renders wait for them
     bool standalone = false;                        // capture immediately instead of waiting for the host
     std::function<void()> onStatusChanged;          // message thread
 
@@ -74,20 +77,25 @@ private:
 
     void timerCallback() override;
     void finishRecording();
+    void releaseCapture();
     void startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter);
+    void matchSessionRate();
     void publish (std::unique_ptr<PlaybackData> data);
     void setPhase (Phase p);
     std::shared_ptr<const std::vector<float>> currentTake() const;
     juce::String describe() const;
 
     double sr = 48000.0;
+    bool prepared = false;
     std::atomic<Phase> phase { Phase::Empty };
 
     // Capture: a fixed table of chunks filled by the audio thread, allocated ahead by the timer.
     static constexpr int chunkSize = 1 << 15;
     static constexpr int maxChunks = 1024;   // ~11 minutes at 48 kHz
+    static constexpr int kChunksAhead = 32;  // ~20 s allocated ahead, for faster-than-realtime bounces
     std::array<std::atomic<float*>, maxChunks> chunks {};
     std::vector<std::unique_ptr<float[]>> chunkStorage;
+    std::vector<std::pair<std::vector<std::unique_ptr<float[]>>, juce::uint32>> chunkGraveyard;   // freed once the audio thread let go
     std::atomic<int64_t> captured { 0 };
     std::atomic<int64_t> captureStart { -1 };      // host position of the first sample, -1 = free running
     std::atomic<bool> captureStarted { false };
@@ -119,7 +127,13 @@ private:
     double lastRenderSeconds = 0.0;
     int renderedSingers = 0;
     bool renderStale = false;
-    bool wantRenderAfterLoad = false;
+    bool renderWhenReady = false;     // RENDER pressed while learning, or a rendered project reloaded
+    bool changedDuringWork = false;   // settings edited while analysing or rendering
+
+    // The take as stored in the project, encoded once rather than on every save.
+    mutable std::mutex encodeLock;
+    mutable std::weak_ptr<const std::vector<float>> encodedTake;
+    mutable juce::MemoryBlock encodedFlac;
     std::atomic<int64_t> engineToTakeOffset { 0 };
 };
 } // namespace sanctuary

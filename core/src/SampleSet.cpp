@@ -2,6 +2,7 @@
 #include "sanctuary/Learn.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 
@@ -77,10 +78,18 @@ int SampleLayer::nearest (float midi, int variant) const noexcept
     for (int i = 0; i < (int) zones.size() && count < 64; ++i)
         if (cost (zones[(size_t) i]) <= best + 1.0f)
             candidates[count++] = i;
-    return candidates[(unsigned) variant % (unsigned) std::max (1, count)];
+    if (count == 0)
+        return 0;   // only when midi is not a number
+    return candidates[(unsigned) variant % (unsigned) count];
 }
 
 //==============================================================================
+uint64_t SampleSet::nextId() noexcept
+{
+    static std::atomic<uint64_t> counter { 0 };
+    return ++counter;
+}
+
 int SampleSet::addRecording (int section, int vowel, const float* x, int64_t n, double sampleRate, float a4)
 {
     if (section < 0 || section >= NumSections || vowel < 0 || vowel >= kVowels || n <= 0)
@@ -272,7 +281,9 @@ void SamplePlayer::render (const SampleLayer& layer, float hz, const float* amp,
         return;
     }
 
-    const float midi = hzToMidi (std::max (hz, 20.0f));
+    if (! (hz > 20.0f && hz < 20000.0f))
+        hz = 220.0f;
+    const float midi = hzToMidi (hz);
     const int zi = layer.nearest (midi, variant);
     const SampleZone* want = &layer.zones[(size_t) zi];
     if (&layer != lastLayer)
@@ -288,9 +299,10 @@ void SamplePlayer::render (const SampleLayer& layer, float hz, const float* amp,
         old.zone = nullptr;
         fade = 1.0f;
     }
-    else if (want != cur.zone && std::abs (midi - cur.zone->rootMidi) > 1.6f)
+    else if (fade >= 1.0f && want != cur.zone && std::abs (midi - cur.zone->rootMidi) > 1.6f)
     {
-        // The melody moved on: crossfade into the nearer recorded note, mid-sustain.
+        // The melody moved on: crossfade into the nearer recorded note, mid-sustain (after any
+        // crossfade still running, so a fast glide never cuts one off halfway).
         old = cur;
         const double span = (double) (want->loopEnd - want->loopStart);
         cur = { want, (double) want->loopStart + jitter * 0.5 * span, 0.0f, loopPointFor (*want, jitter) };

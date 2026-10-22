@@ -27,6 +27,7 @@ SanctuaryProcessor::SanctuaryProcessor()
     learn.standalone = standaloneApp;
     learn.onStatusChanged = [this] { ++statusVersion; };
     learn.getVoices = [this] { return voices.getCurrent(); };
+    learn.voicesBusy = [this] { return voices.isBusy(); };
     voices.onStatusChanged = [this] { ++statusVersion; };
     voices.onSetChanged = [this] { learn.renderSettingsChanged(); };   // rendered takes used the old voices
     // The recorded Sanctuary Voices are the default when they are installed.
@@ -142,9 +143,9 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
             const auto ppq = pos->getPpqPosition();
             if (info.hostPlaying && bpm.hasValue() && ppq.hasValue() && *bpm > 20.0 && *bpm < 400.0)
             {
-                songBpm.store (*bpm, std::memory_order_relaxed);
                 songBeat.store (*ppq, std::memory_order_relaxed);
                 songBeatTime.store (Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
+                songBpm.store (*bpm, std::memory_order_release);
             }
             else
             {
@@ -159,6 +160,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         buffer.clear();
     else if (numIn == 1 && numOut > 1)
         buffer.clear (1, 0, n);
+    writeBypassDelay (buffer, n, numIn);   // so engaging bypass starts from the current input
 
     float* chans[2] = { buffer.getWritePointer (0), numIn > 1 ? buffer.getWritePointer (1) : nullptr };
     learn.processInput (chans, std::max (1, std::min (numIn, 2)), n, info);
@@ -179,8 +181,32 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         buffer.clear (ch, 0, n);
 }
 
-void SanctuaryProcessor::processBlockBypassed (AudioBuffer<float>& buffer, MidiBuffer&)
+void SanctuaryProcessor::writeBypassDelay (const AudioBuffer<float>& buffer, int n, int numIn)
 {
+    const int size = bypassDelay.getNumSamples();
+    if (size <= 1)
+        return;
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const int src = std::min ({ ch, numIn - 1, buffer.getNumChannels() - 1 });
+        const float* x = src >= 0 ? buffer.getReadPointer (src) : nullptr;
+        float* ring = bypassDelay.getWritePointer (ch);
+        int pos = bypassPos;
+        for (int i = 0; i < n; ++i)
+        {
+            ring[pos] = x != nullptr ? x[i] : 0.0f;
+            pos = pos + 1 < size ? pos + 1 : 0;
+        }
+    }
+    bypassPos = (bypassPos + n) % size;
+}
+
+void SanctuaryProcessor::processBlockBypassed (AudioBuffer<float>& buffer, MidiBuffer& midi)
+{
+    // Keep following the keyboard, so notes released while bypassed don't hang on afterwards.
+    updateMidi (midi);
+    songBpm.store (0.0, std::memory_order_relaxed);
+
     const int n = buffer.getNumSamples();
     const int numIn = getTotalNumInputChannels();
     const int numOut = getTotalNumOutputChannels();
