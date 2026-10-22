@@ -296,7 +296,8 @@ void LearnSession::startRecording()
     stopRequested = false;
     captureSampleRate = sr;
     armedLoudSamples = 0;
-    captureStart = standalone ? -1 : -2;   // -2 = armed, wait for the host to play
+    const bool freeRunning = standalone || JUCEApplicationBase::isStandaloneApp();
+    captureStart = freeRunning ? -1 : -2;   // -2 = armed, wait for the host to play
     lastError.clear();
     setPhase (Phase::Recording);
 }
