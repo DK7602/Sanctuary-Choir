@@ -114,6 +114,7 @@
         sections, singers: total, leadVoiced: singing, leadMidi: progression[beat][0] - 12, leadNote: progression[beat][0] - 12,
         keyTonic: values.key > 0 ? values.key - 1 : (demoLevel !== undefined ? 7 : 0), keyMinor: [1, 2, 3, 6].includes(values.scale), keyConfidence: 0.8,
         chord: singing ? (demoLevel !== undefined ? chordNamesG : chordNames)[beat] : "", in: env * 0.6, out: env * 0.8, frozen: !!values.freeze,
+        bpm: window.SC_DEMO_BEAT !== undefined ? 120 : 0, beat: window.SC_DEMO_BEAT,
       });
     }
 

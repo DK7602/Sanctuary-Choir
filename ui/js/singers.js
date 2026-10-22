@@ -12,6 +12,7 @@
     manifest: null, tiers: [], fg: null,
     tierIndex: -1, count: 0,
     levels: [0, 0, 0, 0],
+    bpm: 0, beat: 0, beatAt: 0,
     animating: false, lastFrame: 0, time: 0,
 
     async init(canvas) {
@@ -75,6 +76,21 @@
       this.kick();
     },
 
+    // Song tempo from the host: the singers move on the beat while the song plays.
+    setBeat(bpm, beat) {
+      if (bpm > 0 && beat !== undefined) {
+        this.bpm = bpm;
+        this.beat = beat;
+        this.beatAt = performance.now();
+      } else {
+        this.bpm = 0;
+      }
+    },
+
+    beatNow() {
+      return this.beat + (performance.now() - this.beatAt) / 60000 * this.bpm;
+    },
+
     setLevels(levels) {
       const changed = levels.some((l, i) => Math.abs(l - this.levels[i]) > 0.01);
       this.levels = levels;
@@ -128,12 +144,21 @@
         // Paint from the highest reveal order down to 0: a newly revealed singer stands
         // behind the ones already shown (the art pipeline guarantees occluders come first).
         const people = t.people.slice().sort((a, b) => b.order - a.order);
+        const beat = this.bpm > 0 ? this.beatNow() : 0;
         for (const p of people) {
           const a = p.alpha * t.alpha;
           if (a <= 0.001 || !p.img) continue;
           any = true;
           const lvl = this.levels[this.sectionOf(p)] || 0;
-          const bob = Math.sin(this.time * 4.2 + p.phase) * Math.min(1, lvl * 2.5) * 0.9;
+          const depth = Math.min(1, lvl * 2.5);
+          let bob;
+          if (this.bpm > 0) {
+            // A soft dip on every beat; each singer a touch early or late, like real people.
+            const b = beat + (p.phase - 3.14) * 0.012;
+            bob = (0.5 - 0.5 * Math.cos(2 * Math.PI * b)) * depth * 1.4 - depth * 0.7;
+          } else {
+            bob = Math.sin(this.time * 4.2 + p.phase) * depth * 0.9;
+          }
           const rise = (1 - p.alpha) * 8;
           c.globalAlpha = a;
           c.drawImage(p.img, p.x, p.y + rise + bob, p.w, p.h);

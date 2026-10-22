@@ -137,6 +137,19 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
                 info.hasPosition = true;
                 info.hostPosition = *t;
             }
+            // The song's tempo and beat, so the singers can move with it.
+            const auto bpm = pos->getBpm();
+            const auto ppq = pos->getPpqPosition();
+            if (info.hostPlaying && bpm.hasValue() && ppq.hasValue() && *bpm > 20.0 && *bpm < 400.0)
+            {
+                songBpm.store (*bpm, std::memory_order_relaxed);
+                songBeat.store (*ppq, std::memory_order_relaxed);
+                songBeatTime.store (Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
+            }
+            else
+            {
+                songBpm.store (0.0, std::memory_order_relaxed);
+            }
         }
     }
     info.engineWritten = engineWritten;

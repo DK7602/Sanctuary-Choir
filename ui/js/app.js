@@ -411,6 +411,7 @@
       levels.push(Math.min(1, Math.sqrt(s.peak || 0)));
     });
     Choir.setLevels(levels);
+    Choir.setBeat(m.bpm || 0, m.beat);
     const out = Math.min(1, Math.sqrt(m.out || 0) * 1.1);
     $("medallion").style.setProperty("--glow", out.toFixed(3));
     $("sceneGlow").style.opacity = (out * 0.8).toFixed(3);
@@ -531,8 +532,10 @@
         } else {
           window.SC_DEMO_LEVEL = 0.15;
         }
+        window.SC_DEMO_BEAT = (audio.currentTime - 0.15) * 2;   // the demo song is at 120 BPM
       } else {
         window.SC_DEMO_LEVEL = undefined;
+        window.SC_DEMO_BEAT = undefined;
       }
       requestAnimationFrame(level);
     })();

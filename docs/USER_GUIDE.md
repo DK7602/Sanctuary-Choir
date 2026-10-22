@@ -24,7 +24,7 @@ Pro Tools (AAX) isn't supported yet.
 
 ## 3. Sing
 
-- **Turn up Choir Size** to add singers. You'll see each one walk into the loft.
+- **Turn up Choir Size** to add singers. You'll see each one walk into the loft. While your song plays, the singers move with its beat (each a touch loose, like real people); when the transport stops they sway on their own.
 - **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note. Once Auto has found it, click the small **lock** next to *Auto · E♭* to keep it.
 - **Harmony Mode** chooses the arrangement. *Full Choir* is the classic four-part hymn sound.
 - **Style** changes how the choir performs. *Gospel* adds 7th chords, scoops and more vibrato; *Gregorian* gives pure, still voices.
