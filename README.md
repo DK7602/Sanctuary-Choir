@@ -45,7 +45,7 @@
   - Lead vocal and choir levels.
   - Humanize, Vibrato, Glide, Formant (gender/size), Pitch Lock and Breath.
 - **FX page**:
-  - Six sacred spaces: Grand Cathedral, Stone Abbey, Wooden Chapel, Concert Hall, Gospel Church, Studio Room.
+  - Six sacred spaces: Grand Cathedral, Stone Abbey, Wooden Chapel, Concert Hall, Gospel Church, Studio Room. Each one appears on screen with its own choir (monks in the abbey for Gregorian chant), chosen from the picker at the top of the scene.
   - Decay, pre-delay and brightness.
   - Lead reverb send.
   - Low/high cut, Warmth and a Glue compressor on the choir bus.

@@ -954,5 +954,5 @@
     };
   }
 
-  window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords };
+  window.SCPages = { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords };
 })();

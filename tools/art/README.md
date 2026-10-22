@@ -135,3 +135,46 @@ draw foreground.webp at (foreground.x, foreground.y)
 alpha-weighted centroid, `head` is the face centre and `row` 0 is the front row,
 all in base pixels. `offset` is the translation from tier pixels to base pixels.
 Tiers are sorted by `count`.
+
+# Rooms
+
+`build_rooms.py` gives every venue its own scene and choir, from the mockups in
+`design/mockups/rooms/`: each room once with its choir and once empty (the Stone Abbey
+also with monks, shown when the Style is Gregorian). It writes `ui/assets/rooms/`:
+
+- `<room>/base.webp`: the empty room, cut to the frame's opening (its alpha). Drawn first.
+- `<room>/pXX.webp`: one cut-out per singer, `XX` the reveal order.
+- `<room>/fg.webp`: the scenery just below the singers (rail, stands, candles), lossless.
+  Drawn last, so singers moving with the music never show a seam.
+- `manifest.json`: `{ rooms: { <room>: { base, fg, count, rows, people[] } } }`, with the
+  same per-person fields as the loft manifest.
+
+```sh
+tools/art/.venv/bin/python tools/art/build_rooms.py --stage detect   # YOLO, pose and SAM (cached)
+tools/art/.venv/bin/python tools/art/build_rooms.py                  # every room
+tools/art/.venv/bin/python tools/art/build_rooms.py --rooms gospel   # one room
+```
+
+The steps:
+
+1. **Registration.** Each mockup is aligned with the plug-in's skin by SIFT on the frame
+   around the scene (top bar and stained-glass columns), a similarity transform.
+2. **The opening.** Where the rooms differ from one another (and from the skin) is the
+   scene; the frame is the same in all. The median absolute deviation across all the
+   pictures, blurred and thresholded, gives the opening. The largest component is kept,
+   holes are filled and the edge is softened.
+3. **Singers.** Detection, SAM, held books, raised hands, rows, occlusion, reveal order
+   and matting are the loft pipeline's. A big figure in front of the choir (the gospel
+   director, the cathedral conductor) whose SAM mask comes back far smaller than its
+   box is redone with points down the body and its enclosed holes filled.
+4. **Choir onto the empty room.** The two pictures of a room are not drawn identically
+   (the abbey's choir picture is 4% larger). SIFT on the architecture outside the
+   singers gives the transform, and every sprite is warped with it.
+5. **Foreground.** Pixels of the empty room within a few pixels below a singer's edge,
+   where the choir picture shows the same scenery, are drawn over the singers.
+6. **Verification.** `.work/rooms/verify_<room>.jpg` puts the rebuilt room beside the
+   mockup; `verify_<room>_third.jpg` shows a third of the choir; `labels_<room>.png`
+   shows the masks and the occlusion.
+
+In the UI the venue picks the room: the scene crossfades to it, and Choir Size reveals the
+same share of that room's choir (5 singers in the studio, 62 in the cathedral).

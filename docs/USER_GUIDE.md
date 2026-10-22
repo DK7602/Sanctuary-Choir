@@ -171,4 +171,12 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
   - Click a singer icon to mute that section; double-click to solo it.
   - Drag a keyboard to change that section's range.
   - Drag the coloured bar to set the section's level.
-- **FX page**: choose the room, from a vast Grand Cathedral to a dry Studio Room, and shape the choir bus (low/high cut, warmth, glue).
+- **The room**: choose where the choir sings with the picker at the top left of the main page, or on the FX page. Each room has its own choir:
+  - **Grand Cathedral**: a large robed choir with its conductor. Vast stone, a 6 s tail.
+  - **Stone Abbey**: a robed choir in the cloisters. With the *Gregorian* style, monks sing there instead.
+  - **Wooden Chapel**: a small choir, warm and close.
+  - **Concert Hall**: a choir in black on risers, clear and wide.
+  - **Gospel Church**: a gospel choir in purple robes with its director, lively.
+  - **Studio Room**: five singers at their microphones, dry and intimate.
+  - Choir Size fills each room in turn, front row first.
+- **FX page**: the reverb of the room, and the choir bus (low/high cut, warmth, glue).

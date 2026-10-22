@@ -2,7 +2,26 @@
 (function () {
   "use strict";
   const { Params, BigKnob, Dropdown, Menu, hiDpiCanvas, stageRect, noteName } = window.SCW;
-  const { SECTIONS, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords } = window.SCPages;
+  const { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords } = window.SCPages;
+
+  // Each venue has its own room and choir; monks sing Gregorian chant in the abbey.
+  const ROOMS = ["cathedral", "abbey", "chapel", "hall", "gospel", "studio"];
+  const GREGORIAN = 2;
+  const VENUE_ICONS = [
+    // Grand Cathedral: spires
+    '<path d="M3 21V12l3-4 3 4v9M15 21v-9l3-4 3 4v9M9 21V9l3-6 3 6v12M2 21h20M12 1.5v3M10.8 2.7h2.4M11 21v-4h2v4"/>',
+    // Stone Abbey: round arches
+    '<path d="M3 21v-9a4 4 0 0 1 8 0v9M13 21v-9a4 4 0 0 1 8 0v9M2 21h20M12 2v5M10 3.8h4M5.5 21v-6M18.5 21v-6"/>',
+    // Wooden Chapel: a little church
+    '<path d="M4 21V11l8-6 8 6v10M2 21h20M12 1.5v5M10 3.2h4M10 21v-5a2 2 0 0 1 4 0v5"/>',
+    // Concert Hall: pipes under a shell
+    '<path d="M3 9.5Q12 2 21 9.5M6 20v-6M9.5 20v-9M13 20v-7M16.5 20v-8M19 20v-4M3 21h18"/>',
+    // Gospel Church: a cross in light
+    '<path d="M12 4v17M7.5 9h9M4 4.5l2 2M20 4.5l-2 2M2.5 11h2M19.5 11h2M8 21h8"/>',
+    // Studio Room: a microphone
+    '<path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/>',
+  ];
+  const svgIcon = (paths) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + paths + "</svg>";
   const Choir = window.SCChoir;
   const $ = (id) => document.getElementById(id);
 
@@ -442,7 +461,35 @@
       state.lastSizeChange = performance.now();
     });
 
-    Choir.init($("choirCanvas")).then(() => Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || MAX_ENGINE_SINGERS)), Choir.maxSingers() || MAX_ENGINE_SINGERS), true));
+    // The room: the picker at the top of the scene, and the scene itself.
+    const picker = $("venuePicker");
+    const showRoom = (instant) => {
+      const v = Math.max(0, Math.min(VENUES.length - 1, Math.round(Params.get("venue"))));
+      const style = Math.round(Params.get("style"));
+      picker.querySelector(".vp-icon").innerHTML = svgIcon(VENUE_ICONS[v]);
+      picker.querySelector(".vp-name").textContent = VENUES[v][0];
+      picker.querySelector(".vp-desc").textContent = VENUES[v][1];
+      Choir.setRoom(ROOMS[v] === "abbey" && style === GREGORIAN ? "abbey-monks" : ROOMS[v], instant);
+    };
+    picker.addEventListener("click", () => {
+      Menu.open(stageRect(picker), (m) => {
+        Menu.heading(m, "THE ROOM");
+        VENUES.forEach(([name, desc], i) => {
+          const it = Menu.item(m, name, Math.round(Params.get("venue")) === i, () => Params.set("venue", i));
+          const d = document.createElement("span");
+          d.className = "idesc";
+          d.textContent = desc;
+          it.appendChild(d);
+        });
+      });
+    });
+    Params.on("venue", () => showRoom(false));
+    Params.on("style", () => showRoom(false));
+
+    Choir.init($("choirCanvas")).then(() => {
+      Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || MAX_ENGINE_SINGERS)), Choir.maxSingers() || MAX_ENGINE_SINGERS), true);
+      showRoom(true);
+    });
     setTab(info.tab && ["perform", "mix", "fx", "settings", "take", "stage"].includes(info.tab) ? info.tab : "perform");
   }
 
