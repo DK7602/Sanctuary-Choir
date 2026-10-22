@@ -1,0 +1,11 @@
+# Singer sprite pipeline (tools/art/build_singers.py). CPU-only is fine.
+# Install torch/torchvision from the CPU wheel index first:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
+torch==2.14.1
+torchvision==0.29.1
+ultralytics==8.4.183
+PyMatting==1.1.16
+numpy==2.5.3
+scipy==1.18.1
+opencv-python-headless==5.0.0.93
+pillow==12.3.0
