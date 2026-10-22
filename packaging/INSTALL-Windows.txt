@@ -1,6 +1,11 @@
 Sanctuary Choir for Windows (64-bit)
 ====================================
 
+EASIEST: double-click "Sanctuary Choir Setup.exe" and follow the steps.
+(Windows SmartScreen may warn because the installer isn't code-signed yet:
+ click "More info" > "Run anyway".)
+
+Manual install instead:
 1. Copy "Sanctuary Choir.vst3" (the whole folder) to:
      C:\Program Files\Common Files\VST3\
 

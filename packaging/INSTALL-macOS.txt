@@ -1,6 +1,13 @@
 Sanctuary Choir for macOS (Apple Silicon and Intel)
 ====================================================
 
+EASIEST: open "Sanctuary Choir.pkg" and follow the installer.
+The package isn't notarised yet, so the first time macOS may say it can't be opened:
+right-click (or Control-click) the .pkg > Open > Open. On newer macOS versions use
+System Settings > Privacy & Security > "Open Anyway". It installs the AU, the VST3
+and the standalone app.
+
+Manual install instead:
 1. Copy the plug-ins:
      Sanctuary Choir.vst3       ->  /Library/Audio/Plug-Ins/VST3/        (or ~/Library/Audio/Plug-Ins/VST3/)
      Sanctuary Choir.component  ->  /Library/Audio/Plug-Ins/Components/  (or ~/Library/Audio/Plug-Ins/Components/)

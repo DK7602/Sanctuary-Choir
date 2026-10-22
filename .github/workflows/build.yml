@@ -86,26 +86,44 @@ jobs:
             Windows) ./pv/pluginval.exe --strictness-level 5 --skip-gui-tests --validate-in-process --validate "$VST3" ;;
           esac
 
+      - name: Validate Audio Unit (auval)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ART=$(find build -type d -name "SanctuaryChoir_artefacts" | head -n 1)
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "$ART/Release/AU/Sanctuary Choir.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -a | grep -i sanctuary || true
+          auval -strict -v aumf SChr Snct
+
       - name: Package
         shell: bash
         run: |
+          VERSION=1.0.0
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF#refs/tags/v}"; fi
           OUT="Sanctuary-Choir-${{ matrix.name }}"
           mkdir -p "dist/$OUT"
           ART=$(find build -type d -name "SanctuaryChoir_artefacts" | head -n 1)
           REL="$ART/Release"
           cp -R "$REL/VST3/Sanctuary Choir.vst3" "dist/$OUT/"
+          cp packaging/INSTALL-${{ matrix.name }}.txt "dist/$OUT/INSTALL.txt"
           if [ "$RUNNER_OS" = "macOS" ]; then
             cp -R "$REL/AU/Sanctuary Choir.component" "dist/$OUT/"
             cp -R "$REL/Standalone/Sanctuary Choir.app" "dist/$OUT/"
             # Ad-hoc signature so the bundles load on Apple Silicon.
-            for b in "dist/$OUT/"*; do codesign --force --deep --sign - "$b"; done
+            for b in "dist/$OUT/"*.vst3 "dist/$OUT/"*.component "dist/$OUT/"*.app; do codesign --force --deep --sign - "$b"; done
+            packaging/macos/build_pkg.sh "dist/$OUT" "$VERSION" "dist/$OUT"
           elif [ "$RUNNER_OS" = "Windows" ]; then
             cp "$REL/Standalone/Sanctuary Choir.exe" "dist/$OUT/"
+            ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+            if [ ! -f "$ISCC" ]; then choco install innosetup -y --no-progress; fi
+            "$ISCC" //Q "//DAppVersion=$VERSION" "//DSourceDir=$(cygpath -w "$PWD/dist/$OUT")" "//O$(cygpath -w "$PWD/dist/$OUT")" packaging/windows/SanctuaryChoir.iss
           else
             cp "$REL/Standalone/Sanctuary Choir" "dist/$OUT/"
-            [ -d "$REL/LV2/Sanctuary Choir.lv2" ] && cp -R "$REL/LV2/Sanctuary Choir.lv2" "dist/$OUT/"
+            if [ -d "$REL/LV2/Sanctuary Choir.lv2" ]; then cp -R "$REL/LV2/Sanctuary Choir.lv2" "dist/$OUT/"; fi
           fi
-          cp packaging/INSTALL-${{ matrix.name }}.txt "dist/$OUT/INSTALL.txt"
+          ls -la "dist/$OUT"
           cd dist && cmake -E tar cf "$OUT.zip" --format=zip "$OUT"
 
       - name: Upload

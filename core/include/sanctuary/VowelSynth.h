@@ -69,6 +69,7 @@ class VowelSinger
 public:
     void prepare (double sampleRate);
     void reset();
+    void setPhase (float p) { phase = p - std::floor (p); }
 
     /** Configure formants (call when vowel/section/formant scale changes). */
     void setFormants (const FormantSpec& spec, float formantScale);

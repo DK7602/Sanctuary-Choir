@@ -443,6 +443,68 @@
     if (!busy) state.plaqueTimer = setTimeout(() => onStatus(state.status), 7100);
   }
 
+  //==========================================================================
+  // Browser preview only: listen to audio rendered by the engine.
+  function buildDemoPlayer() {
+    if (SC.isPlugin) return;
+    const demos = [["demo-input.mp3", "SOLO VOICE"], ["demo-ah.mp3", "SACRED \u00b7 AH"], ["demo-gospel.mp3", "GOSPEL \u00b7 WORDS"]];
+    const bar = document.createElement("div");
+    bar.id = "demoBar";
+    bar.innerHTML = '<span class="demo-title">HEAR THE ENGINE</span>';
+    const audio = new Audio();
+    audio.preload = "none";
+    let ctx = null, analyser = null, data = null, current = null;
+    const buttons = demos.map(([file, label]) => {
+      const b = document.createElement("button");
+      b.className = "demo-btn";
+      b.textContent = "\u25B6 " + label;
+      b.addEventListener("click", () => {
+        if (current === file && !audio.paused) { audio.pause(); return; }
+        if (!ctx) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) {
+            ctx = new AC();
+            const src = ctx.createMediaElementSource(audio);
+            analyser = ctx.createAnalyser();
+            analyser.fftSize = 1024;
+            data = new Float32Array(analyser.fftSize);
+            src.connect(analyser);
+            analyser.connect(ctx.destination);
+          }
+        }
+        if (ctx && ctx.state === "suspended") ctx.resume();
+        current = file;
+        audio.src = "demo/" + file;
+        audio.play().catch(() => toast("Tap again to play"));
+        // Learned harmony for the demo is in G major.
+        if (file !== "demo-input.mp3") Params.set("choirSize", file === "demo-ah.mp3" ? 70 : 45);
+      });
+      bar.appendChild(b);
+      return [b, file];
+    });
+    const sync = () => buttons.forEach(([b, f]) => {
+      const playing = current === f && !audio.paused;
+      b.classList.toggle("on", playing);
+      b.textContent = (playing ? "\u25A0 " : "\u25B6 ") + demos.find((d) => d[0] === f)[1];
+    });
+    audio.addEventListener("play", sync);
+    audio.addEventListener("pause", sync);
+    audio.addEventListener("ended", () => { sync(); window.SC_DEMO_LEVEL = undefined; });
+    (function level() {
+      if (analyser && !audio.paused) {
+        analyser.getFloatTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; ++i) sum += data[i] * data[i];
+        window.SC_DEMO_LEVEL = Math.sqrt(sum / data.length);
+      } else if (audio.paused) {
+        window.SC_DEMO_LEVEL = undefined;
+      }
+      requestAnimationFrame(level);
+    })();
+    $("stage").appendChild(bar);
+  }
+
+  SC.on("init", buildDemoPlayer);
   SC.on("init", build);
   SC.on("params", (obj) => Object.keys(obj).forEach((id) => { if (!Params.gestures.has(id)) Params.update(id, obj[id]); }));
   SC.on("meters", onMeters);

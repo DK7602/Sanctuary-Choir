@@ -316,3 +316,19 @@ html, body {
   animation: toastIn 160ms ease-out;
 }
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---------- Browser preview demo player ---------- */
+#demoBar {
+  position: absolute; left: 50%; top: 96px; transform: translateX(-50%); z-index: 20;
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 16px;
+  background: linear-gradient(180deg, rgba(16,11,9,0.88), rgba(16,11,9,0.74));
+  border: 1px solid rgba(232, 201, 138, 0.55); border-radius: 22px; box-shadow: 0 6px 22px rgba(0,0,0,0.55);
+}
+#demoBar .demo-title { font-family: "Cinzel", serif; font-size: 13px; letter-spacing: 2px; color: var(--gold-bright); margin-right: 4px; }
+.demo-btn {
+  height: 30px; padding: 0 14px; border-radius: 15px; cursor: pointer;
+  font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 11.5px; letter-spacing: 1.4px;
+  color: #f2e4c6; background: #17110e; border: 1px solid rgba(232, 201, 138, 0.45);
+}
+.demo-btn:hover { border-color: var(--gold); }
+.demo-btn.on { color: #1b1209; background: linear-gradient(180deg, #ffe3a3, #c69a52); border-color: #ffe9b8; box-shadow: 0 0 12px rgba(255, 210, 140, 0.5); }

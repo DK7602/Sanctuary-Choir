@@ -89,25 +89,28 @@
     // Hymn progression in C for the simulated meters: [S, A, T, B] per chord.
     const progression = [[72, 67, 64, 48], [72, 69, 65, 53], [71, 67, 62, 55], [72, 67, 64, 48], [76, 72, 67, 57], [74, 69, 65, 50], [74, 71, 67, 55], [72, 67, 64, 48]];
     const chordNames = ["C", "F", "G", "C", "Am", "Dm", "G", "C"];
+    const chordNamesG = ["G", "C", "D", "G", "Em", "Am", "D", "G"];
     let t0 = performance.now();
     function meters() {
       const t = (performance.now() - t0) / 1000;
       const beat = Math.floor(t / 1.4) % progression.length;
       const phase = (t % 11.2) / 11.2;
-      const singing = phase < 0.9 && (t % 1.4) < 1.3;
-      const env = singing ? 0.55 + 0.25 * Math.sin(t * 2.1) + 0.12 * Math.random() : 0.02 * Math.random();
+      const demoLevel = window.SC_DEMO_LEVEL;
+      const singing = demoLevel !== undefined ? demoLevel > 0.02 : (phase < 0.9 && (t % 1.4) < 1.3);
+      const env = demoLevel !== undefined ? Math.min(1, demoLevel * 2.2) : singing ? 0.55 + 0.25 * Math.sin(t * 2.1) + 0.12 * Math.random() : 0.02 * Math.random();
       const total = Math.round(values.choirSize / 100 * 48);
       const counts = [Math.round(total * 0.28), Math.round(total * 0.26), Math.round(total * 0.22)];
       counts.push(Math.max(0, total - counts[0] - counts[1] - counts[2]));
-      const sections = progression[beat].map((n, i) => ({
+      const shift = demoLevel !== undefined ? -5 : 0;
+      const sections = progression[beat].map((n0, i) => ({
         peak: counts[i] > 0 && !values[["sop", "alt", "ten", "bas"][i] + "Mute"] ? env * (0.8 + 0.4 * Math.random()) * values[["sop", "alt", "ten", "bas"][i] + "Level"] / 0.75 : 0,
-        notes: singing && counts[i] > 0 ? [n] : [],
+        notes: singing && counts[i] > 0 ? [n0 + shift] : [],
         singers: counts[i],
       }));
       emit("meters", {
         sections, singers: total, leadVoiced: singing, leadMidi: progression[beat][0] - 12, leadNote: progression[beat][0] - 12,
-        keyTonic: values.key > 0 ? values.key - 1 : 0, keyMinor: [1, 2, 3, 6].includes(values.scale), keyConfidence: 0.8,
-        chord: singing ? chordNames[beat] : "", in: env * 0.6, out: env * 0.8, frozen: !!values.freeze,
+        keyTonic: values.key > 0 ? values.key - 1 : (demoLevel !== undefined ? 7 : 0), keyMinor: [1, 2, 3, 6].includes(values.scale), keyConfidence: 0.8,
+        chord: singing ? (demoLevel !== undefined ? chordNamesG : chordNames)[beat] : "", in: env * 0.6, out: env * 0.8, frozen: !!values.freeze,
       });
     }
 

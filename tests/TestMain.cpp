@@ -269,6 +269,35 @@ TEST (engineFullChoirHarmony)
     maybeWrite ("input_scale", x, x, sr);
 }
 
+TEST (midiPlaysTheChoir)
+{
+    // With no voice coming in, held MIDI notes make the choir sing (in every vocal type).
+    const double sr = 48000.0;
+    for (VocalType vt : { VocalType::Ah, VocalType::Words })
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (vt, HarmonyMode::FullChoir);
+        eng.setParams (p);
+        NoteSet chord;
+        chord.add (48); chord.add (60); chord.add (64); chord.add (67);
+        eng.setMidi (chord, 0.8f);
+        std::vector<float> silence ((size_t) sr * 2, 0.0f);
+        auto out = runEngine (eng, silence, sr);
+        float rms = 0;
+        for (size_t i = (size_t) sr; i < out.size(); ++i) rms += out[i] * out[i];
+        rms = std::sqrt (rms / (float) (out.size() - (size_t) sr));
+        std::printf ("  midi chord (%s): rms %.4f\n", vt == VocalType::Words ? "words" : "ah", rms);
+        CHECK (rms > 0.01f);
+        const auto snap = eng.takeSnapshot();
+        for (int s = 0; s < NumSections; ++s)
+        {
+            const int n = snap.sectionNotes[(size_t) s][0];
+            CHECK (n >= 0 && (wrapPc (n) == 0 || wrapPc (n) == 4 || wrapPc (n) == 7));
+        }
+    }
+}
+
 TEST (leadLatencyAlignment)
 {
     const double sr = 48000.0;

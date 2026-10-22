@@ -25,6 +25,7 @@ struct ChoirEngine::ControlFrame
     int leadNote = -1;
     int sopShift = 0;
     float level = 0.0f;
+    bool midiInstrument = false;   // MIDI is playing the choir (no voice): always use the vowel synth
     Voicing voicing;
 };
 
@@ -276,6 +277,7 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
     s.expr = 0.0f;
     s.lastFollow = 1.0f;
     s.vowel.reset();
+    s.vowel.setPhase (s.rng.uni());
 }
 
 void ChoirEngine::allocateSingers()
@@ -449,7 +451,8 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     if (params.midiEnabled && ! midiHeld.empty() && unvoicedTime > 0.15f)
     {
         cf.sounding = true;
-        cf.level = 0.3f + 0.55f * midiVelocity;
+        cf.level = 0.18f + 0.4f * midiVelocity;
+        cf.midiInstrument = true;
     }
 
     if (frozen)
@@ -715,7 +718,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             const float fadeEnd = s.fade;
 
             std::fill (scratch.begin(), scratch.begin() + c, 0.0f);
-            if (words)
+            if (words && ! cf.midiInstrument)
             {
                 s.psola.render (analyzer, tOut - s.delay, c, scratch.data(), s.pctl, s.rng);
                 const float gateTarget = cf.sounding ? 1.0f : 0.0f;
