@@ -95,6 +95,7 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
 void SanctuaryProcessor::updateMidi (const MidiBuffer& midi)
 {
+    noteOns.fill (0);
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
@@ -105,6 +106,7 @@ void SanctuaryProcessor::updateMidi (const MidiBuffer& midi)
         auto& sus = sustained[(size_t) ch];
         if (m.isNoteOn())
         {
+            ++noteOns[(size_t) ch];
             held[(size_t) m.getNoteNumber()] = m.getFloatVelocity();
             sus[(size_t) m.getNoteNumber()] = false;
         }
@@ -194,8 +196,18 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         if (inChord)
             held.add (note);
     }
-    engine.setMidi (held, velocity);
-    engine.setMidiParts (parts, partsVelocity);
+    // Typed words: each new note (chord) sings the next syllable; in Parts mode each part keeps
+    // its own place in the words.
+    engine.setLyrics (liveLyrics.load (std::memory_order_acquire));
+    int chordOns = 0;
+    std::array<int, sc::NumSections> partOns {};
+    for (int ch = 0; ch < 16; ++ch)
+    {
+        if (p.midiParts && ch < sc::NumSections) partOns[(size_t) ch] = noteOns[(size_t) ch];
+        else chordOns += noteOns[(size_t) ch];
+    }
+    engine.setMidi (held, velocity, chordOns);
+    engine.setMidiParts (parts, partsVelocity, partOns);
 
     LearnSession::BlockInfo info;
     if (auto* ph = getPlayHead())
@@ -433,9 +445,42 @@ var SanctuaryProcessor::getSceneSlots() const
     return slots;
 }
 
+void SanctuaryProcessor::setLyrics (const String& text)
+{
+    const String t = text.substring (0, 2000);
+    if (t == lyricsText && (lyricsScript != nullptr || t.trim().isEmpty()))
+        return;
+    lyricsText = t;
+    lyricsParsed = sc::Lyrics::parse (t.toStdString());
+    if (lyricsScript != nullptr)
+        retiredScripts.push_back ({ lyricsScript, Time::getMillisecondCounter() });
+    lyricsScript = lyricsParsed.empty() ? nullptr : std::make_shared<sc::LyricScript> (sc::LyricScript::make (lyricsParsed));
+    liveLyrics.store (lyricsScript.get(), std::memory_order_release);
+    ++statusVersion;
+}
+
+var SanctuaryProcessor::getLyricsStatus() const
+{
+    auto o = std::make_unique<DynamicObject>();
+    o->setProperty ("text", lyricsText);
+    Array<var> sung, starts;
+    for (const auto& s : lyricsParsed.syllables())
+    {
+        sung.add (String (CharPointer_UTF8 (s.text.c_str())));
+        starts.add (s.wordStart || s.hold);
+    }
+    o->setProperty ("sung", sung);
+    o->setProperty ("starts", starts);
+    o->setProperty ("latin", lyricsParsed.isLatin());
+    return var (o.release());
+}
+
 void SanctuaryProcessor::timerCallback()
 {
     const auto now = Time::getMillisecondCounter();
+    // The audio thread picks up new words at its next block; free old ones well after that.
+    retiredScripts.erase (std::remove_if (retiredScripts.begin(), retiredScripts.end(), [now] (const auto& r) { return now - r.second > 2000; }),
+                          retiredScripts.end());
     if (harmonyDirty.exchange (false))
         lastHarmonyChange = now;
     if (lastHarmonyChange != 0 && now - lastHarmonyChange > 300)
@@ -486,6 +531,7 @@ void SanctuaryProcessor::getStateInformation (MemoryBlock& destData)
     tree.setProperty ("detectedKey", rememberedKey.load(), nullptr);   // Auto key starts right next time
     tree.setProperty ("voicesFolder", voices.getFolder().getFullPathName(), nullptr);
     tree.setProperty ("voicesBuiltIn", voices.userChoseBuiltIn(), nullptr);
+    tree.setProperty ("lyrics", lyricsText, nullptr);
     tree.setProperty ("stageVersion", kStageVersion, nullptr);
     {
         Array<var> sceneList;
@@ -562,6 +608,7 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
         editorHeight = tree.getProperty ("editorHeight", 0);
         // Choir voices: the user's own folder, the built-in synth on purpose, or (default) the
         // installed Sanctuary Voices that the constructor already started loading.
+        setLyrics (tree.getProperty ("lyrics", "").toString());
         const String voicesFolder = tree.getProperty ("voicesFolder", "").toString();
         if ((bool) tree.getProperty ("voicesBuiltIn", false))
         {

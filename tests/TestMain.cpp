@@ -446,6 +446,177 @@ TEST (midiPlaysTheChoir)
     }
 }
 
+TEST (lyricsSplitIntoSungSyllables)
+{
+    auto hy = [] (const char* t) { return Lyrics::parse (t).hyphenated(); };
+    CHECK (hy ("Kyrie eleison") == "Ky-ri-e e-le-i-son");
+    CHECK (hy ("Christe eleison") == "Chri-ste e-le-i-son");
+    CHECK (hy ("Alleluia") == "Al-le-lu-ia");
+    CHECK (hy ("Gloria in excelsis Deo") == "Glo-ri-a in ex-cel-sis De-o");
+    CHECK (hy ("Sanctus") == "Sanc-tus");
+    CHECK (hy ("Agnus Dei") == "Ag-nus De-i");
+    CHECK (hy ("Hallelujah") == "Hal-le-lu-jah");
+    CHECK (hy ("Glory to God") == "Glo-ry to God");
+    CHECK (hy ("A _ _ men") == "A _ _ men");
+    CHECK (hy ("Ho-san-na") == "Ho-san-na");
+    CHECK (hy ("Ky\xC5\x93rie") .size() > 0);
+    const auto kyrie = Lyrics::parse ("Kyrie eleison");
+    CHECK (kyrie.isLatin() && kyrie.size() == 7);
+    if (kyrie.size() == 7)
+    {
+        const auto& s = kyrie.syllables();
+        CHECK (s[0].numOnset == 1 && s[0].onset[0] == Phone::K && s[0].vowel == VocalType::Ee);
+        CHECK (s[6].vowel == VocalType::Oh && s[6].numCoda == 1 && s[6].coda[0] == Phone::N);
+    }
+    // Church Latin: c before e is "ch", x before ce is "k-sh", ti before a vowel is "tsi".
+    const auto gloria = Lyrics::parse ("excelsis gratia");
+    CHECK (gloria.size() == 6);
+    if (gloria.size() == 6)
+    {
+        CHECK (gloria.syllables()[1].onset[0] == Phone::Sh);
+        CHECK (gloria.syllables()[4].numOnset == 2 && gloria.syllables()[4].onset[0] == Phone::T && gloria.syllables()[4].onset[1] == Phone::S);
+    }
+    // English: silent final e, vowel teams, "y" at the end.
+    const auto grace = Lyrics::parse ("Amazing grace holy");
+    CHECK (! grace.isLatin() && grace.size() == 6);
+    if (grace.size() == 6)
+    {
+        CHECK (grace.syllables()[3].text == "grace" && grace.syllables()[3].vowel == VocalType::Eh && grace.syllables()[3].numCoda == 1);
+        CHECK (grace.syllables()[5].vowel == VocalType::Ee);
+    }
+    CHECK (Lyrics::parse ("").empty() && Lyrics::parse ("hmm sh").empty());
+}
+
+/** A MIDI chord played as notes (start, end in seconds) with typed words; dry choir out. */
+static std::vector<float> singWords (const char* text, const std::vector<std::pair<double, double>>& notes, double sr, double seconds,
+                                     ChoirEngine* engine = nullptr, std::vector<int>* shown = nullptr)
+{
+    ChoirEngine local;
+    ChoirEngine& eng = engine != nullptr ? *engine : local;
+    eng.prepare (sr, 256);
+    auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+    p.choirSize = 30.0f;
+    eng.setParams (p);
+    const auto script = LyricScript::make (Lyrics::parse (text));
+    eng.setLyrics (&script);
+    NoteSet chord;
+    chord.add (48); chord.add (60); chord.add (64); chord.add (67);
+    std::vector<float> silence ((size_t) (seconds * sr), 0.0f);
+    return runEngine (eng, silence, sr, nullptr, [&] (int64_t pos)
+    {
+        const double t0 = (double) pos / sr, t1 = (double) (pos + 256) / sr;
+        bool on = false;
+        int started = 0;
+        for (const auto& [a, b] : notes)
+        {
+            on = on || (t0 >= a && t0 < b);
+            started += a >= t0 && a < t1 ? 1 : 0;
+        }
+        eng.setMidi (on ? chord : NoteSet{}, 0.8f, started);
+        if (shown != nullptr && on)
+            shown->push_back (eng.takeSnapshot().lyricIndex);
+    });
+}
+
+/** Level in a band (Hz) between two times, dB. */
+static float bandDb (const std::vector<float>& x, double sr, double t0, double t1, float lo, float hi)
+{
+    const int order = 11, n = 1 << order;
+    FFT fft (order);
+    double e = 0.0;
+    int frames = 0;
+    for (size_t at = (size_t) (t0 * sr); at + (size_t) n <= (size_t) (t1 * sr) && at + (size_t) n <= x.size(); at += (size_t) n / 2, ++frames)
+    {
+        std::vector<std::complex<float>> buf ((size_t) n);
+        for (int i = 0; i < n; ++i)
+            buf[(size_t) i] = x[at + (size_t) i] * (0.5f - 0.5f * std::cos (kTwoPi * (float) i / (float) n));
+        fft.forward (buf.data());
+        for (int k = (int) (lo * n / sr); k <= (int) (hi * n / sr) && k < n / 2; ++k)
+            e += (double) std::norm (buf[(size_t) k]);
+    }
+    return 10.0f * std::log10 ((float) (e / std::max (1, frames)) + 1e-20f);
+}
+
+TEST (lyricsSingTheirVowels)
+{
+    // "La li la li", one syllable per note: the "i" notes are bright (a high second formant),
+    // the "a" notes are not.
+    const double sr = 48000.0;
+    const std::vector<std::pair<double, double>> notes { { 0.3, 1.0 }, { 1.2, 1.9 }, { 2.1, 2.8 }, { 3.0, 3.7 } };
+    const auto y = singWords ("la li la li", notes, sr, 4.2);
+    float bright[4];
+    for (int k = 0; k < 4; ++k)
+    {
+        const double a = notes[(size_t) k].first + 0.25, b = notes[(size_t) k].second - 0.05;
+        bright[k] = bandDb (y, sr, a, b, 1900.0f, 3200.0f) - bandDb (y, sr, a, b, 400.0f, 1300.0f);
+    }
+    std::printf ("  brightness (F2 band against F1 band): la %.1f, li %.1f, la %.1f, li %.1f dB\n", bright[0], bright[1], bright[2], bright[3]);
+    CHECK (bright[1] > bright[0] + 4.0f && bright[1] > bright[2] + 4.0f);
+    CHECK (bright[3] > bright[0] + 4.0f && bright[3] > bright[2] + 4.0f);
+}
+
+TEST (lyricsSingTheirConsonants)
+{
+    // "sa": a hiss before the vowel; "a" has none. "as" hisses when the note is let go.
+    const double sr = 48000.0;
+    const std::vector<std::pair<double, double>> notes { { 0.3, 1.3 } };
+    const auto sa = singWords ("sa", notes, sr, 2.0);
+    const auto a = singWords ("a", notes, sr, 2.0);
+    const auto as = singWords ("as", notes, sr, 2.0);
+    auto hiss = [&] (const std::vector<float>& y, double t0, double t1) { return bandDb (y, sr, t0, t1, 5000.0f, 9000.0f); };
+    const float saStart = hiss (sa, 0.28, 0.42), saMid = hiss (sa, 0.7, 1.2), aStart = hiss (a, 0.28, 0.42);
+    const float asEnd = hiss (as, 1.28, 1.45), aEnd = hiss (a, 1.28, 1.45);
+    std::printf ("  hiss at the start of \"sa\" %.1f dB (mid-vowel %.1f, \"a\" %.1f); at the end of \"as\" %.1f (\"a\" %.1f)\n",
+                 saStart, saMid, aStart, asEnd, aEnd);
+    CHECK (saStart > saMid + 8.0f);
+    CHECK (saStart > aStart + 8.0f);
+    CHECK (asEnd > aEnd + 8.0f);
+
+    // "pa": the voice stops for the closure before the vowel.
+    const auto pa = singWords ("pa", notes, sr, 2.0);
+    const float closed = bandDb (pa, sr, 0.27, 0.32, 100.0f, 4000.0f), unclosed = bandDb (a, sr, 0.27, 0.32, 100.0f, 4000.0f);
+    const float vowelPa = bandDb (pa, sr, 0.45, 0.6, 100.0f, 4000.0f), vowelA = bandDb (a, sr, 0.45, 0.6, 100.0f, 4000.0f);
+    std::printf ("  \"pa\" against \"a\": %.1f dB in the closure, %.1f dB once the vowel sings\n", closed - unclosed, vowelPa - vowelA);
+    CHECK (closed < unclosed - 15.0f);
+    CHECK (std::abs (vowelPa - vowelA) < 3.0f);
+}
+
+TEST (lyricsStepOneSyllablePerNote)
+{
+    // Each new chord sings the next syllable (a chord's notes arriving together count once);
+    // the text loops; starting the host's transport starts it again.
+    const double sr = 48000.0;
+    ChoirEngine eng;
+    std::vector<int> shown;
+    singWords ("Ky-ri-e", { { 0.2, 0.6 }, { 0.7, 1.1 }, { 1.2, 1.6 }, { 1.7, 2.1 } }, sr, 2.4, &eng, &shown);
+    std::vector<int> seen;
+    for (int v : shown)
+        if (v >= 0 && (seen.empty() || seen.back() != v)) seen.push_back (v);
+    std::printf ("  syllables sung:");
+    for (int v : seen) std::printf (" %d", v);
+    std::printf ("\n");
+    CHECK ((seen == std::vector<int> { 0, 1, 2, 0 }));
+
+    // Notes 10 ms apart are one chord, one syllable.
+    const auto script = LyricScript::make (Lyrics::parse ("a e i"));
+    eng.setLyrics (&script);
+    NoteSet c1;
+    c1.add (60);
+    std::vector<float> in (256, 0.0f), out (256), outR (256);
+    eng.setMidi (c1, 0.8f, 1);
+    eng.process (in.data(), nullptr, out.data(), outR.data(), 256);
+    c1.add (64);
+    eng.setMidi (c1, 0.8f, 1);
+    eng.process (in.data(), nullptr, out.data(), outR.data(), 256);
+    for (int k = 0; k < 40; ++k) { eng.setMidi (c1, 0.8f, 0); eng.process (in.data(), nullptr, out.data(), outR.data(), 256); }
+    CHECK (eng.takeSnapshot().lyricIndex == 0);
+    eng.setTransport (false, 120.0, 0.0);
+    eng.setTransport (true, 120.0, 0.0);
+    eng.setMidi (c1, 0.8f, 1);
+    for (int k = 0; k < 40; ++k) { eng.process (in.data(), nullptr, out.data(), outR.data(), 256); eng.setMidi (c1, 0.8f, 0); }
+    CHECK (eng.takeSnapshot().lyricIndex == 0);
+}
+
 TEST (echoAnswersAfterThePhrase)
 {
     // Response = Echo: the choir stays quiet while you sing, then sings the phrase back.

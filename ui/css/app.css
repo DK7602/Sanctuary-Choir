@@ -451,6 +451,23 @@ html, body {
 #loftHit:hover::after { background: radial-gradient(ellipse at 50% 55%, rgba(255, 230, 180, 0.07), rgba(255, 230, 180, 0) 70%); box-shadow: none; }
 .page-link { position: absolute; right: 30px; top: 22px; height: 30px; padding: 0 14px; }
 .page-pills { position: absolute; left: 30px; top: 22px; height: 30px; gap: 6px; }
+.words-group { padding: 10px 16px 12px; margin-bottom: 12px; }
+.words-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.words-field {
+  display: block; width: 100%; box-sizing: border-box; resize: none; padding: 8px 12px;
+  font-family: "Cormorant Garamond", Georgia, serif; font-size: 24px; line-height: 1.25; color: var(--gold-bright);
+  background: linear-gradient(180deg, #1d1612, #120d0b); border: 1px solid rgba(232, 201, 138, 0.5); border-radius: 8px; outline: none;
+}
+.words-field:focus { border-color: rgba(255, 220, 150, 0.9); box-shadow: 0 0 12px rgba(255, 200, 110, 0.25); }
+.words-presets { flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.words-lang { font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: 2px; color: var(--muted); }
+.words-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; min-height: 40px; font-family: "Cormorant Garamond", Georgia, serif; font-size: 26px; color: #d9c7a3; }
+.words-syl { padding: 0 3px; border-radius: 6px; transition: color 0.12s, background 0.12s, text-shadow 0.12s; }
+.words-syl.on { color: #1b1209; background: linear-gradient(180deg, #ffe9b8, #e0b467); text-shadow: none; box-shadow: 0 0 14px rgba(255, 210, 120, 0.6); }
+.words-dash { color: #7d6c55; }
+.words-gap { width: 14px; }
+.words-empty { font-size: 18px; color: var(--muted); font-style: italic; }
+.words-hint { font-size: 15px !important; line-height: 1.35 !important; color: #a8977c !important; margin: 0 4px !important; }
 .stage-group { width: 722px; padding: 10px 14px 6px; }
 .stage-head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
 .stage-head .pill-row { margin-left: auto; }

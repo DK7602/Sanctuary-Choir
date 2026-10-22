@@ -463,15 +463,6 @@ void SamplePlayer::render (const SampleLayer& layer, const SampleNote& note, con
         std::fill (out, out + n, 0.0f);
         return;
     }
-    if (&layer != lastLayer)
-    {
-        for (auto& h : heads)
-            h = Head{};
-        cur = -1;
-        next = nullptr;
-        lastLayer = &layer;
-    }
-
     float hz = note.hz, noteHz = note.noteHz;
     if (! (hz > 20.0f && hz < 20000.0f))
         hz = 220.0f;
@@ -514,6 +505,28 @@ void SamplePlayer::render (const SampleLayer& layer, const SampleNote& note, con
             next = nullptr;
         }
     };
+
+    if (&layer != lastLayer)
+    {
+        // Another vowel (typed words) or way of singing mid-note: crossfade into it. The heads
+        // still sounding keep pointing into the same set, which outlives this player's use.
+        const bool sounding = current() != nullptr && lastLayer != nullptr;
+        lastLayer = &layer;
+        if (sounding)
+        {
+            start (held (&layer.zones[(size_t) layer.nearest (target, variant)], false), 0.04f, outRate);
+            next = nullptr;
+            lastSerial = note.serial;
+            lastNote = target;
+        }
+        else
+        {
+            for (auto& h : heads)
+                h = Head{};
+            cur = -1;
+            next = nullptr;
+        }
+    }
 
     Head* c = current();
     if (c == nullptr)

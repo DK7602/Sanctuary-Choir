@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const { Params, BigKnob, Dropdown, Menu, hiDpiCanvas, stageRect, noteName } = window.SCW;
-  const { SECTIONS, buildMix, buildFx, buildSettings, buildTake, buildStage } = window.SCPages;
+  const { SECTIONS, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords } = window.SCPages;
   const Choir = window.SCChoir;
   const $ = (id) => document.getElementById(id);
 
@@ -296,12 +296,12 @@
   //==========================================================================
   // Tabs and pages
   // Pages opened from another page (not a tab) keep that page's tab lit.
-  const SUB_PAGES = { take: "settings", stage: "mix" };
+  const SUB_PAGES = { take: "settings", stage: "mix", words: "settings" };
   function setTab(tab) {
     if (!SUB_PAGES[tab] && !SUB_PAGES[state.tab]) state.returnTab = state.tab;
     state.tab = tab;
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === (SUB_PAGES[tab] || tab)));
-    ["mix", "fx", "settings", "take", "stage"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
+    ["mix", "fx", "settings", "take", "stage", "words"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
     if (tab === "take") SC.send({ type: "cmd", name: "lane" });
     SC.send({ type: "cmd", name: "tab", value: tab });
     Menu.close();
@@ -407,9 +407,12 @@
     $("loftHit").addEventListener("click", () => setTab("stage"));
     buildFx($("page-fx"));
     const settingsInfo = { version: info.version, latencyMs: info.latencyMs, liveChoirMs: info.liveChoirMs, standalone: !!info.standalone,
-                           openTake: () => setTab("take") };
+                           openTake: () => setTab("take"), openWords: () => setTab("words") };
     buildSettings($("page-settings"), settingsInfo);
     state.settingsInfo = settingsInfo;
+    const wordsInfo = { close: () => setTab("settings") };
+    buildWords($("page-words"), wordsInfo);
+    state.wordsInfo = wordsInfo;
     const takeInfo = { toast, close: () => setTab(state.returnTab && !SUB_PAGES[state.returnTab] ? state.returnTab : "settings"), visible: () => state.tab === "take" };
     buildTake($("page-take"), takeInfo);
     state.takeInfo = takeInfo;
@@ -473,6 +476,7 @@
     $("chordReadout").classList.toggle("band", band);
     if (state.settingsInfo && state.settingsInfo.onMeters) state.settingsInfo.onMeters(m);
     if (state.stageInfo && state.stageInfo.onMeters) state.stageInfo.onMeters(m);
+    if (state.wordsInfo && state.wordsInfo.onMeters) state.wordsInfo.onMeters(m);
     const now = performance.now();
     if (m.leadVoiced || out > 0.05 || band) state.lastActivity = now;
     $("harmonyBadge").style.opacity = now - state.lastActivity < 4000 ? "1" : "0";
@@ -507,6 +511,7 @@
     plaque.classList.toggle("clickable", !!l.hasTake && ["learned", "rendered"].includes(l.phase));
     plaque.title = plaque.classList.contains("clickable") ? "See the chords, choose others, and drag the stems into your DAW" : "";
     if (state.settingsInfo && state.settingsInfo.onStatus) state.settingsInfo.onStatus(st);
+    if (state.wordsInfo && state.wordsInfo.onStatus) state.wordsInfo.onStatus(st);
     if (state.takeInfo && state.takeInfo.onTakeStatus) state.takeInfo.onTakeStatus(st);
     clearTimeout(state.plaqueTimer);
     if (!busy) state.plaqueTimer = setTimeout(() => onStatus(state.status), 7100);

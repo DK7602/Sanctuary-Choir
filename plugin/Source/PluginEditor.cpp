@@ -204,6 +204,7 @@ void SanctuaryEditor::sendMeters()
     o->setProperty ("in", snap.inputPeak);
     o->setProperty ("out", snap.outputPeak);
     o->setProperty ("frozen", snap.frozen);
+    o->setProperty ("lyric", snap.lyricIndex);
     // The band on the side-chain: connected, heard, and the chord the choir follows.
     o->setProperty ("sidechain", processor.sidechainConnected.load (std::memory_order_relaxed));
     o->setProperty ("bandHeard", snap.bandHeard);
@@ -232,6 +233,7 @@ void SanctuaryEditor::sendStatus()
     o->setProperty ("monoOutput", processor.getTotalNumOutputChannels() < 2);
     o->setProperty ("voices", processor.getVoices().getStatus());
     o->setProperty ("scenes", processor.getSceneSlots());
+    o->setProperty ("lyrics", processor.getLyricsStatus());
     addLatencyInfo (*o);
     web->emitEventIfBrowserIsVisible ("status", var (o.release()));
 }
@@ -476,6 +478,8 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
         learn.unlockChords ((int64) message.getProperty ("s", 0), (int64) message.getProperty ("e", 0));
     else if (name == "chordUnlockAll")
         learn.unlockAllChords();
+    else if (name == "lyrics")
+        processor.setLyrics (message.getProperty ("text", "").toString());
     else if (name == "presetLoad")
         presets.load ((int) message.getProperty ("index", 0));
     else if (name == "presetNext")

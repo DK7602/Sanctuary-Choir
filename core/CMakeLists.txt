@@ -7,6 +7,7 @@ add_library(sanctuary_core STATIC
     src/Learn.cpp
     src/PitchTracker.cpp
     src/Psola.cpp
+    src/Lyrics.cpp
     src/SampleSet.cpp
     src/Theory.cpp
     src/VowelSynth.cpp)

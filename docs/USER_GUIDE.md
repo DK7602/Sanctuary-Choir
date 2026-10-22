@@ -160,6 +160,13 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
 - **MIDI chords**: hold chords on a keyboard to decide the harmony yourself. With no voice coming in, the choir becomes an instrument you can play.
 - **MIDI parts** (Settings → *Parts on channels 1–4*): write each part yourself. Notes on channel 1 are sung by the sopranos, channel 2 the altos, channel 3 the tenors and channel 4 the basses. Other channels still work as chords.
 - **Program Change** messages pick a preset by its number in the list, so a MIDI controller or a DAW track can switch sounds.
+- **Sung words** (Settings → **SUNG WORDS**): type words and the MIDI choir sings them.
+  - Type "Kyrie eleison", "Alleluia" or "Glory to God", or pick one of the ready texts.
+  - Each new note or chord you play sings the next syllable, with its vowel and its consonants. The page shows how the words are split and lights up the syllable being sung.
+  - Latin is sung the church way: Ky-ri-e, Chri-ste, ex-cel-sis ("ek-shel-sis"), gra-ti-a ("gra-tsi-a"). Anything else is read as English.
+  - Write **-** inside a word to split the syllables yourself (Ho-san-na). Write **_** to hold a syllable over one more note: *A _ _ men* sings "A" across three notes, then "men".
+  - The words start again from the top when you change them or your DAW starts playing, and they loop at the end. In Parts mode each part keeps its own place, so the sopranos can sing a melisma while the basses move on.
+  - It works with the recorded voices and the synthesised ones. Clear the text to go back to the Vocal Type.
 - **Section panels**:
   - Click a singer icon to mute that section; double-click to solo it.
   - Drag a keyboard to change that section's range.

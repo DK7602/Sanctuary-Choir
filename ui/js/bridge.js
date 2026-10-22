@@ -193,10 +193,21 @@
       emit("chordOptions", { s, e, options });
     }
 
+    // Typed words: a rough syllable split for the preview (the plug-in sings it properly).
+    let lyrics = { text: "", sung: [], starts: [], latin: false };
+    function setLyrics(text) {
+      const sung = [], starts = [];
+      (text.match(/[A-Za-z\u00c0-\u024f'-]+|_/g) || []).forEach((w) => {
+        const parts = w === "_" ? ["_"] : w.split("-").flatMap((p) => p.match(/[^aeiouy]*[aeiouy]+(?:[^aeiouy]*$|[^aeiouy](?=[^aeiouy]))?/gi) || [p]);
+        parts.forEach((p, i) => { sung.push(p); starts.push(i === 0); });
+      });
+      const latinWords = /\b(kyrie|eleison|christe|gloria|excelsis|deo|sanctus|agnus|dei|ave|maria|alleluia|hosanna|dona|nobis|pacem|amen|dominus)\b/i;
+      lyrics = { text, sung, starts, latin: latinWords.test(text) };
+    }
     function status() {
       learn.export = !learn.hasStems || learn.stale ? "none" : exportState;
       learn.tiedToTimeline = true;
-      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices), scenes: scenes.slice() });
+      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices), scenes: scenes.slice(), lyrics });
     }
     function setParam(id, v) {
       values[id] = v;
@@ -233,6 +244,7 @@
         // The preview pretends a band is on the side-chain, playing the same progression.
         sidechain: true, bandHeard: singing, followingBand: singing && !!values.followBand,
         bandChord: singing ? (demoLevel !== undefined ? chordNamesG : chordNames)[beat] : "",
+        lyric: singing && lyrics.sung.length ? Math.floor(t / 1.4) % lyrics.sung.length : -1,
       });
     }
 
@@ -320,6 +332,7 @@
             break;
           case "voicesBundled": Object.assign(voices, { loading: false, name: "Sanctuary Voices", text: "4 SECTIONS \u00b7 5 VOWELS \u00b7 753 NOTES", error: "", usingBundled: true }); status(); break;
           case "voicesClear": Object.assign(voices, { loading: false, name: "", text: "", error: "", usingBundled: false }); status(); break;
+          case "lyrics": setLyrics(msg.text || ""); status(); break;
           case "preview": learn.previewing = !learn.previewing; status(); break;
           case "presetLoad": presetIndex = msg.index; status(); break;
           case "presetNext": presetIndex = (presetIndex + 1) % presets.length; status(); break;

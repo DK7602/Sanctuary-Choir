@@ -14,6 +14,7 @@
 //     --mics C,T,R         close, tree and room microphone levels in dB (-60 = off; default -60,0,-60)
 //     --formation NAME     blocks | across | mencentre | mixed
 //     --singing NAME       natural | breathy | belt  (recorded voices: their breathy or belted takes)
+//     --words TEXT         ignore the input: play chords over MIDI, one per syllable, and sing TEXT
 //     --synth-demo         ignore the input and sing a demo melody (writes it next to the output)
 #include "TestSignals.h"
 
@@ -39,13 +40,14 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--synth-demo]\n", argv[0]);
         return 2;
     }
 
     const std::string inPath = argv[1], outPath = argv[2];
     EngineParams p;
     bool learn = false, demo = false;
+    std::string words;
     std::string stemsDir, voicesDir;
 
     const std::map<std::string, int> voices { { "ah", 0 }, { "oh", 1 }, { "oo", 2 }, { "ee", 3 }, { "eh", 4 }, { "mm", 5 }, { "words", 6 } };
@@ -71,6 +73,7 @@ int main (int argc, char** argv)
         else if (a == "--stems") stemsDir = next();
         else if (a == "--voices") voicesDir = next();
         else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
+        else if (a == "--words") words = next();
         else if (a == "--singing") p.singing = (Singing) indexOf ({ { "natural", 0 }, { "breathy", 1 }, { "belt", 2 } }, next(), 0);
         else if (a == "--rhythm") p.rhythmPattern = std::clamp (std::stoi (next()), 0, kNumRhythmPatterns - 1);
         else if (a == "--mics")
@@ -99,7 +102,15 @@ int main (int argc, char** argv)
 
     test::Audio in;
     std::string err;
-    if (demo)
+    const auto script = LyricScript::make (Lyrics::parse (words));
+    const double sylSeconds = 0.8;
+    if (! words.empty())
+    {
+        std::printf ("words: %s\n", script.text.c_str());
+        in.sampleRate = 48000.0;
+        in.channels = { std::vector<float> ((size_t) ((double) script.entries.size() * sylSeconds * in.sampleRate + in.sampleRate), 0.0f) };
+    }
+    else if (demo)
     {
         in.sampleRate = 48000.0;
         in.channels = { test::singMelody (test::amazingGrace(), in.sampleRate, Tenor) };
@@ -206,6 +217,11 @@ int main (int argc, char** argv)
         eng.setSampleSet (voicesPtr);
         const int lat = eng.getLatencySamples();
         const int64_t total = n + lat + (int64_t) (sr * 4.0);
+        if (! words.empty())
+            eng.setLyrics (&script);
+        // --words: a hymn-like progression in C, one chord per syllable, re-sung each time.
+        static const int chords[][3] = { { 60, 64, 67 }, { 60, 65, 69 }, { 59, 62, 67 }, { 60, 64, 67 }, { 57, 60, 64 }, { 57, 62, 65 }, { 55, 59, 62 }, { 55, 60, 64 } };
+        const int64_t sylLen = (int64_t) (sylSeconds * sr), gap = (int64_t) (0.05 * sr);
         std::vector<float> l ((size_t) total), r ((size_t) total), x ((size_t) total, 0.0f), xr ((size_t) total, 0.0f);
         for (int64_t i = 0; i < n; ++i)
         {
@@ -215,6 +231,19 @@ int main (int argc, char** argv)
         for (int64_t pos = 0; pos < total; pos += 512)
         {
             const int len = (int) std::min<int64_t> (512, total - pos);
+            if (! words.empty())
+            {
+                // Each chord is a new note; before a held syllable ("_") they join up.
+                const int64_t k = pos / sylLen, into = pos % sylLen;
+                const auto count = (int64_t) script.entries.size();
+                const bool tied = k + 1 < count && script.entries[(size_t) (k + 1)].hold;
+                const bool on = k < count && (tied || into < sylLen - gap);
+                NoteSet held;
+                if (on)
+                    for (int note : chords[k % 8])
+                        held.add (note);
+                eng.setMidi (held, 0.75f, on && into < 512 ? 1 : 0);
+            }
             eng.process (x.data() + pos, xr.data() + pos, l.data() + pos, r.data() + pos, len);
         }
         out.channels = { std::vector<float> (l.begin() + lat, l.end()), std::vector<float> (r.begin() + lat, r.end()) };

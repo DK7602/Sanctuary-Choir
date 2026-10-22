@@ -506,6 +506,38 @@ static void voicePackLoads()
         std::printf ("  %s: %.1f dB\n", sc::getSingingNames()[(int) how], rmsDb);
         check (finite && rmsDb > -40.0 && rmsDb < -6.0, "sings from the pack");
     }
+
+    // Typed words over MIDI, from the recorded vowels: one syllable per chord.
+    {
+        sc::ChoirEngine engine;
+        engine.prepare (48000.0, 512);
+        engine.setSampleSet (set);
+        sc::EngineParams p;
+        p.reverb = 0.0f;
+        engine.setParams (p);
+        const auto script = sc::LyricScript::make (sc::Lyrics::parse ("Kyrie eleison"));
+        engine.setLyrics (&script);
+        std::vector<float> in (512, 0.0f), l (512), r (512);
+        double e = 0.0;
+        bool finite = true;
+        std::vector<int> seen;
+        for (int block = 0; block < 900; ++block)
+        {
+            const int k = block / 60, into = block % 60;
+            sc::NoteSet chord;
+            if (k < 7 && into < 56)
+                for (int note : { 60, 64, 67 })
+                    chord.add (note + (k % 2) * 2);
+            engine.setMidi (chord, 0.8f, k < 7 && into == 0 ? 1 : 0);
+            engine.process (in.data(), nullptr, l.data(), r.data(), 512);
+            for (float v : l) { e += (double) v * v; finite = finite && std::isfinite (v); }
+            const int shown = engine.takeSnapshot().lyricIndex;
+            if (shown >= 0 && (seen.empty() || seen.back() != shown)) seen.push_back (shown);
+        }
+        std::printf ("  Kyrie eleison from the pack: %.1f dB, %zu syllables\n", 10.0 * std::log10 (e / (900.0 * 512.0) + 1e-20), seen.size());
+        check (finite && e > 0.0, "sings typed words from the pack");
+        check (seen == std::vector<int> ({ 0, 1, 2, 3, 4, 5, 6 }), "a syllable per chord");
+    }
 }
 
 int main()

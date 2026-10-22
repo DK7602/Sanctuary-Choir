@@ -10,6 +10,7 @@
 #include "ChordDetector.h"
 #include "Effects.h"
 #include "Harmonizer.h"
+#include "Lyrics.h"
 #include "Psola.h"
 #include "SampleSet.h"
 #include "VowelSynth.h"
@@ -138,6 +139,7 @@ struct EngineSnapshot
     bool bandHeard = false;        // audio is arriving on the side-chain
     bool followingBand = false;    // ... and the choir is singing the band's chord
     char bandChord[16] {};         // e.g. "G/B", empty if none
+    int lyricIndex = -1;           // typed words: the syllable the MIDI choir is on (-1 = none)
 };
 
 /** Pre-rendered section stems to play instead of live singers (learned + rendered takes). */
@@ -178,16 +180,29 @@ public:
     double getSampleRate() const noexcept { return sr; }
 
     void setParams (const EngineParams& p);
-    /** Held MIDI notes (ascending) and the loudest velocity 0..1. */
-    void setMidi (const NoteSet& held, float velocity);
-    /** Notes held on MIDI channels 1-4 (soprano, alto, tenor, bass), used when params.midiParts. */
-    void setMidiParts (const std::array<NoteSet, NumSections>& parts, float velocity);
+    /** Held MIDI notes (ascending), the loudest velocity 0..1 and how many notes started in
+        this block (each new note, or chord, sings the next syllable of the typed words). */
+    void setMidi (const NoteSet& held, float velocity, int newNotes = 0);
+    /** Notes held on MIDI channels 1-4 (soprano, alto, tenor, bass), used when params.midiParts;
+        each part steps through the typed words on its own. */
+    void setMidiParts (const std::array<NoteSet, NumSections>& parts, float velocity, const std::array<int, NumSections>& newNotes = {});
+    /** Typed words for the MIDI choir (nullptr = none): it sings them, one syllable per note,
+        from the start of the text whenever it changes or the host starts playing. Call from the
+        audio thread; the script must stay alive while it is in use. */
+    void setLyrics (const LyricScript* script) noexcept;
     /** Side-chain audio for this block (the band, keys or a backing track), or nullptr. Call
         before process(); the pointers are used during that call only. */
     void setSidechain (const float* left, const float* right) noexcept { scL = left; scR = right; }
     /** The host's transport for the rhythm effects (call before process). Not playing: the
         rhythm runs freely at the last tempo. ppq is the song position at the block start. */
-    void setTransport (bool playing, double bpm, double ppq) noexcept { transportPlaying = playing; transportBpm = bpm; transportPpq = ppq; }
+    void setTransport (bool playing, double bpm, double ppq) noexcept
+    {
+        if (playing && ! transportPlaying)
+            restartLyrics();
+        transportPlaying = playing;
+        transportBpm = bpm;
+        transportPpq = ppq;
+    }
     /** Scripted harmony for offline rendering (nullptr = live harmoniser). */
     void setScore (const ScoreSource* score) { scoreSource = score; }
     /** When set, dry section buses (pre level/pan/width) are written here: 8 channels (S L/R, A L/R, ...). */
@@ -219,6 +234,9 @@ private:
     void configureSinger (Singer& s, int section, int index, int countInSection);
     void updateSingerControl (Singer& s, const ControlFrame& cf, float dt);
     void refreshVowelFormants();
+    void setSingerVowel (Singer& s, VocalType vt);
+    void articulate (Singer& s, const Articulation& a0, const Articulation& a1, float* x, int n);
+    void restartLyrics() noexcept;
     void applyRhythm (int c, int offset);
     float singerFormant (const Singer& s) const noexcept;
     int formantSection (int section) const noexcept;
@@ -265,6 +283,11 @@ private:
 
     NoteSet midiHeld;
     float midiVelocity = 0.0f;
+    // Typed words: where each section is in the text (raw counts; -1 = before the first note).
+    const LyricScript* lyrics = nullptr;
+    int chordSyllable = -1;
+    std::array<int, NumSections> partSyllable { -1, -1, -1, -1 };
+    int64_t midiClock = 0, lastSyllableAt = -1000000;
     std::array<NoteSet, NumSections> midiParts;
     float partsVelocity = 0.0f;
 

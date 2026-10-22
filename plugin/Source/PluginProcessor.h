@@ -83,6 +83,12 @@ public:
     /** [true/false per slot] for the UI. */
     juce::var getSceneSlots() const;
 
+    // Typed words for the MIDI choir (message thread): saved with the project.
+    void setLyrics (const juce::String& text);
+    juce::String getLyrics() const { return lyricsText; }
+    /** { text, sung: ["Ky", "ri", ...], starts: [true, false, ...], latin } for the UI. */
+    juce::var getLyricsStatus() const;
+
 private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void timerCallback() override;
@@ -100,6 +106,13 @@ private:
     std::array<std::array<float, 128>, 16> heldVelocity {};
     std::array<std::array<bool, 128>, 16> sustained {};
     bool sustain = false;
+    std::array<int, 16> noteOns {};   // note-ons per channel in this block
+
+    juce::String lyricsText;
+    sc::Lyrics lyricsParsed;
+    std::shared_ptr<sc::LyricScript> lyricsScript;
+    std::vector<std::pair<std::shared_ptr<sc::LyricScript>, juce::uint32>> retiredScripts;   // freed once the audio thread let go
+    std::atomic<const sc::LyricScript*> liveLyrics { nullptr };
     std::atomic<int> pendingProgram { -1 };   // MIDI Program Change: load that preset (message thread)
 
     std::array<juce::var, kNumScenes> scenes;   // { paramID: value } or void

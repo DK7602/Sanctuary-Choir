@@ -187,7 +187,12 @@
     let foot = null;
 
     const midi = el("div", "group", left);
-    el("h3", "", midi, "HARMONY FROM \u00b7 MIDI AND THE BAND");
+    const midiHead = el("div", "", midi);
+    midiHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:6px";
+    el("h3", "", midiHead, "HARMONY FROM \u00b7 MIDI AND THE BAND").style.margin = "0";
+    const wordsBtn = el("button", "pill", midiHead, "SUNG WORDS");
+    wordsBtn.title = "Type words (Kyrie eleison, Alleluia, Glory to God...) and the MIDI choir sings them, a syllable per note";
+    wordsBtn.addEventListener("click", () => info.openWords && info.openWords());
     const midiRow = el("div", "", midi);
     midiRow.style.cssText = "display:flex;gap:10px 22px;flex-wrap:wrap";
     toggleSwitch(midiRow, "midiEnabled", "MIDI chords").title = "Hold chords to choose the harmony; with no voice coming in, the choir sings what you play. Program Change picks a preset.";
@@ -867,5 +872,87 @@
     syncPills();
   }
 
-  window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings, buildTake, buildStage };
+  // Typed words for the MIDI choir.
+  const WORD_PRESETS = [
+    ["KYRIE", "Kyrie eleison, Christe eleison, Kyrie eleison"],
+    ["GLORIA", "Gloria in excelsis Deo"],
+    ["ALLELUIA", "Alleluia, alleluia, alleluia, Amen"],
+    ["SANCTUS", "Sanctus, sanctus, sanctus Dominus Deus Sabaoth"],
+    ["HOSANNA", "Hosanna in excelsis"],
+    ["AGNUS DEI", "Agnus Dei qui tollis peccata mundi, dona nobis pacem"],
+    ["AVE MARIA", "Ave Maria, gratia plena, Dominus tecum"],
+    ["AMEN", "A _ _ men"],
+    ["HALLELUJAH", "Hallelujah, hallelujah"],
+    ["GLORY", "Glory to God in the highest"],
+  ];
+
+  function buildWords(page, info) {
+    page.innerHTML = "";
+    el("h2", "", page, "SUNG WORDS");
+    const close = el("button", "page-close", page, "\u2715");
+    close.title = "Back";
+    close.addEventListener("click", () => info.close && info.close());
+
+    const group = el("div", "group words-group", page);
+    const head = el("div", "words-head", group);
+    el("h3", "", head, "THE WORDS").style.margin = "0";
+    const clear = el("button", "pill", head, "CLEAR");
+    clear.title = "No words: the choir sings the Vocal Type again";
+    const field = el("textarea", "words-field", group);
+    field.rows = 2;
+    field.spellcheck = false;
+    field.placeholder = "Type the words: Kyrie eleison...";
+    let sendTimer = null;
+    const send = () => SC.send({ type: "cmd", name: "lyrics", text: field.value });
+    field.addEventListener("input", () => { clearTimeout(sendTimer); sendTimer = setTimeout(send, 250); });
+    field.addEventListener("keydown", (e) => e.stopPropagation());
+    clear.addEventListener("click", () => { field.value = ""; send(); });
+
+    const presets = el("div", "pill-row words-presets", group);
+    WORD_PRESETS.forEach(([name, text]) => {
+      const b = el("button", "pill", presets, name);
+      b.title = text;
+      b.addEventListener("click", () => { field.value = text; send(); });
+    });
+
+    const sungGroup = el("div", "group words-group", page);
+    const sungHead = el("div", "words-head", sungGroup);
+    el("h3", "", sungHead, "SUNG AS").style.margin = "0";
+    const lang = el("span", "words-lang", sungHead, "");
+    const strip = el("div", "words-strip", sungGroup);
+    const hint = el("p", "words-hint", page);
+    hint.innerHTML = "Play MIDI notes or chords with no voice coming in (<b>MIDI chords</b> on): each new note or chord sings the next syllable, "
+      + "its vowel and its consonants. Latin is sung the church way. Write <b>-</b> to split the syllables yourself "
+      + "(Ho-san-na) and <b>_</b> to hold one over another note (A _ _ men). The words start again from the top when you change them "
+      + "or your DAW starts playing. In Parts mode each part keeps its own place.";
+
+    let chips = [];
+    let lastText = null;
+    info.onStatus = (st) => {
+      const w = (st && st.lyrics) || {};
+      if (document.activeElement !== field && typeof w.text === "string" && w.text !== field.value) field.value = w.text;
+      const sung = w.sung || [];
+      const key = JSON.stringify(sung) + (w.starts || []).join();
+      if (key === lastText) return;
+      lastText = key;
+      strip.innerHTML = "";
+      chips = sung.map((text, i) => {
+        if (i > 0 && w.starts && w.starts[i]) el("span", "words-gap", strip);
+        else if (i > 0) el("span", "words-dash", strip, "-");
+        return el("span", "words-syl", strip, text === "_" ? "\u2013" : text);
+      });
+      if (!sung.length) el("span", "words-empty", strip, "No words: the choir sings the Vocal Type.");
+      lang.textContent = sung.length ? (w.latin ? "CHURCH LATIN" : "ENGLISH") + "  \u00b7  " + sung.length + " SYLLABLE" + (sung.length === 1 ? "" : "S") : "";
+    };
+    let lit = -1;
+    info.onMeters = (m) => {
+      const i = m && typeof m.lyric === "number" ? m.lyric : -1;
+      if (i === lit) return;
+      if (chips[lit]) chips[lit].classList.remove("on");
+      lit = i;
+      if (chips[lit]) chips[lit].classList.add("on");
+    };
+  }
+
+  window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords };
 })();

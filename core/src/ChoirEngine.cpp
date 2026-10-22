@@ -158,6 +158,7 @@ struct ChoirEngine::ControlFrame
     float level = 0.0f;
     bool midiInstrument = false;   // MIDI is playing the choir (no voice): always use the vowel synth
     Voicing voicing;
+    std::array<int, NumSections> syllable { -1, -1, -1, -1 };   // typed words: each section's syllable count
 };
 
 struct ChoirEngine::Singer
@@ -194,6 +195,14 @@ struct ChoirEngine::Singer
     float noteMidi = -1.0f;      // the note sampleNote.serial counts
     float silentFor = 1.0f;      // seconds since the singer last sang
     bool wasSinging = false;
+
+    // Typed words
+    int syllable = -1;           // the syllable count it is singing (-1 = none)
+    float sylAge = 0.0f;         // seconds into it
+    bool ending = false;         // let go: singing the syllable's closing consonants
+    float endAge = 0.0f, endLevel = 0.0f;
+    int vowelOverride = -1;      // the vowel its synth is set to for the words (-1 = the Vocal Type)
+    float nz1 = 0.0f, nz2 = 0.0f, lp = 0.0f;   // consonant noise filter, darkening low-pass
 };
 
 ChoirEngine::ChoirEngine() = default;
@@ -293,6 +302,7 @@ void ChoirEngine::reset()
     harmonizer.reset();
     keyTracker.reset();
     controlCount = 0;
+    restartLyrics();
     std::fill (leadDelayL.begin(), leadDelayL.end(), 0.0f);
     std::fill (leadDelayR.begin(), leadDelayR.end(), 0.0f);
     leadDelayPos = 0;
@@ -304,6 +314,9 @@ void ChoirEngine::reset()
         s->currentMidi = s->targetMidi = s->noteMidi = -1.0f;
         s->silentFor = 1.0f;
         s->wasSinging = false;
+        s->syllable = -1;
+        s->ending = false;
+        s->nz1 = s->nz2 = s->lp = 0.0f;
         s->psola.reset (0.0);
         s->vowel.reset();
         s->sampler.reset();
@@ -560,16 +573,43 @@ void ChoirEngine::setParams (const EngineParams& in)
     }
 }
 
-void ChoirEngine::setMidi (const NoteSet& held, float velocity)
+void ChoirEngine::setMidi (const NoteSet& held, float velocity, int newNotes)
 {
     midiHeld = held;
     midiVelocity = velocity;
+    // A chord's notes rarely land together: notes within 40 ms are one syllable.
+    if (newNotes > 0 && lyrics != nullptr && midiClock - lastSyllableAt > (int64_t) (0.04 * sr))
+    {
+        ++chordSyllable;
+        lastSyllableAt = midiClock;
+    }
 }
 
-void ChoirEngine::setMidiParts (const std::array<NoteSet, NumSections>& parts, float velocity)
+void ChoirEngine::setMidiParts (const std::array<NoteSet, NumSections>& parts, float velocity, const std::array<int, NumSections>& newNotes)
 {
     midiParts = parts;
     partsVelocity = velocity;
+    if (lyrics != nullptr)
+        for (int s = 0; s < NumSections; ++s)
+            if (newNotes[(size_t) s] > 0)
+                ++partSyllable[(size_t) s];
+}
+
+void ChoirEngine::setLyrics (const LyricScript* script) noexcept
+{
+    if (script != nullptr && script->entries.empty())
+        script = nullptr;
+    if (script != lyrics)
+    {
+        lyrics = script;
+        restartLyrics();
+    }
+}
+
+void ChoirEngine::restartLyrics() noexcept
+{
+    chordSyllable = -1;
+    partSyllable.fill (-1);
 }
 
 bool ChoirEngine::partsHeld() const noexcept
@@ -700,6 +740,7 @@ void ChoirEngine::allocateSingers()
                     singer.vowel.setFormants (getFormants (vowelForVocalType (params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType), formantSection (s)),
                                               singerFormant (singer) * ens.tract * std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f));
                     singer.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s].range.centre(), params.a4), style.softness);
+                    singer.vowelOverride = -1;
                     const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f;
                     singer.delay = singer.pendingDelay = (int) (delayMs * 0.001f * (float) sr);
                     singer.psola.reset ((double) (analyzer.getWritten() - latency - activeEchoOffset - singer.delay));
@@ -714,6 +755,57 @@ void ChoirEngine::allocateSingers()
     }
 }
 
+void ChoirEngine::articulate (Singer& s, const Articulation& a0, const Articulation& a1, float* x, int n)
+{
+    // Nasals and liquids darken the voice.
+    if (a0.lowpass > 0.0f || a1.lowpass > 0.0f)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const float t = (float) (i + 1) / (float) n;
+            const float f0 = a0.lowpass > 0.0f ? a0.lowpass : 16000.0f, f1 = a1.lowpass > 0.0f ? a1.lowpass : 16000.0f;
+            const float k = 1.0f - std::exp (-kTwoPi * (f0 + (f1 - f0) * t) / (float) sr);
+            s.lp += k * (x[i] - s.lp);
+            x[i] = s.lp;
+        }
+    }
+    else
+    {
+        s.lp = x[n - 1];
+    }
+
+    // Hiss and bursts: band-passed noise at the singer's own loudness (held from the moment
+    // the note was let go for the closing consonants).
+    if (a0.noise <= 0.0f && a1.noise <= 0.0f)
+        return;
+    const Articulation& shape = a1.noise > 0.0f ? a1 : a0;
+    const float f = clampv (shape.noiseHz, 200.0f, (float) sr * 0.45f);
+    const float q = std::max (0.3f, shape.noiseQ);
+    const float g = std::tan (kPi * f / (float) sr), k = 1.0f / q;
+    const float c1 = 1.0f / (1.0f + g * (g + k)), c2 = g * c1, c3 = g * c2;
+    // Same loudness whatever the band: white noise through a narrower band carries less.
+    const float norm = std::min (8.0f, std::sqrt (0.5f * (float) sr / (1.57f * f / q)));
+    const float level = (s.ending ? s.endLevel : s.ampTarget) * 0.12f * 0.5f * norm * 1.73f;
+    for (int i = 0; i < n; ++i)
+    {
+        const float t = (float) (i + 1) / (float) n;
+        const float in = s.rng.uni() * 2.0f - 1.0f;
+        const float v3 = in - s.nz2;
+        const float v1 = c1 * s.nz1 + c2 * v3;
+        const float v2 = s.nz2 + c2 * s.nz1 + c3 * v3;
+        s.nz1 = 2.0f * v1 - s.nz1;
+        s.nz2 = 2.0f * v2 - s.nz2;
+        x[i] += k * v1 * level * (a0.noise + (a1.noise - a0.noise) * t);
+    }
+}
+
+void ChoirEngine::setSingerVowel (Singer& s, VocalType vt)
+{
+    const float shift = std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f);
+    s.vowel.setFormants (getFormants (vowelForVocalType (vt), formantSection (s.section)), singerFormant (s) * ens.tract * shift);
+    s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre(), params.a4), style.softness);
+}
+
 void ChoirEngine::refreshVowelFormants()
 {
     const VocalType vt = params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType;
@@ -724,6 +816,7 @@ void ChoirEngine::refreshVowelFormants()
         Singer& s = *sp;
         s.vowel.setFormants (getFormants (v, formantSection (s.section)), singerFormant (s) * ens.tract * shift);
         s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre(), params.a4), style.softness);
+        s.vowelOverride = -1;
     }
 }
 
@@ -768,6 +861,9 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
         else if (leadVoice != 1 && leadCentre > 62.0f) leadVoice = 1;
         else if (leadVoice < 0) leadVoice = leadCentre < 60.0f ? 0 : 1;
     }
+
+    for (int s = 0; s < NumSections; ++s)
+        cf.syllable[(size_t) s] = lyrics == nullptr ? -1 : (params.midiParts ? partSyllable[(size_t) s] : chordSyllable);
 
     const bool frozen = params.freeze;
     if (scoreSource != nullptr)
@@ -1006,6 +1102,34 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
     // Recorded voices already have their own vibrato: add only a touch on top. They also sing
     // their own slides between notes, so they get the note without the glide, and every new
     // note (or a note sung again after a gap) is counted.
+    // Typed words: a new syllable starts with its consonants; letting go of the note sings the
+    // ones that close it. The words carry on until a voice comes in.
+    const int syl = lyrics != nullptr && cf.syllable[(size_t) sec] >= 0 && (cf.midiInstrument || (s.syllable >= 0 && ! cf.voiced))
+                        ? cf.syllable[(size_t) sec] : -1;
+    if (syl != s.syllable)
+    {
+        s.syllable = syl;
+        s.sylAge = 0.0f;
+        s.ending = false;
+    }
+    else
+    {
+        s.sylAge += dt;
+    }
+    if (s.syllable >= 0)
+    {
+        if (singing)
+            s.ending = false;
+        else if (! s.ending && s.wasSinging)
+        {
+            s.ending = true;
+            s.endAge = 0.0f;
+            s.endLevel = s.amp;
+        }
+        else if (s.ending)
+            s.endAge += dt;
+    }
+
     auto& sn = s.sampleNote;
     sn.hz = s.synthF0 * std::exp2 (-0.75f * (followLead ? vib * 0.35f : vib) / 12.0f);
     sn.noteHz = sn.hz * std::exp2 ((s.targetMidi - s.currentMidi - s.scoop) / 12.0f);
@@ -1044,6 +1168,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         if (outR != nullptr) std::memset (outR, 0, sizeof (float) * (size_t) n);
         return;
     }
+    midiClock += n;
 
     if (const int seed = pendingKeySeed.exchange (-1); seed >= 0)
     {
@@ -1264,7 +1389,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             const float fadeEnd = s.fade;
 
             std::fill (scratch.begin(), scratch.begin() + c, 0.0f);
-            if (words && ! cf.midiInstrument)
+            if (words && ! cf.midiInstrument && s.syllable < 0)
             {
                 s.psola.render (analyzer, tSinger, c, scratch.data(), s.pctl, s.rng);
                 const float gateTarget = cf.sounding && ! silent ? 1.0f : 0.0f;
@@ -1287,15 +1412,48 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                     ampBuf[i] = s.amp;
                     peakAmp = std::max (peakAmp, s.amp);
                 }
-                if (sampleLayers[(size_t) s.section] != nullptr)
+
+                // Typed words: this syllable's vowel, shaped by its consonants.
+                const LyricScript::Entry* entry = s.syllable >= 0 && lyrics != nullptr
+                                                      ? &lyrics->entries[(size_t) (s.syllable % (int) lyrics->entries.size())] : nullptr;
+                Articulation a0, a1;
+                const SampleLayer* layer = sampleLayers[(size_t) s.section];
+                if (entry != nullptr)
+                {
+                    const float age = s.ending ? s.endAge : s.sylAge;
+                    a0 = LyricScript::at (*entry, age, s.ending);
+                    a1 = LyricScript::at (*entry, age + dt, s.ending);
+                    if (sampleSet != nullptr)
+                        layer = sampleSet->layerFor (formantSection (s.section), entry->vowel, params.singing);
+                    if (s.vowelOverride != (int) entry->vowel)
+                    {
+                        setSingerVowel (s, entry->vowel);
+                        s.vowelOverride = (int) entry->vowel;
+                    }
+                    peakAmp = 0.0f;
+                    for (int i = 0; i < c; ++i)
+                    {
+                        ampBuf[i] *= a0.vowel + (a1.vowel - a0.vowel) * (float) (i + 1) / (float) c;
+                        peakAmp = std::max (peakAmp, ampBuf[i]);
+                    }
+                }
+                else if (s.vowelOverride >= 0)
+                {
+                    setSingerVowel (s, params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType);
+                    s.vowelOverride = -1;
+                }
+
+                if (layer != nullptr)
                 {
                     // Recorded choir voices.
-                    s.sampler.render (*sampleLayers[(size_t) s.section], s.sampleNote, ampBuf, scratch.data(), c, sr, s.index, s.rJitter, ens.zoneOffset);
+                    s.sampler.render (*layer, s.sampleNote, ampBuf, scratch.data(), c, sr, s.index, s.rJitter, ens.zoneOffset);
                     for (int i = 0; i < c; ++i)
                         scratch[(size_t) i] *= kSampleGain;
                 }
                 else if (peakAmp > 1.0e-4f)
                     s.vowel.render (glottal, s.synthF0, style.softness, breath, s.rng, ampBuf, scratch.data(), c);
+                if (entry != nullptr)
+                    articulate (s, a0, a1, scratch.data(), c);
                 s.gate = 0.0f;
             }
 
@@ -1475,6 +1633,8 @@ void ChoirEngine::publishSnapshot()
     const std::string& name = harmonizer.getChord().name;
     std::snprintf (snap.chordName, sizeof (snap.chordName), "%s", scoreSource != nullptr ? "" : name.c_str());
     snap.frozen = params.freeze;
+    snap.lyricIndex = lyrics != nullptr && cf.midiInstrument && cf.syllable[0] >= 0
+                          ? cf.syllable[0] % (int) lyrics->entries.size() : -1;
     snap.bandHeard = bandDetector.hearing();
     const Chord* band = bandDetector.hearing() ? bandDetector.chord() : nullptr;
     snap.followingBand = band != nullptr && params.followBand && scoreSource == nullptr;
