@@ -465,10 +465,10 @@
   // Browser preview only: a panel under the plugin window to hear audio rendered by the engine.
   function buildDemoPlayer() {
     if (SC.isPlugin || $("previewPanel")) return;
-    const demos = [["demo-input.mp3", "Solo voice"], ["demo-ah.mp3", "Sacred choir \u00b7 Ah"], ["demo-gospel.mp3", "Gospel choir \u00b7 Words"]];
+    const demos = [["demo-input.mp3", "Solo voice"], ["demo-ah.mp3", "Recorded choir \u00b7 Ah"], ["demo-gospel.mp3", "Gospel choir \u00b7 Words"]];
     const panel = document.createElement("div");
     panel.id = "previewPanel";
-    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir.</div>';
+    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
     const row = panel.querySelector(".pp-demos");
     const audio = new Audio();
     audio.preload = "none";
