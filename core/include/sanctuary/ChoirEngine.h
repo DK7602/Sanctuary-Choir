@@ -187,7 +187,6 @@ private:
 
     NoteSet midiHeld;
     float midiVelocity = 0.0f;
-    int64_t lastMidiTime = 0;
 
     // Lead (dry) delay so it lines up with the choir.
     std::vector<float> leadDelayL, leadDelayR;

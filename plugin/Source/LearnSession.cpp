@@ -1,6 +1,9 @@
 #include "LearnSession.h"
 
 #include <mutex>
+#include <cstdlib>
+#include <cstring>
+#include <thread>
 
 namespace sanctuary
 {

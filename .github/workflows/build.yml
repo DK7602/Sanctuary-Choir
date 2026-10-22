@@ -1,0 +1,133 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-15
+            cmake_args: -G Ninja "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          - name: Windows
+            os: windows-2022
+            cmake_args: -DJUCE_WEBVIEW2_PACKAGE_LOCATION=C:/webview2
+          - name: Linux
+            os: ubuntu-24.04
+            cmake_args: -G Ninja
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build xvfb \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk libcurl4-openssl-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev libxcursor-dev \
+            libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libxi-dev libegl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libglu1-mesa-dev mesa-common-dev
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Install WebView2 SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: nuget install Microsoft.Web.WebView2 -OutputDirectory C:/webview2 -NonInteractive
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/juce-src
+          key: juce-9.0.4-${{ runner.os }}
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_args }}
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Unit tests
+        shell: bash
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Validate plugin (pluginval)
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   PV=pluginval_Linux.zip ;;
+            macOS)   PV=pluginval_macOS.zip ;;
+            Windows) PV=pluginval_Windows.zip ;;
+          esac
+          curl -sSfL -o pv.zip "https://github.com/Tracktion/pluginval/releases/latest/download/$PV"
+          mkdir -p pv && (cd pv && cmake -E tar xf ../pv.zip)
+          VST3=$(find build -type d -name "Sanctuary Choir.vst3" -path "*VST3*" | head -n 1)
+          case "$RUNNER_OS" in
+            Linux)   xvfb-run -a ./pv/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --validate "$VST3" ;;
+            macOS)   ./pv/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --validate "$VST3" ;;
+            Windows) ./pv/pluginval.exe --strictness-level 5 --skip-gui-tests --validate-in-process --validate "$VST3" ;;
+          esac
+
+      - name: Package
+        shell: bash
+        run: |
+          OUT="Sanctuary-Choir-${{ matrix.name }}"
+          mkdir -p "dist/$OUT"
+          ART=$(find build -type d -name "SanctuaryChoir_artefacts" | head -n 1)
+          REL="$ART/Release"
+          cp -R "$REL/VST3/Sanctuary Choir.vst3" "dist/$OUT/"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cp -R "$REL/AU/Sanctuary Choir.component" "dist/$OUT/"
+            cp -R "$REL/Standalone/Sanctuary Choir.app" "dist/$OUT/"
+            # Ad-hoc signature so the bundles load on Apple Silicon.
+            for b in "dist/$OUT/"*; do codesign --force --deep --sign - "$b"; done
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            cp "$REL/Standalone/Sanctuary Choir.exe" "dist/$OUT/"
+          else
+            cp "$REL/Standalone/Sanctuary Choir" "dist/$OUT/"
+            [ -d "$REL/LV2/Sanctuary Choir.lv2" ] && cp -R "$REL/LV2/Sanctuary Choir.lv2" "dist/$OUT/"
+          fi
+          cp packaging/INSTALL-${{ matrix.name }}.txt "dist/$OUT/INSTALL.txt"
+          cd dist && cmake -E tar cf "$OUT.zip" --format=zip "$OUT"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sanctuary-Choir-${{ matrix.name }}
+          path: dist/Sanctuary-Choir-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true

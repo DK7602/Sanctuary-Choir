@@ -1,6 +1,8 @@
 #include "sanctuary/Theory.h"
 
 #include <limits>
+#include <algorithm>
+#include <functional>
 
 namespace sc
 {

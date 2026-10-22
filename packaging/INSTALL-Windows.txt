@@ -1,0 +1,13 @@
+Sanctuary Choir for Windows (64-bit)
+====================================
+
+1. Copy "Sanctuary Choir.vst3" (the whole folder) to:
+     C:\Program Files\Common Files\VST3\
+
+2. Restart your DAW and rescan plug-ins. Load Sanctuary Choir as an effect on a vocal track.
+
+3. "Sanctuary Choir.exe" is a standalone version: open it, choose your microphone under
+   Options > Audio/MIDI Settings, and sing (use headphones to avoid feedback).
+
+The interface uses Microsoft Edge WebView2, which is built into Windows 10 and 11.
+If the window stays blank, install the "WebView2 Runtime" from Microsoft.

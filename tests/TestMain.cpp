@@ -6,6 +6,9 @@
 #include <sanctuary/Learn.h>
 
 #include <chrono>
+#include <algorithm>
+#include <cstdlib>
+#include <string>
 #include <complex>
 #include <cstdio>
 #include <functional>

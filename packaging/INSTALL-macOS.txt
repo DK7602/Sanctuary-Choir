@@ -1,0 +1,19 @@
+Sanctuary Choir for macOS (Apple Silicon and Intel)
+====================================================
+
+1. Copy the plug-ins:
+     Sanctuary Choir.vst3       ->  /Library/Audio/Plug-Ins/VST3/        (or ~/Library/Audio/Plug-Ins/VST3/)
+     Sanctuary Choir.component  ->  /Library/Audio/Plug-Ins/Components/  (or ~/Library/Audio/Plug-Ins/Components/)
+   Sanctuary Choir.app is a standalone version you can open directly.
+
+2. These builds are not notarised yet, so macOS may block them the first time.
+   Open Terminal and run (adjust the paths if you used the user folders):
+     sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/Sanctuary Choir.vst3"
+     sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/Components/Sanctuary Choir.component"
+     xattr -dr com.apple.quarantine "Sanctuary Choir.app"
+
+3. Restart your DAW and rescan plug-ins. In Logic Pro the plug-in appears under
+   Audio Units > Sanctuary Audio > Sanctuary Choir (it is an AU "MIDI-controlled effect",
+   so you can also send it MIDI chords).
+
+Put it on a vocal track and sing. Press LEARN while your track plays for the smartest harmony.

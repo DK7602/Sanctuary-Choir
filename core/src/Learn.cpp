@@ -1,6 +1,9 @@
 #include "sanctuary/Learn.h"
 
 #include <cstring>
+#include <cctype>
+#include <chrono>
+#include <cstdio>
 #include <limits>
 #include <thread>
 

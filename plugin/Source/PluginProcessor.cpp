@@ -254,6 +254,21 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
     {
         auto tree = ValueTree::fromXml (*xml);
         state.replaceState (tree);
+
+        // replaceState skips parameters whose denormalised value looks unchanged, which can
+        // leave e.g. a bool sitting at a raw 0.49. Push every stored value explicitly.
+        for (auto* p : getParameters())
+        {
+            if (auto* rp = dynamic_cast<RangedAudioParameter*> (p))
+            {
+                const auto stored = tree.getChildWithProperty ("id", rp->getParameterID()).getProperty ("value");
+                if (stored.isVoid())
+                    continue;
+                const float normalised = rp->convertTo0to1 ((float) stored);
+                if (std::abs (rp->getValue() - normalised) > 1.0e-6f)
+                    rp->setValueNotifyingHost (normalised);
+            }
+        }
         presets.setCurrentByName (tree.getProperty ("preset").toString());
         uiTab = tree.getProperty ("uiTab", "perform").toString();
         editorWidth = tree.getProperty ("editorWidth", 0);

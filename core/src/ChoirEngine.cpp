@@ -1,6 +1,7 @@
 #include "sanctuary/ChoirEngine.h"
 
 #include <cstring>
+#include <cstdio>
 
 namespace sc
 {
