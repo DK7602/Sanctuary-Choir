@@ -58,7 +58,9 @@
 Every push builds the plug-in on GitHub Actions for **macOS (universal), Windows and Linux**:
 1. Open the repository's **Actions** tab and pick the latest green **Build** run.
 2. Download `Sanctuary-Choir-macOS`, `Sanctuary-Choir-Windows` or `Sanctuary-Choir-Linux` under *Artifacts*.
-3. Follow the `INSTALL.txt` inside the zip.
+3. Run the installer inside the zip (`Sanctuary Choir Setup.exe` on Windows, `Sanctuary Choir.pkg` on Mac) or follow `INSTALL.txt`.
+
+New here? Read the [user guide](docs/USER_GUIDE.md).
 
 Pushing a tag such as `v1.0.0` also publishes the zips as a GitHub Release.
 
