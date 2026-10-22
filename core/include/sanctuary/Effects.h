@@ -23,8 +23,9 @@ public:
 
         bool operator== (const Settings& o) const
         {
-            return venue == o.venue && decayScale == o.decayScale && preDelayMs == o.preDelayMs
-                && brightness == o.brightness && early == o.early && width == o.width;
+            auto same = [] (float a, float b) { return std::abs (a - b) < 1.0e-6f; };
+            return venue == o.venue && same (decayScale, o.decayScale) && same (preDelayMs, o.preDelayMs)
+                && same (brightness, o.brightness) && same (early, o.early) && same (width, o.width);
         }
     };
 
