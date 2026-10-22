@@ -44,6 +44,8 @@
       choice("vocalType", "Vocal Type", ["Ah (Vowels)", "Oh (Vowels)", "Oo (Vowels)", "Ee (Vowels)", "Eh (Vowels)", "Mm (Hum)", "Words (Your Voice)"]),
       bool("freeze", "Freeze"),
       choice("response", "Response", ["With Me", "Echo (Right After)"]),
+      choice("ensemble", "Ensemble", ["Choir", "Children", "Gang Vocals", "Congregation"]),
+      choice("scene", "Scene", ["None", "Scene 1", "Scene 2", "Scene 3", "Scene 4", "Scene 5", "Scene 6", "Scene 7", "Scene 8"]),
     ];
     const ranges = [[60, 81], [53, 74], [48, 69], [40, 64]];
     ["sop", "alt", "ten", "bas"].forEach((p, i) => {
@@ -65,23 +67,95 @@
       { id: "lowCut", name: "Low Cut", type: "float", min: 20, max: 400, interval: 1, skew: 0.5, default: 70, label: "Hz" },
       { id: "highCut", name: "High Cut", type: "float", min: 3000, max: 20000, interval: 10, skew: 0.5, default: 18000, label: "Hz" },
       pct("warmth", "Warmth", 0), pct("glue", "Glue", 25),
+      choice("rhythmPattern", "Rhythm", ["Off", "Pulse 1/4", "Pulse 1/8", "Pulse 1/16", "Offbeats", "Dotted", "Gallop", "Syncopated", "Stutter",
+        "Trance Gate", "Heartbeat", "Arp Up", "Arp Down", "Arp Bounce", "Call & Answer"]),
+      choice("rhythmRate", "Rhythm Rate", ["1/8", "1/16", "1/32"], 1),
+      { id: "rhythmLength", name: "Rhythm Length", type: "float", min: 5, max: 100, interval: 1, skew: 1, default: 60, label: "%" },
+      pct("rhythmDepth", "Rhythm Depth", 100),
+      choice("rhythmSections", "Rhythm Sections", ["Whole Choir", "Sopranos & Altos", "Tenors & Basses"]),
       bool("midiEnabled", "MIDI Control", true),
+      bool("midiParts", "MIDI Parts (Ch 1-4)", false),
       { id: "tuning", name: "Tuning (A4)", type: "float", min: 415, max: 466, interval: 0.1, skew: 1, default: 440, label: "Hz" },
       choice("latencyMode", "Monitoring", ["Studio (aligned)", "Live (low latency)"])
     );
     const values = {};
     defs.forEach((d) => { values[d.id] = d.default; d.value = d.default; });
 
-    const presets = ["Heavenly Praise", "Cathedral Hymn", "Sunday Gospel", "Gregorian Chant", "Angelic Voices", "Men of Praise",
-      "Epic Cinematic", "Worship Night", "Christmas Carols", "Chamber Choir", "Midnight Hum", "Spiritual Echoes", "Unison Anthem", "Heavenly Drone", "Call & Response"]
-      .map((name) => ({ name, factory: true }));
+    // Same list as the plugin's factory presets (plugin/Source/Presets.cpp).
+    const presets = [
+      ["Sacred & Classical", "Heavenly Praise"],
+      ["Sacred & Classical", "Cathedral Hymn"],
+      ["Sacred & Classical", "Angelic Voices"],
+      ["Sacred & Classical", "Gregorian Chant"],
+      ["Sacred & Classical", "Christmas Carols"],
+      ["Sacred & Classical", "Chamber Choir"],
+      ["Sacred & Classical", "Evensong"],
+      ["Sacred & Classical", "Requiem"],
+      ["Sacred & Classical", "Renaissance Motet"],
+      ["Sacred & Classical", "Psalm Tone"],
+      ["Worship", "Worship Night"],
+      ["Worship", "Men of Praise"],
+      ["Worship", "Unison Anthem"],
+      ["Worship", "Big Room Worship"],
+      ["Worship", "Altar Call"],
+      ["Worship", "Prayer Room"],
+      ["Worship", "Worship Pad"],
+      ["Worship", "Bridge Swell"],
+      ["Gospel", "Sunday Gospel"],
+      ["Gospel", "Call & Response"],
+      ["Gospel", "Spiritual Echoes"],
+      ["Gospel", "Mass Choir"],
+      ["Gospel", "Praise Break"],
+      ["Gospel", "Gospel Quartet"],
+      ["Gospel", "Sweet Hour"],
+      ["Gospel", "Lining Out"],
+      ["Cinematic", "Epic Cinematic"],
+      ["Cinematic", "Dark Ritual"],
+      ["Cinematic", "Ethereal Rise"],
+      ["Cinematic", "Battle Hymn"],
+      ["Cinematic", "Heroes Unison"],
+      ["Cinematic", "Mystery"],
+      ["Cinematic", "Trailer Hits"],
+      ["Pop & Backing", "Backing Stack"],
+      ["Pop & Backing", "Pop Doubles"],
+      ["Pop & Backing", "Oohs & Aahs"],
+      ["Pop & Backing", "Soul Harmonies"],
+      ["Pop & Backing", "R&B Stack"],
+      ["Pop & Backing", "Wide Octaves"],
+      ["Pads & Drones", "Midnight Hum"],
+      ["Pads & Drones", "Heavenly Drone"],
+      ["Pads & Drones", "Endless Ah"],
+      ["Pads & Drones", "Choir Pad"],
+      ["Pads & Drones", "Warm Hum"],
+      ["Pads & Drones", "Shimmer Pad"],
+      ["Rhythmic", "Pulse Choir"],
+      ["Rhythmic", "Trance Gate"],
+      ["Rhythmic", "Choir Arpeggio"],
+      ["Rhythmic", "Bouncing Arp"],
+      ["Rhythmic", "Stutter Gospel"],
+      ["Rhythmic", "Offbeat Choir"],
+      ["Rhythmic", "Heartbeat"],
+      ["Rhythmic", "Upper & Lower"],
+      ["Rhythmic", "Galloping Choir"],
+      ["Rhythmic", "Dotted Echoes"],
+      ["Kids & Crowds", "Children's Choir"],
+      ["Kids & Crowds", "Kids Christmas"],
+      ["Kids & Crowds", "School Assembly"],
+      ["Kids & Crowds", "Angel Children"],
+      ["Kids & Crowds", "Gang Vocals"],
+      ["Kids & Crowds", "Stadium Chant"],
+      ["Kids & Crowds", "Hey! Shouts"],
+      ["Kids & Crowds", "Congregation"],
+      ["Kids & Crowds", "Church Sing-Along"],
+    ].map(([category, name]) => ({ name, category, factory: true }));
     let presetIndex = 0;
     const learn = { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", progress: 0, hasTake: false, hasStems: false, stale: false, previewing: false };
     let learnTimer = null;
 
     const voices = { loading: false, name: "Sanctuary Voices", text: "4 SECTIONS \u00b7 5 VOWELS \u00b7 753 NOTES", error: "", bundled: true, usingBundled: true };
+    const scenes = [true, true, false, false, false, false, false, false];
     function status() {
-      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices) });
+      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices), scenes: scenes.slice() });
     }
     function setParam(id, v) {
       values[id] = v;
@@ -183,7 +257,10 @@
           case "presetLoad": presetIndex = msg.index; status(); break;
           case "presetNext": presetIndex = (presetIndex + 1) % presets.length; status(); break;
           case "presetPrev": presetIndex = (presetIndex - 1 + presets.length) % presets.length; status(); break;
-          case "presetSave": presets.push({ name: msg.value, factory: false }); presetIndex = presets.length - 1; status(); emit("toast", { text: "Saved preset \"" + msg.value + "\"" }); break;
+          case "sceneStore": scenes[msg.index] = true; status(); emit("toast", { text: "Scene " + (msg.index + 1) + " stored" }); break;
+          case "sceneClear": scenes[msg.index] = false; status(); break;
+          case "sceneRecall": setParam("scene", msg.index + 1); break;
+          case "presetSave": presets.push({ name: msg.value, factory: false, category: "My Presets" }); presetIndex = presets.length - 1; status(); emit("toast", { text: "Saved preset \"" + msg.value + "\"" }); break;
           case "presetDelete": presets.splice(msg.index, 1); presetIndex = 0; status(); break;
           case "resetParam": { const d = defs.find((x) => x.id === msg.id); if (d) setParam(d.id, d.default); break; }
           default: break;

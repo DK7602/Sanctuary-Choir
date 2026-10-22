@@ -56,7 +56,12 @@
 - **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
 - **Chord Speed** and a one-click **key lock** for the detected key.
 - **Stem export**: Sopranos, Altos, Tenors, Basses, Room and Full Choir as 24-bit WAVs.
-- **15 factory presets** (Heavenly Praise, Cathedral Hymn, Sunday Gospel, Gregorian Chant, Angelic Voices, Epic Cinematic…) plus your own.
+- **Ensemble**: an adult choir, a children's choir (every part sung by trebles), shouted gang vocals, or a whole congregation.
+- **Rhythm** (FX page): tempo-synced gates and section arpeggios that follow your DAW: pulses, offbeats, gallops, trance gates, Arp Up/Down/Bounce and Call & Answer.
+- **Key changes**: LEARN follows a song that modulates (G MAJOR → A MAJOR) and harmonises each part in its own key.
+- **MIDI parts and Program Change**: channels 1–4 sing exactly the soprano, alto, tenor and bass notes you write; Program Change picks a preset.
+- **Scenes**: 8 stored sounds per song (verse, chorus, bridge), recalled with a click or by automating the Scene parameter.
+- **64 factory presets** in 8 categories (Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, Kids & Crowds) plus your own.
 
 ## Download
 

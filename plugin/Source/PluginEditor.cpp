@@ -225,6 +225,7 @@ void SanctuaryEditor::sendStatus()
     o->setProperty ("presetName", presets.getCurrentName());
     o->setProperty ("monoOutput", processor.getTotalNumOutputChannels() < 2);
     o->setProperty ("voices", processor.getVoices().getStatus());
+    o->setProperty ("scenes", processor.getSceneSlots());
     addLatencyInfo (*o);
     web->emitEventIfBrowserIsVisible ("status", var (o.release()));
 }
@@ -401,6 +402,30 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
         auto folder = PresetManager::getUserPresetFolder();
         folder.createDirectory();
         folder.revealToUser();
+    }
+    else if (name == "sceneStore" || name == "sceneRecall" || name == "sceneClear")
+    {
+        const int slot = (int) message.getProperty ("index", -1);
+        if (name == "sceneStore")
+        {
+            processor.storeScene (slot);
+            toast ("Scene " + String (slot + 1) + " stored");
+        }
+        else if (name == "sceneClear")
+        {
+            processor.clearScene (slot);
+        }
+        else
+        {
+            // Through the Scene parameter, so the host can record it as automation.
+            if (auto* p = processor.getState().getParameter (ParamIDs::scene))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) (slot + 1)));
+                p->endChangeGesture();
+            }
+            processor.recallScene (slot);
+        }
     }
     else if (name == "tab")
         processor.uiTab = message.getProperty ("value", "perform").toString();

@@ -54,6 +54,7 @@ To re-pitch your voice, the choir has to hear a little of it first, so it runs a
 2. Press play in your DAW. Sanctuary records your vocal track as it plays ("LEARNING 0:12").
 3. Press **LEARN** again, or stop the DAW. Sanctuary studies the whole take: every note, the key, and where each phrase starts and ends. The plaque shows something like *LEARNED 0:43 · G MAJOR · 4 PHRASES · 105 NOTES*.
    - From now on, when the song plays, the choir uses this smarter harmony. It sees each phrase in advance, lands cadences on the right chord, and keeps the voices moving smoothly.
+   - If the song changes key, for example a last chorus a step up, Sanctuary follows it: the plaque shows *G MAJOR → A MAJOR*. One phrase with a few odd notes doesn't count as a key change. Choosing a Key yourself turns this off.
 4. Press **RENDER** to sing every voice at the highest quality. Playback then uses the rendered choir, in sync with your song, and costs almost no CPU.
    - If you later change the harmony or choir settings, RENDER glows again. Press it to update.
    - You can press **RENDER** while still learning: Sanctuary finishes the take, studies it, then renders it.
@@ -68,11 +69,25 @@ The learned take is saved inside your project. If you reopen the project at anot
 
 ## 5. More things to try
 
-- **Presets** change the choir's sound, not your song: the Key and Scale you set stay as they are.
+- **Presets** (top left) come in categories: Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, and Kids & Crowds. Point at a category to see its presets. Presets change the choir's sound, not your song: the Key and Scale you set stay as they are.
+- **Ensemble** (MIX page) chooses who sings:
+  - **Choir**: an adult choir.
+  - **Children**: light, straight voices; every part is sung by trebles.
+  - **Gang**: shouted gang vocals, punchy and loose with no vibrato. Try it with Unison and Words.
+  - **Congregation**: untrained voices, wide tuning and late entrances, like a church full of people.
+- **Rhythm** (FX page) gates the choir in time with your song, following your DAW's tempo:
+  - **Pulses, Offbeats, Dotted, Gallop, Stutter and Trance Gate** chop the whole choir, or only the upper or lower sections (SECTIONS).
+  - **Arp Up, Arp Down and Arp Bounce** pass the chord from section to section, like an arpeggio.
+  - **Call & Answer**: the upper voices sing the first half of the bar, the lower voices the second.
+  - **RATE** sets the speed (1/8, 1/16 or 1/32), **LENGTH** how long each note lasts, and **DEPTH** how far the gate closes.
+  - Rendered takes play the rhythm live. Exported stems are without it.
+- **Scenes** (Settings page) store up to 8 sounds per song, such as verse, chorus and bridge. Press **STORE**, then a slot. Click a slot to bring it back, or automate the **Scene** parameter in your DAW so the choir changes with the song.
 - **FREEZE**: hold a big final chord, then keep it ringing while you sing over it.
 - **Chord Speed** (MIX page) sets how often the choir changes chord. Turn it down and quick passing notes ride over one chord, like a real choir; turn it up and every note gets its own chord.
 - **Response: Echo** (MIX page, or the *Call & Response* preset): the choir answers each phrase right after you sing it.
 - **MIDI chords**: hold chords on a keyboard to decide the harmony yourself. With no voice coming in, the choir becomes an instrument you can play.
+- **MIDI parts** (Settings → *Parts on channels 1–4*): write each part yourself. Notes on channel 1 are sung by the sopranos, channel 2 the altos, channel 3 the tenors and channel 4 the basses. Other channels still work as chords.
+- **Program Change** messages pick a preset by its number in the list, so a MIDI controller or a DAW track can switch sounds.
 - **Section panels**:
   - Click a singer icon to mute that section; double-click to solo it.
   - Drag a keyboard to change that section's range.

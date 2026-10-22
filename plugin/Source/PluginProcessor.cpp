@@ -64,8 +64,8 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     bypassPos = 0;
     learn.prepare (sampleRate);
     engineWritten = 0;
-    heldVelocity.fill (0.0f);
-    sustained.fill (false);
+    for (auto& ch : heldVelocity) ch.fill (0.0f);
+    for (auto& ch : sustained) ch.fill (false);
     sustain = false;
 }
 
@@ -74,15 +74,20 @@ void SanctuaryProcessor::updateMidi (const MidiBuffer& midi)
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
+        const int ch = m.getChannel() - 1;
+        if (ch < 0 || ch > 15)
+            continue;
+        auto& held = heldVelocity[(size_t) ch];
+        auto& sus = sustained[(size_t) ch];
         if (m.isNoteOn())
         {
-            heldVelocity[(size_t) m.getNoteNumber()] = m.getFloatVelocity();
-            sustained[(size_t) m.getNoteNumber()] = false;
+            held[(size_t) m.getNoteNumber()] = m.getFloatVelocity();
+            sus[(size_t) m.getNoteNumber()] = false;
         }
         else if (m.isNoteOff())
         {
-            if (sustain) sustained[(size_t) m.getNoteNumber()] = true;
-            else heldVelocity[(size_t) m.getNoteNumber()] = 0.0f;
+            if (sustain) sus[(size_t) m.getNoteNumber()] = true;
+            else held[(size_t) m.getNoteNumber()] = 0.0f;
         }
         else if (m.isSustainPedalOn())
         {
@@ -91,13 +96,19 @@ void SanctuaryProcessor::updateMidi (const MidiBuffer& midi)
         else if (m.isSustainPedalOff())
         {
             sustain = false;
-            for (int n = 0; n < 128; ++n)
-                if (sustained[(size_t) n]) { sustained[(size_t) n] = false; heldVelocity[(size_t) n] = 0.0f; }
+            for (size_t c = 0; c < 16; ++c)
+                for (size_t n = 0; n < 128; ++n)
+                    if (sustained[c][n]) { sustained[c][n] = false; heldVelocity[c][n] = 0.0f; }
         }
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {
-            heldVelocity.fill (0.0f);
-            sustained.fill (false);
+            held.fill (0.0f);
+            sus.fill (false);
+        }
+        else if (m.isProgramChange())
+        {
+            pendingProgram.store (m.getProgramChangeNumber());
+            triggerAsyncUpdate();
         }
     }
 }
@@ -115,17 +126,34 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     const sc::EngineParams p = currentParams();
     engine.setParams (p);
 
+    // Chords from any channel; in Parts mode channels 1-4 are the four sections instead.
     sc::NoteSet held;
-    float velocity = 0.0f;
+    std::array<sc::NoteSet, sc::NumSections> parts;
+    float velocity = 0.0f, partsVelocity = 0.0f;
     for (int note = 0; note < 128; ++note)
     {
-        if (heldVelocity[(size_t) note] > 0.0f)
+        bool inChord = false;
+        for (int ch = 0; ch < 16; ++ch)
         {
-            held.add (note);
-            velocity = std::max (velocity, heldVelocity[(size_t) note]);
+            const float v = heldVelocity[(size_t) ch][(size_t) note];
+            if (v <= 0.0f)
+                continue;
+            if (p.midiParts && ch < sc::NumSections)
+            {
+                parts[(size_t) ch].add (note);
+                partsVelocity = std::max (partsVelocity, v);
+            }
+            else
+            {
+                inChord = true;
+                velocity = std::max (velocity, v);
+            }
         }
+        if (inChord)
+            held.add (note);
     }
     engine.setMidi (held, velocity);
+    engine.setMidiParts (parts, partsVelocity);
 
     LearnSession::BlockInfo info;
     if (auto* ph = getPlayHead())
@@ -138,7 +166,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
                 info.hasPosition = true;
                 info.hostPosition = *t;
             }
-            // The song's tempo and beat, so the singers can move with it.
+            // The song's tempo and beat, so the singers (and the rhythm effects) move with it.
             const auto bpm = pos->getBpm();
             const auto ppq = pos->getPpqPosition();
             if (info.hostPlaying && bpm.hasValue() && ppq.hasValue() && *bpm > 20.0 && *bpm < 400.0)
@@ -146,10 +174,12 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
                 songBeat.store (*ppq, std::memory_order_relaxed);
                 songBeatTime.store (Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
                 songBpm.store (*bpm, std::memory_order_release);
+                engine.setTransport (true, *bpm, *ppq);
             }
             else
             {
                 songBpm.store (0.0, std::memory_order_relaxed);
+                engine.setTransport (false, bpm.hasValue() ? *bpm : 0.0, 0.0);
             }
         }
     }
@@ -259,6 +289,11 @@ void SanctuaryProcessor::parameterChanged (const String& id, float)
     const int idx = paramIds.indexOf (id);
     if (idx >= 0)
         dirty[(size_t) idx].store (true, std::memory_order_relaxed);
+    if (id == ParamIDs::scene)
+    {
+        sceneDirty = true;
+        triggerAsyncUpdate();
+    }
     if (affectsHarmony (id))
         harmonyDirty = true;
     else if (affectsRender (id))
@@ -272,6 +307,77 @@ StringArray SanctuaryProcessor::takeChangedParameters()
         if (dirty[i].exchange (false, std::memory_order_relaxed))
             changed.add (paramIds[(int) i]);
     return changed;
+}
+
+void SanctuaryProcessor::handleAsyncUpdate()
+{
+    // MIDI Program Change selects a preset.
+    if (const int program = pendingProgram.exchange (-1); program >= 0 && program < (int) presets.getEntries().size())
+    {
+        presets.load (program);
+        ++statusVersion;
+    }
+    // The Scene parameter moved (automation or the UI): bring that scene back.
+    if (sceneDirty.exchange (false))
+    {
+        if (auto* p = state.getParameter (ParamIDs::scene))
+        {
+            const int slot = roundToInt (p->convertFrom0to1 (p->getValue())) - 1;
+            if (slot >= 0)
+                recallScene (slot);
+        }
+    }
+}
+
+void SanctuaryProcessor::storeScene (int slot)
+{
+    if (! isPositiveAndBelow (slot, kNumScenes))
+        return;
+    auto o = std::make_unique<DynamicObject>();
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<RangedAudioParameter*> (p))
+            if (PresetManager::isSoundParameter (rp->getParameterID()))
+                o->setProperty (rp->getParameterID(), rp->convertFrom0to1 (rp->getValue()));
+    scenes[(size_t) slot] = var (o.release());
+    ++statusVersion;
+}
+
+void SanctuaryProcessor::recallScene (int slot)
+{
+    if (! isPositiveAndBelow (slot, kNumScenes))
+        return;
+    if (auto* obj = scenes[(size_t) slot].getDynamicObject())
+    {
+        for (const auto& prop : obj->getProperties())
+        {
+            auto* rp = state.getParameter (prop.name.toString());
+            if (rp == nullptr || ! PresetManager::isSoundParameter (rp->getParameterID()))
+                continue;
+            const float v = rp->convertTo0to1 ((float) prop.value);
+            if (std::abs (rp->getValue() - v) < 1.0e-6f)
+                continue;
+            rp->beginChangeGesture();
+            rp->setValueNotifyingHost (v);
+            rp->endChangeGesture();
+        }
+    }
+    ++statusVersion;
+}
+
+void SanctuaryProcessor::clearScene (int slot)
+{
+    if (! isPositiveAndBelow (slot, kNumScenes))
+        return;
+    scenes[(size_t) slot] = var();
+    ++statusVersion;
+}
+
+var SanctuaryProcessor::getSceneSlots() const
+{
+    Array<var> slots;
+    for (const auto& s : scenes)
+        slots.add (s.isObject());
+    return slots;
 }
 
 void SanctuaryProcessor::timerCallback()
@@ -300,6 +406,13 @@ int SanctuaryProcessor::getNumPrograms() { return std::max (1, (int) presets.get
 int SanctuaryProcessor::getCurrentProgram() { return std::max (0, presets.getCurrentIndex()); }
 void SanctuaryProcessor::setCurrentProgram (int index)
 {
+    // Some hosts change programs from the audio thread: hand it to the message thread.
+    if (! MessageManager::existsAndIsCurrentThread())
+    {
+        pendingProgram.store (index);
+        triggerAsyncUpdate();
+        return;
+    }
     presets.load (index);
     ++statusVersion;
 }
@@ -320,6 +433,12 @@ void SanctuaryProcessor::getStateInformation (MemoryBlock& destData)
     tree.setProperty ("detectedKey", rememberedKey.load(), nullptr);   // Auto key starts right next time
     tree.setProperty ("voicesFolder", voices.getFolder().getFullPathName(), nullptr);
     tree.setProperty ("voicesBuiltIn", voices.userChoseBuiltIn(), nullptr);
+    {
+        Array<var> sceneList;
+        for (const auto& s : scenes)
+            sceneList.add (s);
+        tree.setProperty ("scenes", JSON::toString (var (sceneList), true), nullptr);
+    }
     std::unique_ptr<XmlElement> xml (tree.createXml());
 
     MemoryOutputStream out (destData, false);
@@ -387,6 +506,15 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             if (File (voicesFolder) != voices.getFolder())
                 voices.loadFolder (File (voicesFolder));
+        }
+        // Scenes come back with the project (restoring the Scene parameter must not recall one
+        // over the settings that were just restored).
+        {
+            const var sceneList = JSON::parse (tree.getProperty ("scenes", "").toString());
+            for (int i = 0; i < kNumScenes; ++i)
+                scenes[(size_t) i] = sceneList.isArray() && i < sceneList.size() && sceneList[i].isObject() ? sceneList[i] : var();
+            sceneDirty = false;
+            cancelPendingUpdate();
         }
         const int key = tree.getProperty ("detectedKey", -1);
         if (key >= 0 && key < 24)

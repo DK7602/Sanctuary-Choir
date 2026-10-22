@@ -12,7 +12,8 @@ namespace sanctuary
 {
 class SanctuaryProcessor : public juce::AudioProcessor,
                            private juce::AudioProcessorValueTreeState::Listener,
-                           private juce::Timer
+                           private juce::Timer,
+                           private juce::AsyncUpdater
 {
 public:
     SanctuaryProcessor();
@@ -70,9 +71,19 @@ public:
     juce::String uiTab { "perform" };
     int editorWidth = 0, editorHeight = 0;
 
+    // Scenes: snapshots of the sound in 8 slots, recalled from the UI or by automating the
+    // Scene parameter (verse / chorus / bridge). Message thread.
+    static constexpr int kNumScenes = 8;
+    void storeScene (int slot);
+    void recallScene (int slot);
+    void clearScene (int slot);
+    /** [true/false per slot] for the UI. */
+    juce::var getSceneSlots() const;
+
 private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void timerCallback() override;
+    void handleAsyncUpdate() override;
     void updateMidi (const juce::MidiBuffer& midi);
 
     juce::AudioProcessorValueTreeState state;
@@ -82,10 +93,14 @@ private:
     ChoirVoices voices;
     sc::ChoirEngine engine;
 
-    // MIDI state (audio thread)
-    std::array<float, 128> heldVelocity {};
+    // MIDI state (audio thread), per channel: in Parts mode channels 1-4 sing S, A, T and B.
+    std::array<std::array<float, 128>, 16> heldVelocity {};
+    std::array<std::array<bool, 128>, 16> sustained {};
     bool sustain = false;
-    std::array<bool, 128> sustained {};
+    std::atomic<int> pendingProgram { -1 };   // MIDI Program Change: load that preset (message thread)
+
+    std::array<juce::var, kNumScenes> scenes;   // { paramID: value } or void
+    std::atomic<bool> sceneDirty { false };
 
     // Change tracking for the UI and the learn session
     juce::StringArray paramIds;

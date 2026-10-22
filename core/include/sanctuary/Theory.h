@@ -127,5 +127,7 @@ int chooseOctaveShift (int melody, const SectionRange& range, float extraOctaveP
 /** Krumhansl-Kessler key estimation from a pitch-class duration histogram. */
 struct KeyEstimate { int tonic = 0; bool minor = false; float score = 0.0f; };
 KeyEstimate estimateKey (const std::array<float, 12>& histogram, bool restrictToMinor, bool restrictToMajor);
+/** How well a pitch-class histogram fits one key (higher is better; what estimateKey ranks by). */
+float keyFitness (const std::array<float, 12>& histogram, int tonic, bool minor);
 
 } // namespace sc

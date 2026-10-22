@@ -22,6 +22,8 @@ namespace ParamIDs
     inline constexpr const char* vocalType = "vocalType";
     inline constexpr const char* freeze = "freeze";
     inline constexpr const char* response = "response";
+    inline constexpr const char* ensemble = "ensemble";
+    inline constexpr const char* scene = "scene";
     // Mix
     inline constexpr const char* leadLevel = "leadLevel";
     inline constexpr const char* choirLevel = "choirLevel";
@@ -42,8 +44,14 @@ namespace ParamIDs
     inline constexpr const char* highCut = "highCut";
     inline constexpr const char* warmth = "warmth";
     inline constexpr const char* glue = "glue";
+    inline constexpr const char* rhythmPattern = "rhythmPattern";
+    inline constexpr const char* rhythmRate = "rhythmRate";
+    inline constexpr const char* rhythmLength = "rhythmLength";
+    inline constexpr const char* rhythmDepth = "rhythmDepth";
+    inline constexpr const char* rhythmSections = "rhythmSections";
     // Settings
     inline constexpr const char* midiEnabled = "midiEnabled";
+    inline constexpr const char* midiParts = "midiParts";
     inline constexpr const char* tuning = "tuning";
     inline constexpr const char* latencyMode = "latencyMode";
 }

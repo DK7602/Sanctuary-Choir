@@ -36,7 +36,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--synth-demo]\n", argv[0]);
         return 2;
     }
 
@@ -67,6 +67,8 @@ int main (int argc, char** argv)
         else if (a == "--lead") p.leadDb = std::stof (next());
         else if (a == "--stems") stemsDir = next();
         else if (a == "--voices") voicesDir = next();
+        else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
+        else if (a == "--rhythm") p.rhythmPattern = std::clamp (std::stoi (next()), 0, kNumRhythmPatterns - 1);
         else { std::fprintf (stderr, "unknown option %s\n", a.c_str()); return 2; }
     }
 
@@ -150,6 +152,13 @@ int main (int argc, char** argv)
         for (int c = 0; c < 2; ++c)
             for (int64_t i = 0; i < n && i < (int64_t) mix[(size_t) c].size(); ++i)
                 mix[(size_t) c][(size_t) i] += lead * in.channels[(size_t) std::min<int> (c, (int) in.channels.size() - 1)][(size_t) i];
+        // The lead is added after the choir's limiter here: keep the sum from clipping the file.
+        float peak = 0.0f;
+        for (const auto& ch : mix)
+            for (float v : ch) peak = std::max (peak, std::abs (v));
+        if (peak > 0.97f)
+            for (auto& ch : mix)
+                for (float& v : ch) v *= 0.97f / peak;
         out.channels = { mix[0], mix[1] };
 
         if (! stemsDir.empty())

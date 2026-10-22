@@ -276,6 +276,24 @@ html, body {
 .fader .thumb::after { content: ""; position: absolute; left: 4px; right: 4px; top: 7px; height: 2px; background: rgba(40, 25, 10, 0.8); }
 .fader-val { font-size: 15px; color: #efe5d3; }
 .pill-row { display: flex; gap: 6px; }
+.pill-label { font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: 2px; color: var(--muted); margin-right: 4px; min-width: var(--label-w, 0); }
+.pill.scene { min-width: 30px; opacity: 0.55; }
+.pill.scene.stored { opacity: 1; color: var(--gold-bright); border-color: rgba(232, 201, 138, 0.75); }
+.pill.scene.on { color: #1b1209; }
+.page .dropdown.field {
+  position: relative; display: block; width: 100%; height: 36px;
+  border: 1px solid rgba(232, 201, 138, 0.5); background: linear-gradient(180deg, #1d1612, #120d0b);
+}
+.page .dropdown.field .text { font-size: 19px; top: 6px; }
+.page .dropdown.field::after { content: "\25be"; position: absolute; right: 11px; top: 6px; color: var(--gold); font-size: 16px; pointer-events: none; }
+.menu.preset-menu { padding: 6px; }
+.preset-menu .pm-cols { display: flex; gap: 6px; }
+.preset-menu .pm-cats { width: 222px; border-right: 1px solid rgba(232, 201, 138, 0.22); padding-right: 6px; }
+.preset-menu .pm-cats .item { font-family: "Montserrat", sans-serif; font-size: 12px; letter-spacing: 1.4px; padding: 9px 10px; }
+.preset-menu .pm-cats .item.active { background: rgba(232, 201, 138, 0.18); color: var(--gold-bright); }
+.preset-menu .pm-cats .item::before { display: none; }
+.preset-menu .pm-cats .item .count { margin-left: auto; padding-left: 10px; color: var(--muted); font-size: 11px; }
+.preset-menu .pm-list { width: 250px; min-height: 300px; }
 .pill {
   min-width: 34px; height: 26px; padding: 0 8px; border-radius: 13px; cursor: pointer;
   font-family: "Montserrat", sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 1.2px;

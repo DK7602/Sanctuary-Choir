@@ -25,6 +25,19 @@ struct SectionParams
     SectionRange range;
 };
 
+/** Who is singing: an adult choir, children, a shouting gang, or a whole congregation. */
+enum class Ensemble : int { Choir = 0, Children, Gang, Congregation, Count };
+const char* const* getEnsembleNames();   // Ensemble::Count entries
+/** The range a section really sings in for an ensemble: children sing the tenor and bass parts
+    an octave up, everything inside a child's treble range. */
+SectionRange ensembleRange (Ensemble e, int section, SectionRange r);
+
+/** Rhythm effects on the choir, synced to the song's tempo (FX page). */
+constexpr int kNumRhythmPatterns = 15;
+const char* const* getRhythmPatternNames();   // kNumRhythmPatterns entries, 0 = Off
+const char* const* getRhythmRateNames();      // 3 entries: 1/8, 1/16, 1/32
+const char* const* getRhythmSectionNames();   // 3 entries: all, upper, lower
+
 struct EngineParams
 {
     EngineParams()
@@ -48,6 +61,7 @@ struct EngineParams
     VocalType vocalType = VocalType::Ah;
     bool freeze = false;
     int response = 0;            // 0 = sing with me, 1 = echo each phrase right after it
+    Ensemble ensemble = Ensemble::Choir;
     std::array<SectionParams, NumSections> sections;
 
     // Mix page
@@ -71,9 +85,15 @@ struct EngineParams
     float highCutHz = 18000.0f;
     float warmth = 0.0f;         // %
     float glue = 25.0f;          // %
+    int rhythmPattern = 0;       // 0 = off (see getRhythmPatternNames)
+    int rhythmRate = 1;          // 0 = eighths, 1 = sixteenths, 2 = thirty-seconds
+    float rhythmLength = 60.0f;  // % of each note the gate stays open
+    float rhythmDepth = 100.0f;  // %
+    int rhythmSections = 0;      // 0 = all, 1 = sopranos & altos, 2 = tenors & basses
 
     // Settings page
     bool midiEnabled = true;     // MIDI chords steer harmony; MIDI alone plays the choir
+    bool midiParts = false;      // MIDI channels 1-4 sing the soprano, alto, tenor and bass parts
     float a4 = 440.0f;
     bool lowLatency = false;     // Live monitoring: lead undelayed, vowel choir ~15 ms, Words keep full latency
 
@@ -139,6 +159,11 @@ public:
     void setParams (const EngineParams& p);
     /** Held MIDI notes (ascending) and the loudest velocity 0..1. */
     void setMidi (const NoteSet& held, float velocity);
+    /** Notes held on MIDI channels 1-4 (soprano, alto, tenor, bass), used when params.midiParts. */
+    void setMidiParts (const std::array<NoteSet, NumSections>& parts, float velocity);
+    /** The host's transport for the rhythm effects (call before process). Not playing: the
+        rhythm runs freely at the last tempo. ppq is the song position at the block start. */
+    void setTransport (bool playing, double bpm, double ppq) noexcept { transportPlaying = playing; transportBpm = bpm; transportPpq = ppq; }
     /** Scripted harmony for offline rendering (nullptr = live harmoniser). */
     void setScore (const ScoreSource* score) { scoreSource = score; }
     /** When set, dry section buses (pre level/pan/width) are written here: 8 channels (S L/R, A L/R, ...). */
@@ -170,6 +195,9 @@ private:
     void configureSinger (Singer& s, int section, int index, int countInSection);
     void updateSingerControl (Singer& s, const ControlFrame& cf, float dt);
     void refreshVowelFormants();
+    void applyRhythm (int c, int offset);
+    float singerFormant (const Singer& s) const noexcept;
+    int formantSection (int section) const noexcept;
     Scale currentScale() const;
     void publishSnapshot();
     /** How far the live singers run behind the input (shorter for vowels in Live mode). */
@@ -213,6 +241,27 @@ private:
 
     NoteSet midiHeld;
     float midiVelocity = 0.0f;
+    std::array<NoteSet, NumSections> midiParts;
+    float partsVelocity = 0.0f;
+    bool partsHeld() const noexcept;
+
+    // How the ensemble changes the style (set with the parameters).
+    struct EnsembleProfile
+    {
+        float formantSpread = 1.0f;   // how different the singers' voices are
+        float tract = 1.0f;           // vocal tract scale against an adult choir (children ~1.18)
+        float drive = 0.0f;           // choir bus saturation (shouting)
+        float zoneOffset = 0.0f;      // recorded voices: sing from notes this far below (raises formants)
+        bool trebles = false;         // tenors and basses sing as trebles
+    } ens;
+    Ensemble lastEnsemble = Ensemble::Count;
+
+    // Rhythm: song position and per-section gates.
+    bool transportPlaying = false;
+    double transportBpm = 0.0, transportPpq = 0.0;
+    double blockBeat = 0.0, blockBpm = 120.0, freeBeat = 0.0, lastBpm = 120.0;
+    bool beatSynced = false;
+    std::array<float, NumSections> gateGain { 1.0f, 1.0f, 1.0f, 1.0f };
 
     // Lead (dry) delay so it lines up with the choir (bypassed in Live mode).
     std::vector<float> leadDelayL, leadDelayR;

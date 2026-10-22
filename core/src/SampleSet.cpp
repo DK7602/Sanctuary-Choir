@@ -270,7 +270,7 @@ void SamplePlayer::reset() noexcept
 }
 
 void SamplePlayer::render (const SampleLayer& layer, float hz, const float* amp, float* out, int n,
-                           double outRate, int variant, float jitter) noexcept
+                           double outRate, int variant, float jitter, float zoneOffset) noexcept
 {
     const bool silent = amp[0] < 1.0e-5f && amp[n - 1] < 1.0e-5f;
     if (silent || layer.empty())
@@ -283,7 +283,7 @@ void SamplePlayer::render (const SampleLayer& layer, float hz, const float* amp,
 
     if (! (hz > 20.0f && hz < 20000.0f))
         hz = 220.0f;
-    const float midi = hzToMidi (hz);
+    const float midi = hzToMidi (hz) + zoneOffset;
     const int zi = layer.nearest (midi, variant);
     const SampleZone* want = &layer.zones[(size_t) zi];
     if (&layer != lastLayer)

@@ -305,26 +305,49 @@
 
   //==========================================================================
   // Presets
+  // Presets: categories on the left, the presets of the chosen category on the right.
   function openPresetMenu() {
     const st = state.status || {};
     const presets = st.presets || [];
+    const catOf = (p) => p.category || (p.factory ? "Factory" : "My Presets");
+    const cats = [];
+    presets.forEach((p) => { if (!cats.includes(catOf(p))) cats.push(catOf(p)); });
+    const current = presets[st.presetIndex];
+    let active = current ? catOf(current) : cats[0];
+    const div = (cls, parent, text) => { const d = document.createElement("div"); d.className = cls; if (text !== undefined) d.textContent = text; parent.appendChild(d); return d; };
+
     Menu.open(stageRect($("presetBox")), (m) => {
-      Menu.heading(m, "FACTORY");
-      presets.forEach((p, i) => { if (p.factory) Menu.item(m, p.name, i === st.presetIndex, () => SC.send({ type: "cmd", name: "presetLoad", index: i })); });
-      const user = presets.map((p, i) => [p, i]).filter(([p]) => !p.factory);
-      if (user.length) {
-        Menu.sep(m);
-        Menu.heading(m, "MY PRESETS");
-        user.forEach(([p, i]) => {
-          const it = Menu.item(m, p.name, i === st.presetIndex, () => SC.send({ type: "cmd", name: "presetLoad", index: i }));
-          const del = document.createElement("span");
-          del.textContent = "\u2715";
-          del.title = "Delete preset";
-          del.style.cssText = "margin-left:auto;color:#a8977c;font-size:13px;padding:0 4px";
-          del.addEventListener("click", (e) => { e.stopPropagation(); SC.send({ type: "cmd", name: "presetDelete", index: i }); Menu.close(); });
-          it.appendChild(del);
+      m.classList.add("preset-menu");
+      const cols = div("pm-cols", m);
+      const catCol = div("pm-cats", cols);
+      const list = div("pm-list", cols);
+      const catItems = {};
+      const showList = () => {
+        list.innerHTML = "";
+        Object.keys(catItems).forEach((c) => catItems[c].classList.toggle("active", c === active));
+        presets.forEach((p, i) => {
+          if (catOf(p) !== active) return;
+          const it = Menu.item(list, p.name, i === st.presetIndex, () => SC.send({ type: "cmd", name: "presetLoad", index: i }));
+          if (!p.factory) {
+            const del = document.createElement("span");
+            del.textContent = "\u2715";
+            del.title = "Delete preset";
+            del.style.cssText = "margin-left:auto;color:#a8977c;font-size:13px;padding:0 4px";
+            del.addEventListener("click", (e) => { e.stopPropagation(); SC.send({ type: "cmd", name: "presetDelete", index: i }); Menu.close(); });
+            it.appendChild(del);
+          }
         });
-      }
+      };
+      cats.forEach((c) => {
+        const it = div("item", catCol, c.toUpperCase());
+        const n = presets.filter((p) => catOf(p) === c).length;
+        div("count", it, String(n));
+        it.addEventListener("mouseenter", () => { active = c; showList(); });
+        it.addEventListener("click", () => { active = c; showList(); });
+        catItems[c] = it;
+      });
+      showList();
+
       Menu.sep(m);
       const input = document.createElement("input");
       input.placeholder = "Name your sound...";
@@ -333,8 +356,10 @@
         if (e.key === "Enter" && input.value.trim()) { SC.send({ type: "cmd", name: "presetSave", value: input.value.trim() }); Menu.close(); }
       });
       m.appendChild(input);
-      Menu.item(m, "SAVE CURRENT SOUND", false, () => { if (input.value.trim()) SC.send({ type: "cmd", name: "presetSave", value: input.value.trim() }); }, "action");
-      Menu.item(m, "OPEN PRESETS FOLDER", false, () => SC.send({ type: "cmd", name: "presetFolder" }), "action");
+      const actions = div("", m);
+      actions.style.cssText = "display:flex";
+      Menu.item(actions, "SAVE CURRENT SOUND", false, () => { if (input.value.trim()) SC.send({ type: "cmd", name: "presetSave", value: input.value.trim() }); }, "action");
+      Menu.item(actions, "OPEN PRESETS FOLDER", false, () => SC.send({ type: "cmd", name: "presetFolder" }), "action");
     });
   }
 

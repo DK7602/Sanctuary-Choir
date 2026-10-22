@@ -13,6 +13,7 @@ public:
     struct Entry
     {
         juce::String name;
+        juce::String category;                   // factory presets: "Worship", "Gospel", ...
         bool factory = true;
         juce::File file;                         // user presets only
         std::vector<std::pair<juce::String, float>> values;
@@ -32,8 +33,11 @@ public:
     /** Restore the selection after the plugin state is loaded. */
     void setCurrentByName (const juce::String& name);
 
-    /** Preset list for the UI: [{ name, factory }]. */
+    /** Preset list for the UI: [{ name, factory, category }]. */
     juce::var toVar() const;
+
+    /** Part of a sound (presets and scenes), as opposed to settings or the song's key. */
+    static bool isSoundParameter (const juce::String& paramID);
 
     static juce::File getUserPresetFolder();
 

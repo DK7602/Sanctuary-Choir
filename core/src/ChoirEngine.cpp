@@ -19,6 +19,115 @@ const char* const* getResponseNames()
     return names;
 }
 
+const char* const* getEnsembleNames()
+{
+    static const char* names[] = { "Choir", "Children", "Gang Vocals", "Congregation" };
+    return names;
+}
+
+SectionRange ensembleRange (Ensemble e, int section, SectionRange r)
+{
+    if (e != Ensemble::Children)
+        return r;
+    // Children's choirs are all trebles: the lower parts move up an octave, and everything
+    // stays between G3 and C6.
+    if (section == Tenor || section == Bass)
+    {
+        r.low += 12;
+        r.high += 12;
+    }
+    r.low = clampv (r.low, 55, 74);
+    r.high = clampv (r.high, r.low + 9, 84);
+    return r;
+}
+
+namespace
+{
+    // Sixteen steps per bar. 'x' starts a note, '-' holds it, '.' rests. One string for every
+    // section, or one per section (soprano, alto, tenor, bass) for patterns that pass the chord
+    // around the choir.
+    struct RhythmPattern { const char* name; const char* all; std::array<const char*, NumSections> parts; };
+    const RhythmPattern kRhythmPatterns[kNumRhythmPatterns] = {
+        { "Off", nullptr, {} },
+        { "Pulse 1/4", "x---x---x---x---", {} },
+        { "Pulse 1/8", "x-x-x-x-x-x-x-x-", {} },
+        { "Pulse 1/16", "xxxxxxxxxxxxxxxx", {} },
+        { "Offbeats", "..x-..x-..x-..x-", {} },
+        { "Dotted", "x--x--x--x--x-x-", {} },
+        { "Gallop", "x-xxx-xxx-xxx-xx", {} },
+        { "Syncopated", "x--x--x---x--x--", {} },
+        { "Stutter", "xxxx..x.xxxx..x.", {} },
+        { "Trance Gate", "x.xxx.xxx.x.xx.x", {} },
+        { "Heartbeat", "x.x.....x.x.....", {} },
+        { "Arp Up", nullptr, { "...x...x...x...x", "..x...x...x...x.", ".x...x...x...x..", "x...x...x...x..." } },
+        { "Arp Down", nullptr, { "x...x...x...x...", ".x...x...x...x..", "..x...x...x...x.", "...x...x...x...x" } },
+        { "Arp Bounce", nullptr, { "...x.....x.....x", "..x.x...x.x...x.", ".x...x.x...x.x..", "x.....x.....x..." } },
+        { "Call & Answer", nullptr, { "x-------........", "x-------........", "........x-------", "........x-------" } },
+    };
+
+    struct RhythmStep { int8_t start = 0, len = 0; };   // the note this step belongs to (len 0 = rest)
+    using RhythmTable = std::array<std::array<std::array<RhythmStep, 16>, NumSections>, kNumRhythmPatterns>;
+
+    const RhythmTable& rhythmTable()
+    {
+        static const RhythmTable table = []
+        {
+            RhythmTable t {};
+            for (int p = 0; p < kNumRhythmPatterns; ++p)
+                for (int s = 0; s < NumSections; ++s)
+                {
+                    const char* pat = kRhythmPatterns[p].all != nullptr ? kRhythmPatterns[p].all : kRhythmPatterns[p].parts[(size_t) s];
+                    if (pat == nullptr)
+                        continue;
+                    for (int i = 0; i < 16; ++i)
+                    {
+                        int start = i;
+                        while (start > 0 && pat[start] == '-') --start;
+                        if (pat[i] == '.' || pat[start] != 'x')
+                            continue;
+                        int len = 1;
+                        while (start + len < 16 && pat[start + len] == '-') ++len;
+                        t[(size_t) p][(size_t) s][(size_t) i] = { (int8_t) start, (int8_t) len };
+                    }
+                }
+            return t;
+        }();
+        return table;
+    }
+
+    /** 1 while the pattern's note is sounding at this position (in steps), else 0. */
+    float rhythmOpen (int pattern, int section, double stepPos, float length)
+    {
+        double b = std::fmod (stepPos, 16.0);
+        if (b < 0.0) b += 16.0;
+        const int step = std::min (15, (int) b);
+        const RhythmStep& info = rhythmTable()[(size_t) pattern][(size_t) section][(size_t) step];
+        if (info.len == 0)
+            return 0.0f;
+        const double into = (double) (step - info.start) + (b - (double) step);
+        return into < (double) info.len * (double) length ? 1.0f : 0.0f;
+    }
+}
+
+const char* const* getRhythmPatternNames()
+{
+    static const char* names[kNumRhythmPatterns] = {};
+    for (int i = 0; i < kNumRhythmPatterns; ++i) names[i] = kRhythmPatterns[i].name;
+    return names;
+}
+
+const char* const* getRhythmRateNames()
+{
+    static const char* names[] = { "1/8", "1/16", "1/32" };
+    return names;
+}
+
+const char* const* getRhythmSectionNames()
+{
+    static const char* names[] = { "Whole Choir", "Sopranos & Altos", "Tenors & Basses" };
+    return names;
+}
+
 int singersForChoirSize (float percent)
 {
     return clampv ((int) std::lround (clampv (percent, 0.0f, 100.0f) / 100.0f * (float) kMaxSingers), 0, kMaxSingers);
@@ -201,6 +310,8 @@ void ChoirEngine::reset()
     activeEchoOffset = 0;
     echoDuck = 1.0f;
     sectionNorm.fill (-1.0f);
+    gateGain.fill (1.0f);
+    freeBeat = 0.0;
 }
 
 void ChoirEngine::scheduleReplay (int64_t start, int64_t end)
@@ -252,9 +363,10 @@ void ChoirEngine::setSampleSet (const SampleSet* set) noexcept
 void ChoirEngine::updateVoiceCharacter()
 {
     const int voice = leadVoice < 0 ? 0 : leadVoice;
-    if (voice == shapedVoice)
+    const int shape = voice + (ens.trebles ? 2 : 0);
+    if (shape == shapedVoice)
         return;
-    shapedVoice = voice;
+    shapedVoice = shape;
 
     // Vocal tract length relative to the lead (formant scale), and tone per section.
     // A low (male) lead: sopranos and altos get a shorter, female tract, lose the male
@@ -267,7 +379,12 @@ void ChoirEngine::updateVoiceCharacter()
                                       { 1.0f, 0, 0, 0, 2200.0f, 3200.0f }, { 0.96f, 0, 0, 0, 2200.0f, 3200.0f } };
     static const Shape fromFemale[] = { { 1.0f, 0, 0, 0, 2400.0f, 2900.0f }, { 0.97f, 0, 0, 0, 2400.0f, 2900.0f },
                                         { 0.86f, 2.0f, 4.0f, 3.0f, 2400.0f, 2900.0f }, { 0.82f, 1.0f, 3.0f, 4.0f, 2400.0f, 2900.0f } };
-    const Shape* table = voice == 0 ? fromMale : fromFemale;
+    // Children: a much shorter tract than either adult, little chest and no singer's formant.
+    static const Shape kidsFromMale[] = { { 1.32f, -12.0f, -7.0f, -5.0f, 2200.0f, 3200.0f }, { 1.3f, -11.0f, -7.0f, -5.0f, 2200.0f, 3200.0f },
+                                          { 1.3f, -11.0f, -7.0f, -5.0f, 2200.0f, 3200.0f }, { 1.28f, -10.0f, -6.0f, -5.0f, 2200.0f, 3200.0f } };
+    static const Shape kidsFromFemale[] = { { 1.12f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f }, { 1.1f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f },
+                                            { 1.1f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f }, { 1.08f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f } };
+    const Shape* table = ens.trebles ? (voice == 0 ? kidsFromMale : kidsFromFemale) : (voice == 0 ? fromMale : fromFemale);
     for (int s = 0; s < NumSections; ++s)
     {
         const Shape& sh = table[s];
@@ -327,9 +444,41 @@ void ChoirEngine::setParams (const EngineParams& in)
             fix (p.sections[s].level, d.sections[s].level);
             fix (p.sections[s].pan, d.sections[s].pan);
         }
+        fix (p.rhythmLength, d.rhythmLength);
+        fix (p.rhythmDepth, d.rhythmDepth);
+        if ((int) p.ensemble < 0 || p.ensemble >= Ensemble::Count)
+            p.ensemble = Ensemble::Choir;
     }
+    for (int s = 0; s < NumSections; ++s)
+        p.sections[(size_t) s].range = ensembleRange (p.ensemble, s, p.sections[(size_t) s].range);
     params = p;
     style = getStyleProfile (p.style);
+
+    // The ensemble reshapes how the style is sung.
+    ens = EnsembleProfile {};
+    switch (p.ensemble)
+    {
+        case Ensemble::Children:    // light and straight, breathy, quick to scatter in time
+            style.vibratoCents *= 0.3f; style.detuneCents *= 0.8f; style.driftCents *= 1.3f; style.timingMs *= 1.3f;
+            style.scoopCents *= 0.6f; style.glideMs *= 0.8f; style.releaseS *= 0.9f; style.breath *= 1.6f;
+            style.softness = clampv (style.softness + 0.12f, 0.0f, 1.0f);
+            ens.formantSpread = 1.3f; ens.tract = 1.18f; ens.zoneOffset = -3.0f; ens.trebles = true;
+            break;
+        case Ensemble::Gang:        // shouted: pressed and bright, no vibrato, loose and punchy
+            style.vibratoCents *= 0.08f; style.detuneCents *= 2.2f; style.driftCents *= 1.6f; style.timingMs *= 3.0f;
+            style.scoopCents *= 1.4f; style.glideMs *= 0.5f; style.attackS *= 0.6f; style.releaseS *= 0.6f; style.breath *= 1.4f;
+            style.softness = clampv (style.softness - 0.35f, 0.0f, 1.0f);
+            ens.formantSpread = 2.5f; ens.drive = 0.45f;
+            break;
+        case Ensemble::Congregation: // untrained: wide tuning, late entrances, every voice different
+            style.vibratoCents *= 0.5f; style.detuneCents *= 3.0f; style.driftCents *= 2.5f; style.timingMs *= 4.0f;
+            style.scoopCents *= 2.0f; style.glideMs *= 1.5f; style.attackS *= 1.6f; style.releaseS *= 1.2f; style.breath *= 1.3f;
+            style.softness = clampv (style.softness + 0.1f, 0.0f, 1.0f);
+            ens.formantSpread = 2.5f;
+            break;
+        default:
+            break;
+    }
 
     volume.setTarget (dbToGain (p.volumeDb));
     leadGain.setTarget (p.leadDb <= -59.5f ? 0.0f : dbToGain (p.leadDb));
@@ -375,6 +524,34 @@ void ChoirEngine::setMidi (const NoteSet& held, float velocity)
 {
     midiHeld = held;
     midiVelocity = velocity;
+}
+
+void ChoirEngine::setMidiParts (const std::array<NoteSet, NumSections>& parts, float velocity)
+{
+    midiParts = parts;
+    partsVelocity = velocity;
+}
+
+bool ChoirEngine::partsHeld() const noexcept
+{
+    if (! params.midiEnabled || ! params.midiParts)
+        return false;
+    for (const auto& p : midiParts)
+        if (! p.empty())
+            return true;
+    return false;
+}
+
+float ChoirEngine::singerFormant (const Singer& s) const noexcept
+{
+    return 1.0f + (s.rFormant - 1.0f) * ens.formantSpread;
+}
+
+int ChoirEngine::formantSection (int section) const noexcept
+{
+    if (! ens.trebles)
+        return section;
+    return section == Tenor ? Soprano : (section == Bass ? Alto : section);
 }
 
 //==============================================================================
@@ -481,8 +658,8 @@ void ChoirEngine::allocateSingers()
                 if (singer.fade <= 0.0f)
                 {
                     configureSinger (singer, s, i, counts[(size_t) s]);
-                    singer.vowel.setFormants (getFormants (vowelForVocalType (params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType), s),
-                                              singer.rFormant * std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f));
+                    singer.vowel.setFormants (getFormants (vowelForVocalType (params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType), formantSection (s)),
+                                              singerFormant (singer) * ens.tract * std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f));
                     singer.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s].range.centre(), params.a4), style.softness);
                     const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f
                                         + ((s == Tenor || s == Bass) ? 2.5f : 0.0f) * params.space / 100.0f;
@@ -507,7 +684,7 @@ void ChoirEngine::refreshVowelFormants()
     for (auto& sp : singers)
     {
         Singer& s = *sp;
-        s.vowel.setFormants (getFormants (v, s.section), s.rFormant * shift);
+        s.vowel.setFormants (getFormants (v, formantSection (s.section)), singerFormant (s) * ens.tract * shift);
         s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre(), params.a4), style.softness);
     }
 }
@@ -586,6 +763,25 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
         cf.sopShift = harmonizer.getSopranoShift();
     }
 
+    // MIDI parts: channels 1-4 tell each section exactly what to sing.
+    const bool parts = partsHeld();
+    if (parts)
+    {
+        Voicing v;
+        for (int s = 0; s < NumSections; ++s)
+        {
+            const NoteSet& ns = midiParts[(size_t) s];
+            if (ns.count == 1)
+                v.set (s, ns.notes[0]);
+            else if (ns.count >= 2)
+                v.setDivisi (s, ns.notes[(size_t) ns.count - 1], ns.notes[0]);   // top and bottom note
+        }
+        v.valid = true;
+        cf.voicing = v;
+        cf.leadNote = -1;
+        cf.sopShift = 0;
+    }
+
     // Envelope and gate: sing while the lead sings, hold briefly through consonants.
     const float level = std::pow (clampv ((f.rmsDb + 48.0f) / 33.0f, 0.0f, 1.0f), 0.8f);
     if (g.voiced)
@@ -615,10 +811,10 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     }
 
     // MIDI on its own plays the choir like an instrument.
-    if (params.midiEnabled && ! midiHeld.empty() && unvoicedTime > 0.15f)
+    if (params.midiEnabled && (! midiHeld.empty() || parts) && unvoicedTime > 0.15f)
     {
         cf.sounding = true;
-        cf.level = 0.18f + 0.4f * midiVelocity;
+        cf.level = 0.18f + 0.4f * std::max (parts ? partsVelocity : 0.0f, midiHeld.empty() ? 0.0f : midiVelocity);
         cf.midiInstrument = true;
     }
 
@@ -751,7 +947,7 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
         s.pctl.fixedRatio = 0.0f;
         s.pctl.targetHz = hz;
     }
-    s.pctl.formant = vocalTract[(size_t) sec] * s.rFormant * formantParam * s.lastFollow;
+    s.pctl.formant = vocalTract[(size_t) sec] * singerFormant (s) * formantParam * s.lastFollow;
     s.pctl.gain = s.rGain * s.depthGain;
     s.pctl.unvoicedGain = 0.6f;
 
@@ -790,7 +986,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
 
     // Reconfigure on parameter changes that affect the singers.
     allocateSingers();
-    const bool styleChanged = params.style != lastStyle;
+    const bool styleChanged = params.style != lastStyle || params.ensemble != lastEnsemble;
     if (params.vocalType != lastVocal || params.formant != lastFormantParam || styleChanged)
     {
         lastVocal = params.vocalType;
@@ -802,6 +998,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         lastHumanize = params.humanize;
         lastSpace = params.space;
         lastStyle = params.style;
+        lastEnsemble = params.ensemble;
         for (auto& sp : singers)
         {
             const bool back = sp->section == Tenor || sp->section == Bass;
@@ -819,12 +1016,26 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
             analyzer.releaseFreeze();
     }
 
+    // Song position for the rhythm effects: the host's while it plays, otherwise free running.
+    beatSynced = transportPlaying && transportBpm > 20.0 && transportBpm < 400.0;
+    if (beatSynced)
+    {
+        blockBpm = lastBpm = transportBpm;
+        blockBeat = transportPpq;
+    }
+    else
+    {
+        blockBpm = lastBpm;
+        blockBeat = freeBeat;
+    }
+
     for (int offset = 0; offset < n; offset += kChunk)
     {
         const int c = std::min (kChunk, n - offset);
         processChunk (inL + offset, inR != nullptr ? inR + offset : nullptr,
                       outL + offset, outR != nullptr ? outR + offset : nullptr, c, stems, offset);
     }
+    freeBeat = blockBeat + (double) n * blockBpm / (60.0 * sr);
     wasFrozen = params.freeze;
     publishSnapshot();
 }
@@ -938,7 +1149,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         {
             const VocalType vt = words ? VocalType::Ah : params.vocalType;
             for (int s = 0; s < NumSections; ++s)
-                sampleLayers[(size_t) s] = sampleSet->layerFor (s, vt);
+                sampleLayers[(size_t) s] = sampleSet->layerFor (formantSection (s), vt);
         }
 
         // Section level by head count, eased so singers joining or leaving don't step the level
@@ -996,7 +1207,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 if (sampleLayers[(size_t) s.section] != nullptr)
                 {
                     // Recorded choir voices.
-                    s.sampler.render (*sampleLayers[(size_t) s.section], s.sampleHz, ampBuf, scratch.data(), c, sr, s.index, s.rJitter);
+                    s.sampler.render (*sampleLayers[(size_t) s.section], s.sampleHz, ampBuf, scratch.data(), c, sr, s.index, s.rJitter, ens.zoneOffset);
                     for (int i = 0; i < c; ++i)
                         scratch[(size_t) i] *= kSampleGain;
                 }
@@ -1048,6 +1259,9 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         stemTapOffset += c;
     }
 
+    // Rhythm: tempo-synced gates on the sections (live and rendered singers alike).
+    applyRhythm (c, offset);
+
     // Section mix: width, level, balance.
     std::fill (choirL.begin(), choirL.end(), 0.0f);
     std::fill (choirR.begin(), choirR.end(), 0.0f);
@@ -1072,7 +1286,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 
     // Choir bus processing.
     tone.process (choirL.data(), choirR.data(), c);
-    const float warmth = warmthAmt.advance (c);
+    const float warmth = std::max (warmthAmt.advance (c), ens.drive);
     if (warmth > 0.001f)
     {
         for (int i = 0; i < c; ++i)
@@ -1112,6 +1326,43 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         if (! isFiniteSample (outL[i])) outL[i] = 0.0f;   // last line of defence for the host
         if (outR != nullptr && ! isFiniteSample (outR[i])) outR[i] = 0.0f;
         outPeakAccum = std::max (outPeakAccum, std::max (std::abs (outL[i]), outR != nullptr ? std::abs (outR[i]) : 0.0f));
+    }
+}
+
+void ChoirEngine::applyRhythm (int c, int offset)
+{
+    const int pattern = clampv (params.rhythmPattern, 0, kNumRhythmPatterns - 1);
+    const float depth = pattern == 0 ? 0.0f : clampv (params.rhythmDepth / 100.0f, 0.0f, 1.0f);
+    if (depth <= 0.0f && *std::min_element (gateGain.begin(), gateGain.end()) >= 0.9999f)
+        return;
+
+    const double rate = params.rhythmRate == 0 ? 0.5 : (params.rhythmRate == 2 ? 2.0 : 1.0);
+    const double stepsPerSample = 4.0 * rate * blockBpm / (60.0 * sr);
+    // Synced to the host, output sample i is heard at song position (block start + i - latency).
+    const int lat = beatSynced ? getReportedLatency() : 0;
+    const double step0 = blockBeat * 4.0 * rate + (double) (offset - lat) * stepsPerSample;
+    const float length = clampv (params.rhythmLength / 100.0f, 0.05f, 1.0f);
+    const float att = 1.0f - std::exp (-1.0f / (0.0015f * (float) sr));
+    const float rel = 1.0f - std::exp (-1.0f / (0.006f * (float) sr));
+    const bool perSection = kRhythmPatterns[pattern].all == nullptr;
+
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const bool inRhythm = pattern > 0 && (perSection || params.rhythmSections == 0
+                                              || (params.rhythmSections == 1 && s <= Alto) || (params.rhythmSections == 2 && s >= Tenor));
+        float g = gateGain[(size_t) s];
+        float* L = sectionBuf.data() + (size_t) (s * 2) * kChunk;
+        float* R = sectionBuf.data() + (size_t) (s * 2 + 1) * kChunk;
+        for (int i = 0; i < c; ++i)
+        {
+            float target = 1.0f;
+            if (inRhythm)
+                target = 1.0f - depth * (1.0f - rhythmOpen (pattern, s, step0 + (double) i * stepsPerSample, length));
+            g += (target - g) * (target > g ? att : rel);
+            L[i] *= g;
+            R[i] *= g;
+        }
+        gateGain[(size_t) s] = g;
     }
 }
 

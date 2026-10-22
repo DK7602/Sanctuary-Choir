@@ -81,7 +81,7 @@ static sc::HarmonySettings harmonySettingsFor (const sc::EngineParams& p)
     hs.mode = p.harmonyMode;
     hs.style = p.style;
     for (int s = 0; s < sc::NumSections; ++s)
-        hs.ranges[(size_t) s] = p.sections[(size_t) s].range;
+        hs.ranges[(size_t) s] = sc::ensembleRange (p.ensemble, s, p.sections[(size_t) s].range);   // as the engine sings them
     hs.wordsMode = p.vocalType == sc::VocalType::Words;
     hs.speed = p.harmonySpeed / 100.0f;
 
@@ -806,7 +806,7 @@ var LearnSession::getStatus() const
     if (owned != nullptr)
     {
         o->setProperty ("seconds", owned->score.durationSeconds);
-        o->setProperty ("key", String (owned->score.keyName()));
+        o->setProperty ("key", String (CharPointer_UTF8 (owned->score.keyName().c_str())));
         o->setProperty ("phrases", owned->score.numPhrases);
         o->setProperty ("notes", owned->score.numNotes);
         if (previewPlaying.load() && owned->sampleRate > 0)

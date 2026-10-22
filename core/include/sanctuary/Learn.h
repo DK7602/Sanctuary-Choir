@@ -66,15 +66,19 @@ struct LearnedEvent
 class LearnedScore : public ScoreSource
 {
 public:
-    Scale scale;
+    struct KeyRegion { int64_t start = 0; Scale scale; };
+
+    Scale scale;                       // the key at the start
+    std::vector<KeyRegion> keys;       // every key in order (more than one when the song modulates)
     bool keyWasDetected = false;
     std::vector<LearnedEvent> events;
     int numPhrases = 0, numNotes = 0;
     float durationSeconds = 0.0f;
 
     bool voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopShift) const override;
-    /** e.g. "Ab MAJOR · 4 PHRASES · 105 NOTES" */
+    /** e.g. "LEARNED 0:43 · Ab MAJOR · 4 PHRASES · 105 NOTES" */
     std::string describe() const;
+    /** e.g. "G MAJOR", or "G MAJOR → A MAJOR" when the key changes. */
     std::string keyName() const;
 };
 

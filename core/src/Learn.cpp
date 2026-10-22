@@ -185,13 +185,23 @@ TakeAnalysis analyseTake (const float* x, int64_t n, double sampleRate, float a4
 }
 
 //==============================================================================
-std::string LearnedScore::keyName() const
+static std::string scaleName (const Scale& scale)
 {
     const bool flats = scale.tonic == 5 || scale.tonic == 10 || scale.tonic == 3 || scale.tonic == 8 || scale.tonic == 1;
     std::string k = getPitchClassName (scale.tonic, flats || (scale.isMinorFamily() && (scale.tonic == 0 || scale.tonic == 7 || scale.tonic == 2)));
     std::string s = getScaleNames()[(int) scale.type];
     for (auto& ch : s) ch = (char) std::toupper ((unsigned char) ch);
     return k + " " + s;
+}
+
+std::string LearnedScore::keyName() const
+{
+    if (keys.size() < 2)
+        return scaleName (scale);
+    const char* arrow = " \xE2\x86\x92 ";
+    if (keys.size() == 2)
+        return scaleName (keys.front().scale) + arrow + scaleName (keys.back().scale);
+    return scaleName (keys.front().scale) + arrow + "\xE2\x80\xA6" + arrow + scaleName (keys.back().scale);
 }
 
 std::string LearnedScore::describe() const
@@ -222,6 +232,70 @@ bool LearnedScore::voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopSh
     return true;
 }
 
+/** The key of every phrase. Songs often change key (the last chorus a step up): each phrase is
+    scored against every key, and a Viterbi path pays a price for each change, so one phrase
+    with a few odd notes never moves the key but a run of phrases in a new key does. */
+static std::vector<int> phraseKeys (const TakeAnalysis& take, Scale base)
+{
+    const bool minor = base.isMinorFamily();
+    const int P = (int) take.phrases.size();
+    const int global = estimateKey (take.pcHistogram, minor, ! minor).tonic;
+    std::vector<int> key ((size_t) P, global);
+    if (P < 3 || base.type == ScaleType::Chromatic)
+        return key;
+
+    std::vector<std::array<float, 12>> hist ((size_t) P);
+    std::vector<float> dur ((size_t) P, 0.0f);
+    for (auto& h : hist) h.fill (0.0f);
+    for (const auto& note : take.notes)
+    {
+        const float d = (float) ((double) (note.end - note.start) / take.sampleRate);
+        hist[(size_t) note.phrase][(size_t) wrapPc ((int) std::lround (note.pitch))] += d;
+        dur[(size_t) note.phrase] += d;
+    }
+
+    constexpr float switchCost = 1.6f;
+    std::vector<std::array<float, 12>> cost ((size_t) P);
+    std::vector<std::array<int, 12>> back ((size_t) P);
+    for (int p = 0; p < P; ++p)
+    {
+        std::array<float, 12> fit {};
+        float best = -1.0e9f;
+        for (int k = 0; k < 12; ++k)
+        {
+            fit[(size_t) k] = keyFitness (hist[(size_t) p], k, minor);
+            best = std::max (best, fit[(size_t) k]);
+        }
+        const float w = clampv (dur[(size_t) p] / 3.0f, 0.4f, 1.5f);
+        for (int k = 0; k < 12; ++k)
+        {
+            const float e = w * (best - fit[(size_t) k]);
+            if (p == 0)
+            {
+                cost[0][(size_t) k] = e + (k == global ? 0.0f : 0.3f);
+                continue;
+            }
+            float bestPrev = 1.0e9f;
+            int arg = k;
+            for (int j = 0; j < 12; ++j)
+            {
+                const float v = cost[(size_t) p - 1][(size_t) j] + (j == k ? 0.0f : switchCost);
+                if (v < bestPrev) { bestPrev = v; arg = j; }
+            }
+            cost[(size_t) p][(size_t) k] = bestPrev + e;
+            back[(size_t) p][(size_t) k] = arg;
+        }
+    }
+    int k = (int) (std::min_element (cost.back().begin(), cost.back().end()) - cost.back().begin());
+    for (int p = P - 1; p >= 0; --p)
+    {
+        key[(size_t) p] = k;
+        if (p > 0)
+            k = back[(size_t) p][(size_t) k];
+    }
+    return key;
+}
+
 LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
 {
     LearnedScore score;
@@ -231,8 +305,18 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
 
     Scale scale;
     scale.type = hs.scale;
+    std::vector<int> keyOfPhrase (take.phrases.size(), 0);
     if (hs.key > 0)
+    {
         scale.tonic = (hs.key - 1) % 12;
+        std::fill (keyOfPhrase.begin(), keyOfPhrase.end(), scale.tonic);
+    }
+    else if (! take.phrases.empty())
+    {
+        keyOfPhrase = phraseKeys (take, scale);
+        scale.tonic = keyOfPhrase.front();
+        score.keyWasDetected = true;
+    }
     else
     {
         const bool minor = scale.isMinorFamily();
@@ -240,23 +324,47 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         score.keyWasDetected = true;
     }
     score.scale = scale;
+    score.keys.push_back ({ 0, scale });
     if (take.notes.empty())
         return score;
 
-    const auto vocab = buildChordVocabulary (scale, hs.style);
-    const int numChords = (int) vocab.size();
+    // One chord vocabulary per key the song visits.
+    std::vector<std::vector<Chord>> vocabs;
+    std::vector<int> regionOfPhrase (take.phrases.size(), 0);
+    vocabs.push_back (buildChordVocabulary (scale, hs.style));
+    for (size_t p = 1; p < take.phrases.size(); ++p)
+    {
+        if (keyOfPhrase[p] != score.keys.back().scale.tonic)
+        {
+            Scale s = scale;
+            s.tonic = keyOfPhrase[p];
+            score.keys.push_back ({ take.phrases[p].start, s });
+            vocabs.push_back (buildChordVocabulary (s, hs.style));
+        }
+        regionOfPhrase[p] = (int) score.keys.size() - 1;
+    }
+
     const int N = (int) take.notes.size();
     const double sr = take.sampleRate;
-
+    std::vector<int> region ((size_t) N);
     std::vector<int> q ((size_t) N);
+    int maxChords = 0;
+    for (const auto& v : vocabs) maxChords = std::max (maxChords, (int) v.size());
     for (int i = 0; i < N; ++i)
-        q[(size_t) i] = scale.quantise (take.notes[(size_t) i].pitch);
+    {
+        region[(size_t) i] = regionOfPhrase[(size_t) take.notes[(size_t) i].phrase];
+        q[(size_t) i] = score.keys[(size_t) region[(size_t) i]].scale.quantise (take.notes[(size_t) i].pitch);
+    }
+    auto scaleAt = [&] (int i) -> const Scale& { return score.keys[(size_t) region[(size_t) i]].scale; };
+    auto vocabAt = [&] (int i) -> const std::vector<Chord>& { return vocabs[(size_t) region[(size_t) i]]; };
+    auto chordsAt = [&] (int i) { return (int) vocabAt (i).size(); };
 
     // Viterbi over chords, one step per note.
     std::vector<int> chordOf ((size_t) N, 0);
-    const bool chordModes = hs.mode != HarmonyMode::Drone && scale.type != ScaleType::Chromatic && numChords > 0;
+    const bool chordModes = hs.mode != HarmonyMode::Drone && scale.type != ScaleType::Chromatic && maxChords > 0;
     if (chordModes)
     {
+        const int numChords = maxChords;   // row stride; a key with fewer chords leaves the rest unused
         const float inf = std::numeric_limits<float>::max() / 4.0f;
         std::vector<float> cost ((size_t) N * (size_t) numChords, inf);
         std::vector<int> back ((size_t) N * (size_t) numChords, 0);
@@ -265,7 +373,7 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
             const auto& note = take.notes[(size_t) i];
             const float dur = (float) ((double) (note.end - note.start) / sr);
             const float w = clampv (dur / 0.25f, 0.3f, 2.0f);
-            const Chord& ch = vocab[(size_t) c];
+            const Chord& ch = vocabAt (i)[(size_t) c];
             const int role = ch.roleOf (q[(size_t) i]);
             static const float roleCost[] = { 0.0f, 0.05f, 0.15f, 0.35f };
             float e = role < 0 ? 2.5f * w : roleCost[role];
@@ -284,26 +392,31 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         const float speed = clampv (hs.speed, 0.0f, 1.0f);
         const float changeCost = speed <= 0.5f ? 2.2f - 2.4f * speed : 1.0f - 1.2f * (speed - 0.5f);
 
-        for (int c = 0; c < numChords; ++c)
-            cost[(size_t) c] = emission (0, c) - (vocab[(size_t) c].degree == 0 ? 0.3f : 0.0f);
+        for (int c = 0; c < chordsAt (0); ++c)
+            cost[(size_t) c] = emission (0, c) - (vocabAt (0)[(size_t) c].degree == 0 ? 0.3f : 0.0f);
 
         for (int i = 1; i < N; ++i)
         {
             const auto& note = take.notes[(size_t) i];
             const bool phraseStart = take.phrases[(size_t) note.phrase].firstNote == i;
             const float dur = (float) ((double) (note.end - note.start) / sr);
-            for (int b = 0; b < numChords; ++b)
+            const auto& from = vocabAt (i - 1);
+            const auto& to = vocabAt (i);
+            const bool sameKey = region[(size_t) i] == region[(size_t) i - 1];
+            for (int b = 0; b < (int) to.size(); ++b)
             {
                 const float e = emission (i, b);
                 float best = inf;
                 int arg = 0;
-                for (int a = 0; a < numChords; ++a)
+                for (int a = 0; a < (int) from.size(); ++a)
                 {
                     float tr = 0.0f;
-                    if (a != b)
+                    const bool same = sameKey ? a == b : (from[(size_t) a].root == to[(size_t) b].root && from[(size_t) a].mask() == to[(size_t) b].mask());
+                    if (! same)
                     {
                         tr = (phraseStart ? 0.15f : 0.5f * (dur < 0.15f ? 1.5f : 1.0f)) * changeCost;
-                        tr -= progressionBonus (vocab[(size_t) a], vocab[(size_t) b], scale.isMinorFamily()) * 1.5f;
+                        if (sameKey)
+                            tr -= progressionBonus (from[(size_t) a], to[(size_t) b], scaleAt (i).isMinorFamily()) * 1.5f;
                     }
                     const float v = cost[(size_t) (i - 1) * (size_t) numChords + (size_t) a] + tr;
                     if (v < best) { best = v; arg = a; }
@@ -314,7 +427,7 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         }
 
         int bestEnd = 0;
-        for (int c = 1; c < numChords; ++c)
+        for (int c = 1; c < chordsAt (N - 1); ++c)
             if (cost[(size_t) (N - 1) * (size_t) numChords + (size_t) c] < cost[(size_t) (N - 1) * (size_t) numChords + (size_t) bestEnd])
                 bestEnd = c;
         chordOf[(size_t) N - 1] = bestEnd;
@@ -362,7 +475,8 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         VoicingRequest req;
         req.mode = hs.mode;
         req.style = hs.style;
-        req.scale = scale;
+        req.scale = scaleAt (i);
+        const auto& vocab = vocabAt (i);
         if (chordModes)
             req.chord = vocab[(size_t) chordOf[(size_t) i]];
         else if (scale.type == ScaleType::Chromatic)
@@ -371,7 +485,7 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
             req.chord = chordFromPitchClasses (tones, 3);
         }
         else
-            req.chord = vocab.empty() ? chordFromPitchClasses (&scale.tonic, 1) : vocab.front();
+            req.chord = vocab.empty() ? chordFromPitchClasses (&req.scale.tonic, 1) : vocab.front();
         req.melody = q[(size_t) i];
         req.sopranoOctaveShift = phraseShift[(size_t) note.phrase];
         req.ranges = hs.ranges;
@@ -506,6 +620,7 @@ std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, cons
     params.freeze = false;
     params.midiEnabled = false;
     params.wetOnly = roomOnly;
+    params.rhythmPattern = 0;   // no song position here: exports are without the rhythm effect
     params.leadDb = -60.0f;
     params.lowLatency = false;
 

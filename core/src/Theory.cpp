@@ -770,12 +770,12 @@ Voicing voiceChord (const VoicingRequest& req)
 }
 
 //==============================================================================
-KeyEstimate estimateKey (const std::array<float, 12>& h, bool restrictToMinor, bool restrictToMajor)
+namespace
 {
-    static const float majorProfile[] = { 6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f, 2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f };
-    static const float minorProfile[] = { 6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f, 2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f };
+    const float majorProfile[] = { 6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f, 2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f };
+    const float minorProfile[] = { 6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f, 2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f };
 
-    auto correlate = [&h] (const float* profile, int tonic)
+    float correlateKey (const std::array<float, 12>& h, const float* profile, int tonic)
     {
         float mh = 0, mp = 0;
         for (int i = 0; i < 12; ++i) { mh += h[(size_t) i]; mp += profile[i]; }
@@ -788,14 +788,14 @@ KeyEstimate estimateKey (const std::array<float, 12>& h, bool restrictToMinor, b
             num += a * b; dh += a * a; dp += b * b;
         }
         return dh > 0 && dp > 0 ? num / std::sqrt (dh * dp) : 0.0f;
-    };
+    }
 
     // A harmoniser must never pick a key that leaves out notes the singer keeps singing:
     // those notes would be snapped to a neighbour and harmonised with clashing chords.
-    float total = 0.0f;
-    for (float v : h) total += v;
-    auto coveragePenalty = [&h, total] (int tonic, bool minor)
+    float coveragePenalty (const std::array<float, 12>& h, int tonic, bool minor)
     {
+        float total = 0.0f;
+        for (float v : h) total += v;
         if (total <= 0.0f)
             return 0.0f;
         static const int majorSteps[] = { 0, 2, 4, 5, 7, 9, 11 };
@@ -807,8 +807,16 @@ KeyEstimate estimateKey (const std::array<float, 12>& h, bool restrictToMinor, b
             inside += h[(size_t) wrapPc (tonic + steps[i])];
         const float outside = 1.0f - inside / total;
         return 2.0f * std::max (0.0f, outside - 0.06f);
-    };
+    }
+}
 
+float keyFitness (const std::array<float, 12>& h, int tonic, bool minor)
+{
+    return correlateKey (h, minor ? minorProfile : majorProfile, tonic) - coveragePenalty (h, tonic, minor);
+}
+
+KeyEstimate estimateKey (const std::array<float, 12>& h, bool restrictToMinor, bool restrictToMajor)
+{
     KeyEstimate best;
     best.score = -2.0f;
     float bestRank = -1.0e9f;
@@ -816,15 +824,13 @@ KeyEstimate estimateKey (const std::array<float, 12>& h, bool restrictToMinor, b
     {
         if (! restrictToMinor)
         {
-            const float s = correlate (majorProfile, tonic);
-            const float rank = s - coveragePenalty (tonic, false);
-            if (rank > bestRank) { bestRank = rank; best = { tonic, false, s }; }
+            const float rank = keyFitness (h, tonic, false);
+            if (rank > bestRank) { bestRank = rank; best = { tonic, false, correlateKey (h, majorProfile, tonic) }; }
         }
         if (! restrictToMajor)
         {
-            const float s = correlate (minorProfile, tonic);
-            const float rank = s - coveragePenalty (tonic, true);
-            if (rank > bestRank) { bestRank = rank; best = { tonic, true, s }; }
+            const float rank = keyFitness (h, tonic, true);
+            if (rank > bestRank) { bestRank = rank; best = { tonic, true, correlateKey (h, minorProfile, tonic) }; }
         }
     }
     return best;

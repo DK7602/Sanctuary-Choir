@@ -57,6 +57,8 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     perform->addChild (std::make_unique<APC> (pid (ParamIDs::vocalType), "Vocal Type", toStringArray (sc::getVocalTypeNames(), (int) sc::VocalType::Count), 0));
     perform->addChild (std::make_unique<APB> (pid (ParamIDs::freeze), "Freeze", false));
     perform->addChild (std::make_unique<APC> (pid (ParamIDs::response), "Response", toStringArray (sc::getResponseNames(), 2), 0));
+    perform->addChild (std::make_unique<APC> (pid (ParamIDs::ensemble), "Ensemble", toStringArray (sc::getEnsembleNames(), (int) sc::Ensemble::Count), 0));
+    perform->addChild (std::make_unique<APC> (pid (ParamIDs::scene), "Scene", StringArray { "None", "Scene 1", "Scene 2", "Scene 3", "Scene 4", "Scene 5", "Scene 6", "Scene 7", "Scene 8" }, 0));
 
     const auto ranges = sc::defaultSectionRanges();
     auto noteAttrs = AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return String (sc::getNoteName (v)); });
@@ -112,11 +114,18 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     fx->addChild (std::make_unique<APF> (pid (ParamIDs::highCut), "High Cut", NormalisableRange<float> (3000.0f, 20000.0f, 10.0f, 0.5f), 18000.0f, hz));
     fx->addChild (std::make_unique<APF> (pid (ParamIDs::warmth), "Warmth", NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f, percentAttrs()));
     fx->addChild (std::make_unique<APF> (pid (ParamIDs::glue), "Glue", NormalisableRange<float> (0.0f, 100.0f, 0.1f), 25.0f, percentAttrs()));
+    fx->addChild (std::make_unique<APC> (pid (ParamIDs::rhythmPattern), "Rhythm", toStringArray (sc::getRhythmPatternNames(), sc::kNumRhythmPatterns), 0));
+    fx->addChild (std::make_unique<APC> (pid (ParamIDs::rhythmRate), "Rhythm Rate", toStringArray (sc::getRhythmRateNames(), 3), 1));
+    fx->addChild (std::make_unique<APF> (pid (ParamIDs::rhythmLength), "Rhythm Length", NormalisableRange<float> (5.0f, 100.0f, 1.0f), 60.0f, percentAttrs()));
+    fx->addChild (std::make_unique<APF> (pid (ParamIDs::rhythmDepth), "Rhythm Depth", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 100.0f, percentAttrs()));
+    fx->addChild (std::make_unique<APC> (pid (ParamIDs::rhythmSections), "Rhythm Sections", toStringArray (sc::getRhythmSectionNames(), 3), 0));
     layout.add (std::move (fx));
 
     // Settings ------------------------------------------------------------
     auto settings = std::make_unique<AudioProcessorParameterGroup> ("settings", "Settings", "|");
     settings->addChild (std::make_unique<APB> (pid (ParamIDs::midiEnabled), "MIDI Control", true,
+                                               AudioParameterBoolAttributes().withAutomatable (false)));
+    settings->addChild (std::make_unique<APB> (pid (ParamIDs::midiParts), "MIDI Parts (Ch 1-4)", false,
                                                AudioParameterBoolAttributes().withAutomatable (false)));
     settings->addChild (std::make_unique<APF> (pid (ParamIDs::tuning), "Tuning (A4)", NormalisableRange<float> (415.0f, 466.0f, 0.1f), 440.0f,
                                                AudioParameterFloatAttributes().withAutomatable (false).withLabel ("Hz")
@@ -133,8 +142,10 @@ struct ParameterCache::Ptrs
 {
     std::atomic<float>* volume, *choirSize, *space, *reverb, *tone, *presence, *harmonyMode, *key, *scale, *style, *vocalType, *freeze, *response;
     std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath, *harmonySpeed;
+    std::atomic<float>* ensemble;
     std::atomic<float>* venue, *decay, *preDelay, *brightness, *leadReverb, *lowCut, *highCut, *warmth, *glue;
-    std::atomic<float>* midiEnabled, *tuning, *latencyMode;
+    std::atomic<float>* rhythmPattern, *rhythmRate, *rhythmLength, *rhythmDepth, *rhythmSections;
+    std::atomic<float>* midiEnabled, *midiParts, *tuning, *latencyMode;
     std::array<std::atomic<float>*, sc::NumSections> level, pan, mute, solo, low, high;
 };
 
@@ -152,6 +163,7 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.harmonyMode = get (ParamIDs::harmonyMode); p.key = get (ParamIDs::key); p.scale = get (ParamIDs::scale);
     p.style = get (ParamIDs::style); p.vocalType = get (ParamIDs::vocalType); p.freeze = get (ParamIDs::freeze);
     p.response = get (ParamIDs::response);
+    p.ensemble = get (ParamIDs::ensemble);
     p.leadLevel = get (ParamIDs::leadLevel); p.choirLevel = get (ParamIDs::choirLevel); p.humanize = get (ParamIDs::humanize);
     p.vibrato = get (ParamIDs::vibrato); p.glide = get (ParamIDs::glide); p.formant = get (ParamIDs::formant);
     p.pitchCorrection = get (ParamIDs::pitchCorrection); p.breath = get (ParamIDs::breath);
@@ -159,7 +171,10 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.venue = get (ParamIDs::venue); p.decay = get (ParamIDs::decay); p.preDelay = get (ParamIDs::preDelay);
     p.brightness = get (ParamIDs::brightness); p.leadReverb = get (ParamIDs::leadReverb); p.lowCut = get (ParamIDs::lowCut);
     p.highCut = get (ParamIDs::highCut); p.warmth = get (ParamIDs::warmth); p.glue = get (ParamIDs::glue);
-    p.midiEnabled = get (ParamIDs::midiEnabled); p.tuning = get (ParamIDs::tuning);
+    p.rhythmPattern = get (ParamIDs::rhythmPattern); p.rhythmRate = get (ParamIDs::rhythmRate);
+    p.rhythmLength = get (ParamIDs::rhythmLength); p.rhythmDepth = get (ParamIDs::rhythmDepth);
+    p.rhythmSections = get (ParamIDs::rhythmSections);
+    p.midiEnabled = get (ParamIDs::midiEnabled); p.midiParts = get (ParamIDs::midiParts); p.tuning = get (ParamIDs::tuning);
     p.latencyMode = get (ParamIDs::latencyMode);
     for (int s = 0; s < sc::NumSections; ++s)
     {
@@ -191,6 +206,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.vocalType = (sc::VocalType) jlimit (0, (int) sc::VocalType::Count - 1, i (p.vocalType));
     e.freeze = f (p.freeze) > 0.5f;
     e.response = jlimit (0, 1, i (p.response));
+    e.ensemble = (sc::Ensemble) jlimit (0, (int) sc::Ensemble::Count - 1, i (p.ensemble));
 
     for (int s = 0; s < sc::NumSections; ++s)
     {
@@ -223,8 +239,14 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.highCutHz = f (p.highCut);
     e.warmth = f (p.warmth);
     e.glue = f (p.glue);
+    e.rhythmPattern = jlimit (0, sc::kNumRhythmPatterns - 1, i (p.rhythmPattern));
+    e.rhythmRate = jlimit (0, 2, i (p.rhythmRate));
+    e.rhythmLength = f (p.rhythmLength);
+    e.rhythmDepth = f (p.rhythmDepth);
+    e.rhythmSections = jlimit (0, 2, i (p.rhythmSections));
 
     e.midiEnabled = f (p.midiEnabled) > 0.5f;
+    e.midiParts = f (p.midiParts) > 0.5f;
     e.a4 = f (p.tuning);
     e.lowLatency = i (p.latencyMode) == 1;
 }
@@ -232,7 +254,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
 bool affectsHarmony (const String& id)
 {
     return id == ParamIDs::harmonyMode || id == ParamIDs::key || id == ParamIDs::scale || id == ParamIDs::style
-        || id == ParamIDs::vocalType || id == ParamIDs::choirSize || id == ParamIDs::tuning || id == ParamIDs::harmonySpeed
+        || id == ParamIDs::ensemble || id == ParamIDs::vocalType || id == ParamIDs::choirSize || id == ParamIDs::tuning || id == ParamIDs::harmonySpeed
         || id.endsWith ("Low") || id.endsWith ("High");
 }
 

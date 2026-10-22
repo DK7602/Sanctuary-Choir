@@ -85,9 +85,11 @@ public:
     void reset() noexcept;
 
     /** Renders n samples at hz into out (overwrites), scaled per sample by amp. variant picks
-        between takes; jitter (0..1) staggers this singer's start inside the note. */
+        between takes; jitter (0..1) staggers this singer's start inside the note. zoneOffset
+        (semitones) sings from recordings that much lower or higher, which moves the formants:
+        -3 gives a shorter, child-like vocal tract. */
     void render (const SampleLayer& layer, float hz, const float* amp, float* out, int n,
-                 double outRate, int variant, float jitter) noexcept;
+                 double outRate, int variant, float jitter, float zoneOffset = 0.0f) noexcept;
 
 private:
     struct Head

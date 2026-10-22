@@ -833,6 +833,202 @@ TEST (wideRangesKeepChordSearchFast)
     CHECK (ms < 1.5);
 }
 
+TEST (learnFollowsKeyChanges)
+{
+    // A song that moves up a whole step for its last verses is harmonised in both keys; a song
+    // in one key, or with a single odd phrase, keeps its key.
+    const double sr = 48000.0;
+    auto song = [] (std::initializer_list<float> transpositions, bool oddPhrase)
+    {
+        std::vector<test::SungNote> m;
+        int k = 0;
+        for (float t : transpositions)
+        {
+            auto v = test::amazingGrace (t);
+            if (oddPhrase && k == 2)
+                v.resize (9);   // just the first phrase
+            m.insert (m.end(), v.begin(), v.end());
+            ++k;
+        }
+        return m;
+    };
+    HarmonySettings hs;
+    hs.scale = ScaleType::Major;
+
+    {
+        auto x = test::singMelody (song ({ 0, 0, 2, 2 }, false), sr, Tenor, 20.0f);
+        const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+        const auto score = harmoniseTake (take, hs);
+        std::printf ("  modulating song: %s\n", score.describe().c_str());
+        CHECK (score.keys.size() == 2);
+        if (score.keys.size() == 2)
+        {
+            CHECK (score.keys[0].scale.tonic == 7);   // G
+            CHECK (score.keys[1].scale.tonic == 9);   // A
+            // The change lands where the third verse starts (the 5th phrase).
+            CHECK (take.phrases.size() == 8);
+            if (take.phrases.size() == 8)
+                CHECK (score.keys[1].start == take.phrases[4].start);
+            // Every voice after the change sings in A major (or a chord tone).
+            int outside = 0;
+            for (const auto& e : score.events)
+                if (e.start >= score.keys[1].start)
+                    for (int s = 0; s < NumSections; ++s)
+                        if (e.voicing.primary (s) >= 0 && ! score.keys[1].scale.contains (e.voicing.primary (s)) && ! e.chord.contains (e.voicing.primary (s)))
+                            ++outside;
+            CHECK (outside == 0);
+        }
+        HarmonySettings fixed = hs;
+        fixed.key = 8;   // G chosen by hand: no detection, one key
+        CHECK (harmoniseTake (take, fixed).keys.size() == 1);
+    }
+    {
+        auto x = test::singMelody (song ({ 0, 0, 0 }, false), sr, Tenor, 20.0f);
+        const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+        const auto score = harmoniseTake (take, hs);
+        std::printf ("  one key: %s\n", score.describe().c_str());
+        CHECK (score.keys.size() == 1);
+        CHECK (score.scale.tonic == 7);
+    }
+    {
+        auto x = test::singMelody (song ({ 0, 0, 2, 0, 0 }, true), sr, Tenor, 20.0f);
+        const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+        const auto score = harmoniseTake (take, hs);
+        std::printf ("  one odd phrase: %s\n", score.describe().c_str());
+        CHECK (score.keys.size() == 1);
+        CHECK (score.scale.tonic == 7);
+    }
+}
+
+static std::array<std::vector<float>, NumSections * 2> runStems (ChoirEngine& eng, const std::vector<float>& x,
+                                                              const std::function<void (int64_t)>& perBlock = {})
+{
+    std::array<std::vector<float>, NumSections * 2> stems;
+    float* taps[NumSections * 2];
+    for (size_t i = 0; i < stems.size(); ++i) { stems[i].assign (x.size() + 256, 0.0f); taps[i] = stems[i].data(); }
+    eng.setStemTap (taps);
+    std::vector<float> l (256), r (256);
+    for (size_t pos = 0; pos + 256 <= x.size(); pos += 256)
+    {
+        if (perBlock) perBlock ((int64_t) pos);
+        eng.process (x.data() + pos, nullptr, l.data(), r.data(), 256);
+    }
+    eng.setStemTap (nullptr);
+    return stems;
+}
+
+TEST (childrenSingInTrebleRange)
+{
+    // A children's choir sings every part as trebles; the adult basses sit far below.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 60, 1.5f, 0.1f }, { 64, 1.5f, 0.1f }, { 67, 1.5f, 0.5f } }, sr, Soprano, 20.0f);
+    float adultBass = 0, kidsBass = 0, kidsTenor = 0;
+    for (Ensemble ens : { Ensemble::Choir, Ensemble::Children })
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.ensemble = ens;
+        eng.setParams (p);
+        auto st = runStems (eng, x);
+        const double lat = eng.getLatencySamples() / sr;
+        const float bass = medianPitch (st[Bass * 2], sr, 0.4 + lat, 4.0 + lat);
+        const float tenor = medianPitch (st[Tenor * 2], sr, 0.4 + lat, 4.0 + lat);
+        std::printf ("  %s: tenor %.1f, bass %.1f\n", ens == Ensemble::Children ? "children" : "choir", tenor, bass);
+        if (ens == Ensemble::Choir) adultBass = bass;
+        else { kidsBass = bass; kidsTenor = tenor; }
+    }
+    CHECK (adultBass > 0.0f && adultBass < 55.0f);
+    CHECK (kidsBass >= 54.5f);
+    CHECK (kidsTenor >= 54.5f);
+    CHECK (ensembleRange (Ensemble::Children, Bass, SectionRange { 40, 64 }).low >= 55);
+    CHECK (ensembleRange (Ensemble::Choir, Bass, SectionRange { 40, 64 }).low == 40);
+}
+
+TEST (congregationEntersLooser)
+{
+    // A congregation comes in late and scattered: the choir takes longer to reach full voice.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 57, 2.0f, 0.5f } }, sr, Tenor, 15.0f);
+    double rise[2] = {};
+    int k = 0;
+    for (Ensemble ens : { Ensemble::Choir, Ensemble::Congregation })
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.ensemble = ens;
+        p.humanize = 100.0f;
+        eng.setParams (p);
+        auto y = runEngine (eng, x, sr);
+        auto level = [&] (double t0) { double e = 0; for (int i = 0; i < 480; ++i) e += (double) y[(size_t) (t0 * sr) + (size_t) i] * y[(size_t) (t0 * sr) + (size_t) i]; return std::sqrt (e / 480.0); };
+        const double full = level (1.2);
+        double t = 0.0;
+        while (t < 1.0 && level (t) < 0.7 * full) t += 0.005;
+        rise[k++] = t;
+        std::printf ("  %s: reaches 70%% after %.3f s\n", ens == Ensemble::Choir ? "choir" : "congregation", t);
+    }
+    CHECK (rise[1] > rise[0] + 0.02);
+}
+
+TEST (rhythmGateFollowsTheSong)
+{
+    // Pulse 1/4 at 50 %: the choir sounds on the first half of every beat of the song and is
+    // silent on the second half, lined up with the host's beat after latency compensation.
+    const double sr = 48000.0, bpm = 120.0;
+    auto x = test::singMelody ({ { 57, 5.0f, 0.3f } }, sr, Tenor, 10.0f);
+    for (int pattern : { 1, 11 })
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.rhythmPattern = pattern;   // Pulse 1/4, then Arp Up
+        p.rhythmLength = 50.0f;
+        if (pattern == 11)
+            p.sections[Soprano].solo = true;   // the arpeggio gives sopranos every 4th sixteenth
+        eng.setParams (p);
+        auto y = runEngine (eng, x, sr, nullptr, [&] (int64_t pos) { eng.setTransport (true, bpm, (double) pos / sr * bpm / 60.0); });
+        double on = 0, off = 0;
+        size_t nOn = 0, nOff = 0;
+        for (size_t i = (size_t) (1.0 * sr); i < (size_t) (4.5 * sr); ++i)
+        {
+            const double beat = (double) i / sr * bpm / 60.0;
+            const double step = std::fmod (beat * 4.0, 16.0);
+            const double into = pattern == 1 ? std::fmod (beat, 1.0) : std::fmod (step, 4.0) - 3.0;   // sopranos: steps 3, 7, 11, 15
+            const bool open = pattern == 1 ? into > 0.05 && into < 0.45 : into > 0.1 && into < 0.4;
+            const bool closed = pattern == 1 ? into > 0.6 && into < 0.95 : (std::fmod (step, 4.0) > 0.7 && std::fmod (step, 4.0) < 2.9);
+            if (open) { on += (double) y[i] * y[i]; ++nOn; }
+            if (closed) { off += (double) y[i] * y[i]; ++nOff; }
+        }
+        const double ratioDb = 10.0 * std::log10 ((on / std::max<size_t> (1, nOn) + 1e-12) / (off / std::max<size_t> (1, nOff) + 1e-12));
+        std::printf ("  pattern %d: on/off %.1f dB\n", pattern, ratioDb);
+        CHECK (ratioDb > 20.0);
+    }
+}
+
+TEST (midiPartsSingTheirChannels)
+{
+    // Parts mode: notes on channels 1-4 are sung by sopranos, altos, tenors and basses as given.
+    const double sr = 48000.0;
+    std::vector<float> silence ((size_t) (3.0 * sr), 0.0f);
+    ChoirEngine eng;
+    eng.prepare (sr, 256);
+    auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+    p.midiParts = true;
+    eng.setParams (p);
+    std::array<NoteSet, NumSections> parts;
+    const int want[] = { 76, 67, 60, 48 };
+    for (int s = 0; s < NumSections; ++s) parts[(size_t) s].add (want[s]);
+    eng.setMidiParts (parts, 0.8f);
+    auto st = runStems (eng, silence);
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const float m = medianPitch (st[(size_t) s * 2], sr, 1.0, 2.5);
+        std::printf ("  section %d: %.1f (wanted %d)\n", s, m, want[s]);
+        CHECK_NEAR (m, want[s], 0.6);
+    }
+}
+
 TEST (performanceBudget)
 {
     const double sr = 48000.0;

@@ -1,7 +1,7 @@
 // Sanctuary Choir - MIX, FX and SETTINGS pages.
 (function () {
   "use strict";
-  const { Params, MiniKnob, Fader, pill, toggleSwitch, noteName } = window.SCW;
+  const { Params, MiniKnob, Fader, Dropdown, pill, toggleSwitch, noteName } = window.SCW;
 
   const SECTIONS = [
     { prefix: "sop", name: "SOPRANO", color: "#f27fa0", glow: "rgba(242,127,160,0.55)" },
@@ -17,6 +17,20 @@
     if (parent) parent.appendChild(e);
     return e;
   };
+
+  // A row of pills that pick one value of a choice parameter, with a small label in front.
+  function choicePills(parent, id, label, options) {
+    const row = el("div", "pill-row", parent);
+    row.style.alignItems = "center";
+    if (label) el("span", "pill-label", row, label);
+    options.forEach(([text, v, tip]) => {
+      const b = el("button", "pill", row, text);
+      if (tip) b.title = tip;
+      b.addEventListener("click", () => Params.set(id, v));
+      Params.on(id, (x) => b.classList.toggle("on", Math.round(x) === v));
+    });
+    return row;
+  }
 
   function noteStepper(parent, id, label) {
     const wrap = el("div", "stepper", parent);
@@ -73,17 +87,21 @@
     });
 
     const bottom = el("div", "group", page);
-    bottom.style.cssText = "margin-top:10px;padding:8px 14px 2px;position:relative";
-    el("h3", "", bottom, "PERFORMANCE \u00b7 HOW THE CHOIR SINGS");
-    const resp = el("div", "pill-row", bottom);
-    resp.style.cssText = "position:absolute;right:14px;top:6px;align-items:center";
-    el("span", "", resp, "RESPONSE").style.cssText = "font-family:Montserrat,sans-serif;font-weight:600;font-size:10.5px;letter-spacing:2px;color:#a8977c;margin-right:4px";
-    [["WITH ME", 0, "The choir sings along with you"], ["ECHO", 1, "Call & response: the choir answers each phrase right after you sing it"]].forEach(([label, v, tip]) => {
-      const b = el("button", "pill", resp, label);
-      b.title = tip;
-      b.addEventListener("click", () => Params.set("response", v));
-      Params.on("response", (x) => b.classList.toggle("on", Math.round(x) === v));
-    });
+    bottom.style.cssText = "margin-top:10px;padding:8px 14px 2px";
+    const head = el("div", "", bottom);
+    head.style.cssText = "display:flex;align-items:center;gap:22px;margin-bottom:2px";
+    el("h3", "", head, "PERFORMANCE").style.margin = "0";
+    const ens = choicePills(head, "ensemble", "ENSEMBLE", [
+      ["CHOIR", 0, "An adult choir: sopranos, altos, tenors and basses"],
+      ["CHILDREN", 1, "A children's choir: light, straight voices, every part sung by trebles"],
+      ["GANG", 2, "Gang vocals: shouted, punchy and loose, no vibrato"],
+      ["CONGREGATION", 3, "A congregation: untrained voices, wide tuning, late entrances"],
+    ]);
+    ens.style.marginLeft = "auto";
+    choicePills(head, "response", "RESPONSE", [
+      ["WITH ME", 0, "The choir sings along with you"],
+      ["ECHO", 1, "Call & response: the choir answers each phrase right after you sing it"],
+    ]);
     const knobs = el("div", "knob-row", bottom);
     const tips = {
       harmonySpeed: "How readily the choir changes chord. Low holds chords through passing notes; high gives every note its own chord.",
@@ -126,9 +144,29 @@
     el("h3", "", bus, "CHOIR BUS");
     const bk = el("div", "knob-row", bus);
     [["lowCut", "LOW CUT"], ["highCut", "HIGH CUT"], ["warmth", "WARMTH"], ["glue", "GLUE"]].forEach(([id, l]) => new MiniKnob(bk, id, l));
-    const hint = el("p", "", page);
-    hint.style.cssText = "text-align:center;margin-top:14px;color:#a8977c";
-    hint.innerHTML = "SPACE spreads the singers across the stage and adds early reflections \u00b7 REVERB sets how much of the room you hear";
+    venues.title = "SPACE spreads the singers across the stage and adds early reflections; REVERB sets how much of the room you hear";
+
+    // Rhythm: tempo-synced gates and arpeggios on the choir.
+    const rh = el("div", "group", page);
+    rh.style.cssText = "margin-top:12px;padding:8px 14px 4px;display:flex;align-items:center;gap:22px";
+    const rhLeft = el("div", "", rh);
+    rhLeft.style.cssText = "display:flex;flex-direction:column;gap:8px;width:250px";
+    el("h3", "", rhLeft, "RHYTHM").style.margin = "0";
+    const dd = el("div", "dropdown field", rhLeft);
+    dd.dataset.param = "rhythmPattern";
+    dd.title = "Gate the choir in time with your song. The Arp patterns pass the chord from section to section.";
+    new Dropdown(dd);
+    const rhMid = el("div", "", rh);
+    rhMid.style.cssText = "display:flex;flex-direction:column;gap:10px;--label-w:78px";
+    choicePills(rhMid, "rhythmRate", "RATE", [["1/8", 0, "Half speed: eighth notes"], ["1/16", 1, "Sixteenth notes"], ["1/32", 2, "Double speed: thirty-second notes"]]);
+    choicePills(rhMid, "rhythmSections", "SECTIONS", [["ALL", 0, "The whole choir"], ["S + A", 1, "Only sopranos and altos; tenors and basses keep singing"], ["T + B", 2, "Only tenors and basses; sopranos and altos keep singing"]]);
+    const rhKnobs = el("div", "knob-row", rh);
+    rhKnobs.style.cssText = "flex:1";
+    new MiniKnob(rhKnobs, "rhythmLength", "LENGTH");
+    new MiniKnob(rhKnobs, "rhythmDepth", "DEPTH");
+    const rhNote = el("p", "", rh);
+    rhNote.style.cssText = "width:250px;font-size:15px;line-height:1.3;color:#a8977c";
+    rhNote.textContent = "Follows your DAW's tempo while it plays. Rendered takes play it live; exported stems are without it.";
   }
 
   function buildSettings(page, info) {
@@ -141,8 +179,11 @@
 
     const midi = el("div", "group", left);
     el("h3", "", midi, "MIDI");
-    toggleSwitch(midi, "midiEnabled", "MIDI keyboard controls the harmony");
-    el("p", "", midi, "Hold chords to choose the choir's harmony. With no voice coming in, the choir sings the notes you play like an instrument.");
+    const midiRow = el("div", "", midi);
+    midiRow.style.cssText = "display:flex;gap:22px;flex-wrap:wrap";
+    toggleSwitch(midiRow, "midiEnabled", "MIDI controls the harmony");
+    toggleSwitch(midiRow, "midiParts", "Parts on channels 1\u20134").title = "Channels 1, 2, 3 and 4 sing exactly the soprano, alto, tenor and bass notes you play";
+    el("p", "", midi, "Hold chords to choose the harmony; with no voice coming in, the choir sings what you play. Program Change picks a preset.");
 
     const row2 = el("div", "", left);
     row2.style.cssText = "display:flex;gap:12px";
@@ -204,6 +245,8 @@
         describe(Params.get("latencyMode"));
       }
       showVoices(st.voices);
+      storedSlots = st.scenes || [];
+      showScenes();
       const l = st.learn || {};
       preview.disabled = !l.hasTake;
       preview.textContent = l.previewing ? "\u25a0  STOP PREVIEW" : "\u25b6  PREVIEW";
@@ -247,16 +290,61 @@
     };
     showVoices(null);
 
+    // Scenes: store the sound in a slot, recall it with a click or by automating Scene.
+    const scenes = el("div", "group", rightCol);
+    scenes.style.cssText = "padding:10px 14px";
+    const sHead = el("div", "", scenes);
+    sHead.style.cssText = "display:flex;align-items:center;gap:10px";
+    el("h3", "", sHead, "SCENES").style.margin = "0";
+    const slotRow = el("div", "pill-row", sHead);
+    slotRow.style.marginLeft = "auto";
+    let sceneMode = "recall";
+    const slots = [];
+    for (let i = 0; i < 8; i++) {
+      const b = el("button", "pill scene", slotRow, String(i + 1));
+      b.addEventListener("click", () => {
+        SC.send({ type: "cmd", name: sceneMode === "store" ? "sceneStore" : sceneMode === "clear" ? "sceneClear" : "sceneRecall", index: i });
+        setMode("recall");
+      });
+      slots.push(b);
+    }
+    const modeRow = el("div", "pill-row", sHead);
+    const storeBtn = el("button", "pill", modeRow, "STORE");
+    storeBtn.title = "Then click a slot to store the current sound in it";
+    const clearBtn = el("button", "pill", modeRow, "CLEAR");
+    clearBtn.title = "Then click a slot to empty it";
+    const sText = el("p", "", scenes);
+    sText.style.cssText = "font-size:15px;line-height:1.3;margin-top:6px";
+    function setMode(m) {
+      sceneMode = m;
+      storeBtn.classList.toggle("on", m === "store");
+      clearBtn.classList.toggle("on", m === "clear");
+      sText.innerHTML = m === "store" ? "Click a slot to store the current sound in it."
+        : m === "clear" ? "Click a slot to empty it."
+        : "<b>Store</b> a sound for each part of your song, then click a slot (or automate <b>Scene</b> in your DAW) to switch.";
+    }
+    storeBtn.addEventListener("click", () => setMode(sceneMode === "store" ? "recall" : "store"));
+    clearBtn.addEventListener("click", () => setMode(sceneMode === "clear" ? "recall" : "clear"));
+    setMode("recall");
+    let storedSlots = [];
+    const showScenes = () => {
+      const cur = Math.round(Params.get("scene")) - 1;
+      slots.forEach((b, i) => {
+        b.classList.toggle("stored", !!storedSlots[i]);
+        b.classList.toggle("on", i === cur && !!storedSlots[i]);
+        b.title = storedSlots[i] ? "Scene " + (i + 1) + ": click to bring it back" : "Scene " + (i + 1) + " is empty: STORE, then click here";
+      });
+    };
+    Params.on("scene", showScenes);
+
     const right = el("div", "group", rightCol);
     right.style.cssText = "flex:1";
     el("h3", "", right, "HOW TO USE SANCTUARY CHOIR");
     const ol = el("ol", "", right);
     ol.style.cssText = "margin:4px 0 0;padding-left:22px";
     [
-      "<b>Sing</b> into the plugin on a stereo track. The choir harmonises you live in your key.",
-      "<b>Learn</b>, then <b>Render</b>: phrase-aware harmony at the best quality, in sync with your song.",
-      "<b>Chord Speed</b> (MIX) sets how often the chords change. Click the lock by Auto to keep the detected key.",
-      "<b>Freeze</b> holds the chord. <b>Response: Echo</b> answers each phrase.",
+      "<b>Sing</b> into the plugin on a stereo track; <b>Learn</b>, then <b>Render</b> for the best quality.",
+      "<b>Ensemble</b> and <b>Chord Speed</b> are on MIX, <b>Rhythm</b> on FX.",
     ].forEach((html) => { const li = el("li", "", ol); li.innerHTML = html; li.style.fontSize = "15.5px"; });
     foot = el("p", "", right);
     foot.style.cssText = "margin-top:8px;color:#8f7f66;font-size:14px";
