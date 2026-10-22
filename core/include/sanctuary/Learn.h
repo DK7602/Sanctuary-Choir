@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ChoirEngine.h"
+#include "ChordDetector.h"
 
 #include <atomic>
 #include <functional>
@@ -34,6 +35,7 @@ struct TakeAnalysis
     std::vector<LearnedPhrase> phrases;
     std::array<float, 12> pcHistogram {};
     float voicedSeconds = 0.0f;
+    std::vector<BandChord> bandChords;   // what the band played during the take (side-chain), if anything
 
     bool isEmpty() const { return notes.empty(); }
 };
@@ -51,6 +53,7 @@ struct HarmonySettings
     std::array<bool, NumSections> active { true, true, true, true };
     bool wordsMode = false;
     float speed = 0.5f;          // harmony speed 0..1 (see HarmonyContext::speed)
+    bool followBand = true;      // use the band's chords when the take has them
 };
 
 struct LearnedEvent
@@ -71,6 +74,7 @@ public:
     Scale scale;                       // the key at the start
     std::vector<KeyRegion> keys;       // every key in order (more than one when the song modulates)
     bool keyWasDetected = false;
+    bool followsBand = false;          // harmonised with the band's chords (side-chain)
     std::vector<LearnedEvent> events;
     int numPhrases = 0, numNotes = 0;
     float durationSeconds = 0.0f;

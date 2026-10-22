@@ -450,9 +450,13 @@
     state.keyConfidence = m.keyConfidence || 0;
     const scaleName = (Params.format("scale") || "").toUpperCase();
     $("keyReadout").textContent = "KEY " + KEY_NAMES[m.keyTonic] + " " + scaleName;
-    $("chordReadout").textContent = m.chord ? "\u00b7  " + m.chord : "";
+    // Following the band: its chord (with the bass note), marked BAND.
+    const band = !!m.followingBand && !!m.bandChord;
+    $("chordReadout").textContent = band ? "\u00b7  " + m.bandChord : (m.chord ? "\u00b7  " + m.chord : "");
+    $("chordReadout").classList.toggle("band", band);
+    if (state.settingsInfo && state.settingsInfo.onMeters) state.settingsInfo.onMeters(m);
     const now = performance.now();
-    if (m.leadVoiced || out > 0.05) state.lastActivity = now;
+    if (m.leadVoiced || out > 0.05 || band) state.lastActivity = now;
     $("harmonyBadge").style.opacity = now - state.lastActivity < 4000 ? "1" : "0";
     $("singerBadge").style.opacity = now - state.lastSizeChange < 2500 ? "1" : "0";
   }

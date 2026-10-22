@@ -75,6 +75,7 @@
       choice("rhythmSections", "Rhythm Sections", ["Whole Choir", "Sopranos & Altos", "Tenors & Basses"]),
       bool("midiEnabled", "MIDI Control", true),
       bool("midiParts", "MIDI Parts (Ch 1-4)", false),
+      bool("followBand", "Follow the Band", true),
       { id: "tuning", name: "Tuning (A4)", type: "float", min: 415, max: 466, interval: 0.1, skew: 1, default: 440, label: "Hz" },
       choice("latencyMode", "Monitoring", ["Studio (aligned)", "Live (low latency)"])
     );
@@ -189,6 +190,9 @@
         keyTonic: values.key > 0 ? values.key - 1 : (demoLevel !== undefined ? 7 : 0), keyMinor: [1, 2, 3, 6].includes(values.scale), keyConfidence: 0.8,
         chord: singing ? (demoLevel !== undefined ? chordNamesG : chordNames)[beat] : "", in: env * 0.6, out: env * 0.8, frozen: !!values.freeze,
         bpm: window.SC_DEMO_BEAT !== undefined ? 120 : 0, beat: window.SC_DEMO_BEAT,
+        // The preview pretends a band is on the side-chain, playing the same progression.
+        sidechain: true, bandHeard: singing, followingBand: singing && !!values.followBand,
+        bandChord: singing ? (demoLevel !== undefined ? chordNamesG : chordNames)[beat] : "",
       });
     }
 

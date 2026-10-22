@@ -62,6 +62,8 @@ public:
     /** Song tempo while the host plays (0 when stopped or unknown), the beat position at the last
         block, and when that block ran (Time::getMillisecondCounterHiRes). */
     std::atomic<double> songBpm { 0.0 }, songBeat { 0.0 }, songBeatTime { 0.0 };
+    /** The side-chain bus is enabled (something can be routed to it). */
+    std::atomic<bool> sidechainConnected { false };
 
     /** Parameter ids changed since the last call (message thread). */
     juce::StringArray takeChangedParameters();
@@ -115,6 +117,7 @@ private:
     // Dry delay used while bypassed
     juce::AudioBuffer<float> bypassDelay;
     int bypassPos = 0;
+    juce::AudioBuffer<float> sidechainCopy;
     void writeBypassDelay (const juce::AudioBuffer<float>& buffer, int n, int numIn);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SanctuaryProcessor)

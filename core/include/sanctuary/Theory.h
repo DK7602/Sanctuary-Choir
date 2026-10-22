@@ -75,6 +75,12 @@ std::vector<Chord> buildChordVocabulary (const Scale& scale, Style style);
 void buildChordVocabulary (const Scale& scale, Style style, std::vector<Chord>& out);
 /** Build a chord from arbitrary pitch classes (e.g. MIDI chord input). */
 Chord chordFromPitchClasses (const int* notes, int count);
+
+/** Chord qualities recognised in a band's audio. */
+enum class ChordQuality : int { Major = 0, Minor, Dominant7, Major7, Minor7, Sus4, Diminished, Count };
+/** Intervals above the root for a quality (3 or 4 notes; unused entries -1). */
+std::array<int, 4> chordQualityIntervals (ChordQuality q);
+Chord makeChordOfQuality (int root, ChordQuality q, bool preferFlats = false);
 /** Functional progression bonus (positive = idiomatic) between chord degrees. */
 float progressionBonus (const Chord& from, const Chord& to, bool minorKey);
 
@@ -114,6 +120,7 @@ struct VoicingRequest
     bool wordsMode = false;     // penalise very large shifts away from the lead voice
     std::array<int, 16> explicitNotes {}; // MIDI chord with 3+ notes: voice these directly
     int numExplicit = 0;
+    int bassPc = -1;            // the band's bass note (pitch class): the choir's bass sings it if it can
 };
 
 Voicing voiceChord (const VoicingRequest& req);

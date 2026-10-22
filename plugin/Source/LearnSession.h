@@ -39,7 +39,12 @@ public:
         int64_t hostPosition = 0;   // samples
         int64_t engineWritten = 0;  // engine input samples consumed before this block
         int latency = 0;
+        const float* sidechainL = nullptr;   // the band on the side-chain (recorded with the take)
+        const float* sidechainR = nullptr;
     };
+
+    /** The side-chain bus is enabled (audio thread sets it every block). */
+    std::atomic<bool> bandConnected { false };
 
     /** Records the block when learning; may replace the input with the preview take. */
     void processInput (float* const* channels, int numChannels, int numSamples, BlockInfo& info);
@@ -78,7 +83,9 @@ private:
     void timerCallback() override;
     void finishRecording();
     void releaseCapture();
-    void startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter);
+    void startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter,
+                        std::vector<float> band = {}, std::vector<sc::BandChord> bandChords = {});
+    void allocateChunk (int64_t index);
     void matchSessionRate();
     void publish (std::unique_ptr<PlaybackData> data);
     void setPhase (Phase p);
@@ -94,6 +101,8 @@ private:
     static constexpr int maxChunks = 1024;   // ~11 minutes at 48 kHz
     static constexpr int kChunksAhead = 32;  // ~20 s allocated ahead, for faster-than-realtime bounces
     std::array<std::atomic<float*>, maxChunks> chunks {};
+    std::array<std::atomic<float*>, maxChunks> bandChunks {};   // the side-chain, sample for sample
+    std::atomic<bool> captureBand { false };
     std::vector<std::unique_ptr<float[]>> chunkStorage;
     std::vector<std::pair<std::vector<std::unique_ptr<float[]>>, juce::uint32>> chunkGraveyard;   // freed once the audio thread let go
     std::atomic<int64_t> captured { 0 };

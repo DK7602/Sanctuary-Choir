@@ -52,6 +52,7 @@ namespace ParamIDs
     // Settings
     inline constexpr const char* midiEnabled = "midiEnabled";
     inline constexpr const char* midiParts = "midiParts";
+    inline constexpr const char* followBand = "followBand";
     inline constexpr const char* tuning = "tuning";
     inline constexpr const char* latencyMode = "latencyMode";
 }

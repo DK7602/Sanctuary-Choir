@@ -10,7 +10,8 @@ static constexpr int kStateMagic = 0x31484353; // "SCH1"
 SanctuaryProcessor::SanctuaryProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", AudioChannelSet::stereo(), true)),
+                          .withOutput ("Output", AudioChannelSet::stereo(), true)
+                          .withInput ("Side-chain (band)", AudioChannelSet::stereo(), false)),
       state (*this, nullptr, "SanctuaryChoir", createParameterLayout()),
       cache (state),
       presets (state)
@@ -50,6 +51,13 @@ bool SanctuaryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
     const auto in = layouts.getMainInputChannelSet();
     if (out != AudioChannelSet::mono() && out != AudioChannelSet::stereo())
         return false;
+    if (layouts.inputBuses.size() > 1)
+    {
+        // The side-chain (the band): off, mono or stereo.
+        const auto sc = layouts.getChannelSet (true, 1);
+        if (! sc.isDisabled() && sc != AudioChannelSet::mono() && sc != AudioChannelSet::stereo())
+            return false;
+    }
     return in == AudioChannelSet::mono() || in == AudioChannelSet::stereo() || in.isDisabled();
 }
 
@@ -61,6 +69,8 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         engine.seedKey (key % 12, key >= 12);
     bypassDelay.setSize (2, engine.getLatencySamples() + 1);
     bypassDelay.clear();
+    sidechainCopy.setSize (2, std::max (samplesPerBlock * 2, 16384));
+    sidechainCopy.clear();
     bypassPos = 0;
     learn.prepare (sampleRate);
     engineWritten = 0;
@@ -117,10 +127,28 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
 {
     ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
-    const int numIn = getTotalNumInputChannels();
+    const int numIn = getMainBusNumInputChannels();
     const int numOut = getTotalNumOutputChannels();
     if (n == 0 || numOut == 0)
         return;
+
+    // The band on the side-chain. Copied first: its channels share the buffer with the outputs.
+    const float* scL = nullptr;
+    const float* scR = nullptr;
+    if (getBusCount (true) > 1)
+    {
+        auto sc = getBusBuffer (buffer, true, 1);
+        if (sc.getNumChannels() > 0 && n <= sidechainCopy.getNumSamples())
+        {
+            for (int ch = 0; ch < std::min (2, sc.getNumChannels()); ++ch)
+                sidechainCopy.copyFrom (ch, 0, sc, ch, 0, n);
+            scL = sidechainCopy.getReadPointer (0);
+            scR = sc.getNumChannels() > 1 ? sidechainCopy.getReadPointer (1) : nullptr;
+        }
+    }
+    sidechainConnected.store (scL != nullptr, std::memory_order_relaxed);
+    learn.bandConnected.store (scL != nullptr, std::memory_order_relaxed);
+    engine.setSidechain (scL, scR);
 
     updateMidi (midi);
     const sc::EngineParams p = currentParams();
@@ -185,6 +213,8 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     }
     info.engineWritten = engineWritten;
     info.latency = engine.getReportedLatency();   // what the host compensates (0 in Live mode)
+    info.sidechainL = scL;
+    info.sidechainR = scR;
 
     if (numIn == 0)
         buffer.clear();
@@ -238,7 +268,7 @@ void SanctuaryProcessor::processBlockBypassed (AudioBuffer<float>& buffer, MidiB
     songBpm.store (0.0, std::memory_order_relaxed);
 
     const int n = buffer.getNumSamples();
-    const int numIn = getTotalNumInputChannels();
+    const int numIn = getMainBusNumInputChannels();
     const int numOut = getTotalNumOutputChannels();
     if (numIn == 0)
         buffer.clear();

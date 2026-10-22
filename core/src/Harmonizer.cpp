@@ -29,6 +29,7 @@ float passingNoteTime (float speed)
 void LiveHarmonizer::reset()
 {
     leadNote = candidate = -1;
+    lastBand = -1;
     melodyCentre = -1.0f;
     candidateTime = outOfChordTime = 0.0f;
     silence = 10.0f;
@@ -123,6 +124,25 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
         lastMidi = ctx.midi;
         changed = true;
     }
+    // The band's chord (side-chain) decides the harmony unless MIDI does. Only a different triad
+    // or bass re-voices the choir: C and Cmaj7 are the same chord to sing.
+    const bool bandOn = ! midiOn && ctx.band != nullptr;
+    bool bandChanged = false;
+    if (bandOn)
+    {
+        const Chord& b = *ctx.band;
+        const int triad = b.root + 12 * wrapPc (b.tones[1] - b.root) + 144 * wrapPc (b.tones[2] - b.root) + 1728 * (ctx.bandBass + 1);
+        if (triad != lastBand)
+        {
+            lastBand = triad;
+            bandChanged = changed = true;
+        }
+    }
+    else if (lastBand >= 0)
+    {
+        lastBand = -1;
+        changed = true;
+    }
     if (ctx.mode != lastMode || ctx.active != lastActive)
     {
         lastMode = ctx.mode;
@@ -130,7 +150,7 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
         changed = true;
     }
 
-    if (leadNote >= 0 && haveChord && ! midiOn && ! chord.contains (leadNote))
+    if (leadNote >= 0 && haveChord && ! midiOn && ! bandOn && ! chord.contains (leadNote))
         outOfChordTime += dt;
     else
         outOfChordTime = 0.0f;
@@ -141,7 +161,7 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
     if (changed && (leadNote >= 0 || midiOn || ctx.mode == HarmonyMode::Drone))
     {
         // A quick stepwise note outside the chord is a passing note: keep the chord.
-        if (! newPhrase && ! midiOn && outOfChordTime <= holdTime && holdThroughPassingNote (ctx, previousLead))
+        if (! newPhrase && ! midiOn && ! bandChanged && outOfChordTime <= holdTime && holdThroughPassingNote (ctx, previousLead))
             return;
         choose (ctx, newPhrase);
     }
@@ -189,9 +209,14 @@ void LiveHarmonizer::choose (const HarmonyContext& ctx, bool newPhrase)
     }
 
     Chord next = chord;
+    const bool bandOn = ! midiOn && ctx.band != nullptr;
     if (midiOn)
     {
         next = chordFromPitchClasses (ctx.midi.notes.data(), ctx.midi.count);
+    }
+    else if (bandOn)
+    {
+        next = *ctx.band;
     }
     else if (ctx.mode == HarmonyMode::Drone)
     {
@@ -251,6 +276,8 @@ void LiveHarmonizer::choose (const HarmonyContext& ctx, bool newPhrase)
     req.active = ctx.active;
     req.previous = voicing.valid ? &voicing : nullptr;
     req.wordsMode = ctx.wordsMode;
+    if (bandOn)
+        req.bassPc = ctx.bandBass;
     if (midiOn && ctx.midi.count >= 3)
     {
         req.numExplicit = ctx.midi.count;

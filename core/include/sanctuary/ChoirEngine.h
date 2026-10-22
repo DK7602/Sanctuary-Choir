@@ -6,6 +6,7 @@
 //   singers -> section buses (S/A/T/B) -> level/pan/width -> tone/glue -> + reverb -> + lead -> limiter
 #pragma once
 
+#include "ChordDetector.h"
 #include "Effects.h"
 #include "Harmonizer.h"
 #include "Psola.h"
@@ -94,6 +95,7 @@ struct EngineParams
     // Settings page
     bool midiEnabled = true;     // MIDI chords steer harmony; MIDI alone plays the choir
     bool midiParts = false;      // MIDI channels 1-4 sing the soprano, alto, tenor and bass parts
+    bool followBand = true;      // harmonise with the chords heard on the side-chain (band, keys, track)
     float a4 = 440.0f;
     bool lowLatency = false;     // Live monitoring: lead undelayed, vowel choir ~15 ms, Words keep full latency
 
@@ -117,6 +119,9 @@ struct EngineSnapshot
     char chordName[16] {};
     float inputPeak = 0.0f, outputPeak = 0.0f;
     bool frozen = false;
+    bool bandHeard = false;        // audio is arriving on the side-chain
+    bool followingBand = false;    // ... and the choir is singing the band's chord
+    char bandChord[16] {};         // e.g. "G/B", empty if none
 };
 
 /** Pre-rendered section stems to play instead of live singers (learned + rendered takes). */
@@ -161,6 +166,9 @@ public:
     void setMidi (const NoteSet& held, float velocity);
     /** Notes held on MIDI channels 1-4 (soprano, alto, tenor, bass), used when params.midiParts. */
     void setMidiParts (const std::array<NoteSet, NumSections>& parts, float velocity);
+    /** Side-chain audio for this block (the band, keys or a backing track), or nullptr. Call
+        before process(); the pointers are used during that call only. */
+    void setSidechain (const float* left, const float* right) noexcept { scL = left; scR = right; }
     /** The host's transport for the rhythm effects (call before process). Not playing: the
         rhythm runs freely at the last tempo. ppq is the song position at the block start. */
     void setTransport (bool playing, double bpm, double ppq) noexcept { transportPlaying = playing; transportBpm = bpm; transportPpq = ppq; }
@@ -243,6 +251,12 @@ private:
     float midiVelocity = 0.0f;
     std::array<NoteSet, NumSections> midiParts;
     float partsVelocity = 0.0f;
+
+    // The band on the side-chain.
+    ChordDetector bandDetector;
+    const float* scL = nullptr;
+    const float* scR = nullptr;
+    std::vector<float> bandScratch;
     bool partsHeld() const noexcept;
 
     // How the ensemble changes the style (set with the parameters).

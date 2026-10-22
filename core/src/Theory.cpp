@@ -289,6 +289,28 @@ void buildChordVocabulary (const Scale& scale, Style style, std::vector<Chord>& 
         v.push_back (makeChord (t + 5, { 0, 4, 7 }, 17, 0.2f, flats)); // major IV (dorian colour)
 }
 
+std::array<int, 4> chordQualityIntervals (ChordQuality q)
+{
+    switch (q)
+    {
+        case ChordQuality::Minor:      return { 0, 3, 7, -1 };
+        case ChordQuality::Dominant7:  return { 0, 4, 7, 10 };
+        case ChordQuality::Major7:     return { 0, 4, 7, 11 };
+        case ChordQuality::Minor7:     return { 0, 3, 7, 10 };
+        case ChordQuality::Sus4:       return { 0, 5, 7, -1 };
+        case ChordQuality::Diminished: return { 0, 3, 6, -1 };
+        default:                       return { 0, 4, 7, -1 };
+    }
+}
+
+Chord makeChordOfQuality (int root, ChordQuality q, bool preferFlats)
+{
+    const auto iv = chordQualityIntervals (q);
+    if (iv[3] >= 0)
+        return makeChord (root, { iv[0], iv[1], iv[2], iv[3] }, 20, 1.0f, preferFlats);
+    return makeChord (root, { iv[0], iv[1], iv[2] }, 20, 1.0f, preferFlats);
+}
+
 Chord chordFromPitchClasses (const int* notes, int count)
 {
     std::array<int, 12> pcsBuf {};
@@ -664,6 +686,8 @@ Voicing voiceChord (const VoicingRequest& req)
             static const float rolePenalty[] = { 0.0f, 1.2f, 2.0f, 2.8f };
             float p = role >= 0 ? rolePenalty[role] : 3.0f;
             if (role == 1 && (req.style == Style::Gospel || req.style == Style::Worship)) p = 0.6f;
+            if (req.bassPc >= 0)   // the band's bass decides the inversion (G/B: B in the bass)
+                p = wrapPc (lowest) == req.bassPc ? 0.0f : 3.5f;
             cost += cur[Bass] >= 0 ? p : p * 0.5f;
         }
 

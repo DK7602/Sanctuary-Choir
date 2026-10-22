@@ -236,6 +236,8 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     revOutR.assign (kChunk, 0.0f);
     scratch.assign (kChunk, 0.0f);
 
+    bandDetector.prepare (sr);
+    bandScratch.assign (kChunk, 0.0f);
     tone.prepare (sr);
     glue.prepare (sr);
     reverb.prepare (sr);
@@ -312,6 +314,7 @@ void ChoirEngine::reset()
     sectionNorm.fill (-1.0f);
     gateGain.fill (1.0f);
     freeBeat = 0.0;
+    bandDetector.reset();
 }
 
 void ChoirEngine::scheduleReplay (int64_t start, int64_t end)
@@ -699,10 +702,16 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     if (g.voiced)
         g.midi = hzToMidi (g.hz, params.a4);
 
+    // The band's chord, if the choir follows it.
+    const Chord* band = params.followBand && bandDetector.hearing() ? bandDetector.chord() : nullptr;
+
     if (params.key == 0)
     {
         if (g.voiced)
             keyTracker.addNote ((int) std::lround (g.midi), hop, g.clarity);
+        if (band != nullptr)   // the band's chords say a lot about the key too
+            for (int i = 0; i < band->numTones; ++i)
+                keyTracker.addNote (band->tones[(size_t) i], hop, i == 0 ? 0.5f : 0.3f);
         const bool minorFamily = Scale { 0, params.scale }.isMinorFamily();
         keyTonic = keyTracker.update (hop, minorFamily);
         if (keyTracker.getConfidence() >= 0.35f)
@@ -756,6 +765,8 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
         ctx.freeze = frozen;
         ctx.midi = params.midiEnabled ? midiHeld : NoteSet{};
         ctx.midiControlsHarmony = params.midiEnabled;
+        ctx.band = band;
+        ctx.bandBass = band != nullptr ? bandDetector.bass() : -1;
         ctx.speed = clampv (params.harmonySpeed / 100.0f, 0.0f, 1.0f);
         harmonizer.process (g, ctx, hop);
         cf.voicing = harmonizer.getVoicing();
@@ -1037,6 +1048,9 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
     }
     freeBeat = blockBeat + (double) n * blockBpm / (60.0 * sr);
     wasFrozen = params.freeze;
+    if (scL == nullptr && bandDetector.hearing())
+        bandDetector.reset();   // the side-chain was disconnected
+    scL = scR = nullptr;        // valid for this block only
     publishSnapshot();
 }
 
@@ -1061,6 +1075,19 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
     {
         mono[(size_t) i] = inR != nullptr ? 0.5f * (inL[i] + inR[i]) : inL[i];
         inPeakAccum = std::max (inPeakAccum, std::abs (mono[(size_t) i]));
+    }
+
+    // The band on the side-chain: what chord is it playing?
+    if (scL != nullptr)
+    {
+        for (int i = 0; i < c; ++i)
+        {
+            const float l = scL[offset + i], r = scR != nullptr ? scR[offset + i] : l;
+            const float v = 0.5f * (l + r);
+            bandScratch[(size_t) i] = isFiniteSample (v) ? v : 0.0f;
+        }
+        bandDetector.setSpeed (clampv (params.harmonySpeed / 100.0f, 0.0f, 1.0f));
+        bandDetector.push (bandScratch.data(), c);
     }
 
     tracker.push (mono.data(), c);
@@ -1391,6 +1418,21 @@ void ChoirEngine::publishSnapshot()
     const std::string& name = harmonizer.getChord().name;
     std::snprintf (snap.chordName, sizeof (snap.chordName), "%s", scoreSource != nullptr ? "" : name.c_str());
     snap.frozen = params.freeze;
+    snap.bandHeard = bandDetector.hearing();
+    const Chord* band = bandDetector.hearing() ? bandDetector.chord() : nullptr;
+    snap.followingBand = band != nullptr && params.followBand && scoreSource == nullptr;
+    if (band != nullptr)
+    {
+        const int bass = bandDetector.bass();
+        if (bass >= 0 && bass != band->root)
+            std::snprintf (snap.bandChord, sizeof (snap.bandChord), "%s/%s", band->name.c_str(), getPitchClassName (bass, band->name.find ('b') != std::string::npos));
+        else
+            std::snprintf (snap.bandChord, sizeof (snap.bandChord), "%s", band->name.c_str());
+    }
+    else
+    {
+        snap.bandChord[0] = 0;
+    }
 
     if (! snapLock.test_and_set (std::memory_order_acquire))
     {

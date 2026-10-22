@@ -67,7 +67,26 @@ Other buttons:
 
 The learned take is saved inside your project. If you reopen the project at another sample rate, Sanctuary converts the take so it stays in tune and in time.
 
-## 5. More things to try
+## 5. Follow the band
+
+Sanctuary can listen to your band, keys or backing track and sing **the chords they play**, instead of guessing them from your melody. A melody alone often can't tell an F chord from a D minor; the band can.
+
+1. Send the band to Sanctuary's **side-chain** input. A chordal part works best: keys, guitar, pads, or a backing track without vocals. The full mix also works.
+   - **Cubase / Nuendo**: in the plug-in window, switch on side-chain (the side-chain button at the top). On the band's track or group, add a send to *Sanctuary Choir – Side-Chain*.
+   - **Logic Pro**: in the Sanctuary Choir window, pick the band's track or bus in the **Side Chain** menu at the top right.
+   - **Studio One**: click **Side-Chain** at the top of the plug-in window and tick the band's track, or add a send to the plug-in's side-chain.
+   - **Reaper**: send the band's track to channels 3/4 of the vocal track. The plug-in's side-chain uses inputs 3/4 (check the pin connector if needed).
+   - **Ableton Live 11.1 or later**: open the plug-in's side-chain section in the device and choose the band's track under *Audio From*.
+   - **FL Studio**: route the band's mixer track to the vocal's mixer track as a side-chain, then map it to the plug-in's side-chain input in the wrapper's *Processing* tab.
+   - Menus differ between DAW versions. Look for "side-chain" in your DAW's manual if yours looks different.
+2. **Settings → Follow the band** is on by default. The Settings page shows what Sanctuary hears, and the main page shows the band's chord with a **BAND** tag, e.g. *G/B*.
+3. Sing as usual. The choir sings the band's chords, follows inversions (the choir's basses sing the band's bass note) and uses the band to find the key.
+
+**Live** the choir takes about a third of a second to follow a chord change. **Chord Speed** (MIX) sets the balance: turn it up for quicker changes, down for steadier chords with busy players. For exact timing, use **LEARN** with the band on the side-chain. Sanctuary records the band along with your voice, finds every chord change in it, and harmonises each note with the chord under it. The plaque then shows *· WITH THE BAND*. The band's chords are saved with your project.
+
+MIDI chords still come first: hold a chord and the choir sings it, whatever the band plays.
+
+## 6. More things to try
 
 - **Presets** (top left) come in categories: Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, and Kids & Crowds. Point at a category to see its presets. Presets change the choir's sound, not your song: the Key and Scale you set stay as they are.
 - **Ensemble** (MIX page) chooses who sings:

@@ -56,8 +56,8 @@ struct Rig
         session.prepare (rate);
     }
 
-    /** Sings the take into the session in host-sized blocks. */
-    void sing (const std::vector<float>& take)
+    /** Sings the take into the session in host-sized blocks (with a band on the side-chain). */
+    void sing (const std::vector<float>& take, const std::vector<float>* band = nullptr)
     {
         std::vector<float> block (512);
         for (size_t pos = 0; pos < take.size(); pos += block.size())
@@ -66,6 +66,8 @@ struct Rig
             std::copy (take.begin() + (long) pos, take.begin() + (long) (pos + n), block.begin());
             float* ch[] = { block.data() };
             LearnSession::BlockInfo info;
+            if (band != nullptr && pos + n <= band->size())
+                info.sidechainL = band->data() + pos;
             session.processInput (ch, 1, (int) n, info);
             if ((pos / block.size()) % 64 == 0)
                 pump (1);
@@ -215,6 +217,58 @@ static void reloadWaitsForVoicesAndSkipsSameTake()
     check (phaseName (rig.session) == "rendered", "restoring the same take keeps the render");
 }
 
+static void learnRecordsTheBand()
+{
+    std::printf ("LEARN records the band on the side-chain, harmonises with it and keeps it with the project\n");
+    MemoryBlock state;
+    const double rate = 48000.0;
+    auto take = melody (rate, 0.0f, 2);
+    std::vector<sc::test::BandChordSpec> prog;
+    for (int i = 0; i < 6; ++i)
+        prog.push_back (i % 2 == 0 ? sc::test::BandChordSpec { { 60, 64, 67 }, 36, 2.0f } : sc::test::BandChordSpec { { 57, 60, 65 }, 41, 2.0f });
+    auto band = sc::test::playBand (prog, rate);
+    band.resize (take.size(), 0.0f);
+    {
+        Rig rig (rate);
+        rig.session.bandConnected = true;
+        rig.session.startRecording();
+        rig.sing (take, &band);
+        rig.session.stopRecording();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned");
+        const String text = rig.session.getStatus().getProperty ("text", "").toString();
+        std::printf ("  %s\n", text.toRawUTF8());
+        check (text.contains ("WITH THE BAND"), "harmonised with the band");
+        MemoryOutputStream out (state, false);
+        rig.session.writeState (out);
+    }
+    {
+        Rig rig (rate);
+        MemoryInputStream in (state, false);
+        rig.session.readState (in);
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned again from the project");
+        check (rig.session.getStatus().getProperty ("text", "").toString().contains ("WITH THE BAND"), "the band's chords come back with the project");
+        rig.params.followBand = false;
+        rig.session.harmonySettingsChanged();
+        check (! rig.session.getStatus().getProperty ("text", "").toString().contains ("WITH THE BAND"), "Follow the Band off: the choir's own harmony");
+    }
+    {
+        // No band connected: nothing extra is recorded, the take is saved as before (version 1).
+        Rig rig (rate);
+        rig.session.startRecording();
+        rig.sing (take);
+        rig.session.stopRecording();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned without a band");
+        MemoryBlock plain;
+        {
+            MemoryOutputStream out (plain, false);
+            rig.session.writeState (out);
+        }
+        MemoryInputStream in (plain, false);
+        in.readInt();
+        check (in.readInt() == 1, "saved in the original format");
+    }
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI juce;
@@ -222,6 +276,7 @@ int main()
     settingsChangedWhileRendering();
     projectReopenedAtAnotherRate();
     reloadWaitsForVoicesAndSkipsSameTake();
+    learnRecordsTheBand();
     std::printf ("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

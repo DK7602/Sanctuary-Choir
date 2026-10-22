@@ -102,6 +102,11 @@ html, body {
 #harmonyBadge { left: 162px; display: flex; gap: 12px; }
 #chordReadout { color: #fff4dc; }
 #chordReadout:empty { display: none; }
+#chordReadout.band::after {
+  content: "BAND"; margin-left: 8px; padding: 1px 6px; border-radius: 6px; vertical-align: 2px;
+  font-family: "Montserrat", sans-serif; font-weight: 700; font-size: 9.5px; letter-spacing: 1.5px;
+  color: #1b1209; background: linear-gradient(180deg, #ffe3a3, #c69a52);
+}
 
 #statusPlaque {
   position: absolute; left: 50%; top: 520px; transform: translateX(-50%);

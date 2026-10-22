@@ -178,12 +178,24 @@
     let foot = null;
 
     const midi = el("div", "group", left);
-    el("h3", "", midi, "MIDI");
+    el("h3", "", midi, "HARMONY FROM \u00b7 MIDI AND THE BAND");
     const midiRow = el("div", "", midi);
-    midiRow.style.cssText = "display:flex;gap:22px;flex-wrap:wrap";
-    toggleSwitch(midiRow, "midiEnabled", "MIDI controls the harmony");
-    toggleSwitch(midiRow, "midiParts", "Parts on channels 1\u20134").title = "Channels 1, 2, 3 and 4 sing exactly the soprano, alto, tenor and bass notes you play";
-    el("p", "", midi, "Hold chords to choose the harmony; with no voice coming in, the choir sings what you play. Program Change picks a preset.");
+    midiRow.style.cssText = "display:flex;gap:10px 22px;flex-wrap:wrap";
+    toggleSwitch(midiRow, "midiEnabled", "MIDI chords").title = "Hold chords to choose the harmony; with no voice coming in, the choir sings what you play. Program Change picks a preset.";
+    toggleSwitch(midiRow, "midiParts", "Parts on ch. 1\u20134").title = "Channels 1, 2, 3 and 4 sing exactly the soprano, alto, tenor and bass notes you play";
+    toggleSwitch(midiRow, "followBand", "Follow the band").title = "Sing the chords of the band, keys or backing track you route to Sanctuary's side-chain input";
+    const bandText = el("p", "", midi);
+    bandText.style.cssText = "font-size:15.5px;line-height:1.3";
+    let lastBand = "";
+    info.onMeters = (m) => {
+      const follow = Params.get("followBand") > 0.5;
+      const html = !m.sidechain ? "Route your band, keys or a backing track to the <b>side-chain</b> input and the choir sings its chords."
+        : !m.bandHeard ? "Side-chain connected: play the band, keys or track into it."
+        : !follow ? "Hearing the band; <b>Follow the band</b> is off."
+        : "<b>Band</b>: the choir sings " + (m.bandChord ? "<b>" + m.bandChord.replace(/[<>&]/g, "") + "</b>" : "along") + ", the chords it hears.";
+      if (html !== lastBand) { lastBand = html; bandText.innerHTML = html; }
+    };
+    info.onMeters({});
 
     const row2 = el("div", "", left);
     row2.style.cssText = "display:flex;gap:12px";

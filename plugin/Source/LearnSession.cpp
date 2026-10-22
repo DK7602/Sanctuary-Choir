@@ -84,6 +84,7 @@ static sc::HarmonySettings harmonySettingsFor (const sc::EngineParams& p)
         hs.ranges[(size_t) s] = sc::ensembleRange (p.ensemble, s, p.sections[(size_t) s].range);   // as the engine sings them
     hs.wordsMode = p.vocalType == sc::VocalType::Words;
     hs.speed = p.harmonySpeed / 100.0f;
+    hs.followBand = p.followBand;
 
     // Mirror the engine's singer allocation so small choirs get sensible parts.
     const int n = sc::singersForChoirSize (p.choirSize);
@@ -102,6 +103,7 @@ static sc::HarmonySettings harmonySettingsFor (const sc::EngineParams& p)
 LearnSession::LearnSession() : adapter (std::make_unique<ScoreAdapter>())
 {
     for (auto& c : chunks) c.store (nullptr);
+    for (auto& c : bandChunks) c.store (nullptr);
     startTimerHz (20);
 }
 
@@ -175,6 +177,7 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
         if (write && captureStarted.load())
         {
             int64_t idx = captured.load();
+            const bool band = captureBand.load (std::memory_order_relaxed);
             for (int i = 0; i < n; ++i, ++idx)
             {
                 const int64_t c = idx / chunkSize;
@@ -188,6 +191,14 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
                 for (int ch = 0; ch < numChannels; ++ch)
                     v += channels[ch][i];
                 chunk[idx % chunkSize] = numChannels > 0 ? v / (float) numChannels : 0.0f;
+                if (band)
+                {
+                    if (float* bc = bandChunks[(size_t) c].load (std::memory_order_acquire))
+                    {
+                        const float l = info.sidechainL != nullptr ? info.sidechainL[i] : 0.0f;
+                        bc[idx % chunkSize] = info.sidechainR != nullptr ? 0.5f * (l + info.sidechainR[i]) : l;
+                    }
+                }
             }
             captured = idx;
             lastCapturePos = info.hostPosition + n;
@@ -287,15 +298,11 @@ void LearnSession::startRecording()
     previewPlaying = false;
     renderWhenReady = false;
 
-    // Pre-allocate the first few chunks; the timer keeps allocating ahead.
+    // Pre-allocate the first few chunks; the timer keeps allocating ahead. With a band on the
+    // side-chain, it is recorded too, so LEARN can harmonise with its chords.
+    captureBand = bandConnected.load();
     for (int i = 0; i < kChunksAhead; ++i)
-    {
-        if (chunks[(size_t) i].load() == nullptr)
-        {
-            chunkStorage.push_back (std::make_unique<float[]> ((size_t) chunkSize));
-            chunks[(size_t) i].store (chunkStorage.back().get(), std::memory_order_release);
-        }
-    }
+        allocateChunk (i);
     captured = 0;
     captureStarted = false;
     stopRequested = false;
@@ -315,18 +322,47 @@ void LearnSession::stopRecording()
     finishRecording();
 }
 
+void LearnSession::allocateChunk (int64_t k)
+{
+    if (k < 0 || k >= maxChunks)
+        return;
+    if (chunks[(size_t) k].load() == nullptr)
+    {
+        chunkStorage.push_back (std::make_unique<float[]> ((size_t) chunkSize));
+        chunks[(size_t) k].store (chunkStorage.back().get(), std::memory_order_release);
+    }
+    if (captureBand.load() && bandChunks[(size_t) k].load() == nullptr)
+    {
+        chunkStorage.push_back (std::make_unique<float[]> ((size_t) chunkSize));
+        std::fill (chunkStorage.back().get(), chunkStorage.back().get() + chunkSize, 0.0f);
+        bandChunks[(size_t) k].store (chunkStorage.back().get(), std::memory_order_release);
+    }
+}
+
 void LearnSession::finishRecording()
 {
     const int64_t n = captured.load();
     std::vector<float> audio ((size_t) std::max<int64_t> (0, n));
+    std::vector<float> band (captureBand.load() ? audio.size() : 0);
     for (int64_t i = 0; i < n; i += chunkSize)
     {
         const int64_t c = i / chunkSize;
         const int64_t len = std::min<int64_t> (chunkSize, n - i);
         if (float* src = chunks[(size_t) c].load())
             std::memcpy (audio.data() + i, src, sizeof (float) * (size_t) len);
+        if (! band.empty())
+            if (float* src = bandChunks[(size_t) c].load())
+                std::memcpy (band.data() + i, src, sizeof (float) * (size_t) len);
     }
     releaseCapture();
+    // Only keep the band if something was actually playing on the side-chain.
+    if (! band.empty())
+    {
+        double e = 0.0;
+        for (float v : band) e += (double) v * v;
+        if (std::sqrt (e / (double) band.size()) < 1.0e-4)
+            band.clear();
+    }
 
     if (n < (int64_t) (captureSampleRate * 0.5))
     {
@@ -336,7 +372,7 @@ void LearnSession::finishRecording()
         return;
     }
     const int64_t start = captureStart.load();
-    startAnalysis (std::move (audio), captureSampleRate, start >= 0 ? start : -1, false);
+    startAnalysis (std::move (audio), captureSampleRate, start >= 0 ? start : -1, false, std::move (band));
 }
 
 void LearnSession::releaseCapture()
@@ -344,13 +380,15 @@ void LearnSession::releaseCapture()
     // The audio thread may still be inside a block that is writing to the chunks, so keep the
     // memory for a moment instead of freeing it here.
     for (auto& c : chunks) c.store (nullptr, std::memory_order_release);
+    for (auto& c : bandChunks) c.store (nullptr, std::memory_order_release);
     if (! chunkStorage.empty())
         chunkGraveyard.push_back ({ std::move (chunkStorage), Time::getMillisecondCounter() });
     chunkStorage.clear();
     captured = 0;
 }
 
-void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter)
+void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter,
+                                  std::vector<float> band, std::vector<sc::BandChord> bandChords)
 {
     cancelWork();
     setPhase (Phase::Analysing);
@@ -363,10 +401,14 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
     auto result = std::make_shared<std::unique_ptr<PlaybackData>>();
     cancel = false;
     workDone = false;
-    worker = std::make_unique<std::thread> ([this, result, params, sampleRate, timelineStart, audio = std::move (audio)]() mutable
+    worker = std::make_unique<std::thread> ([this, result, params, sampleRate, timelineStart, audio = std::move (audio),
+                                             band = std::move (band), bandChords = std::move (bandChords)]() mutable
     {
         auto take = std::make_shared<std::vector<float>> (std::move (audio));
         auto analysis = std::make_shared<sc::TakeAnalysis> (sc::analyseTake (take->data(), (int64_t) take->size(), sampleRate, params.a4, &cancel));
+        // The band's chords: heard from the side-chain recording, or restored with the project.
+        analysis->bandChords = band.empty() ? std::move (bandChords)
+                                            : sc::analyseBandChords (band.data(), (int64_t) band.size(), sampleRate, params.harmonySpeed / 100.0f, &cancel);
         if (! cancel.load())
         {
             auto d = std::make_unique<PlaybackData>();
@@ -672,13 +714,7 @@ void LearnSession::timerCallback()
     {
         const int64_t c = captured.load() / chunkSize;
         for (int64_t k = c; k < std::min<int64_t> (maxChunks, c + kChunksAhead); ++k)
-        {
-            if (chunks[(size_t) k].load() == nullptr)
-            {
-                chunkStorage.push_back (std::make_unique<float[]> ((size_t) chunkSize));
-                chunks[(size_t) k].store (chunkStorage.back().get(), std::memory_order_release);
-            }
-        }
+            allocateChunk (k);
 
         // Armed but the host never played: fall back to free-running capture.
         if (stopRequested.load())
@@ -748,7 +784,13 @@ void LearnSession::matchSessionRate()
     interp.process (ratio, take.data(), out.data(), outLen, (int) take.size(), 0);
     const int64_t start = owned->timelineStart >= 0 ? (int64_t) std::llround ((double) owned->timelineStart / ratio) : -1;
     const bool wasRendered = owned->stems != nullptr && ! owned->stale.load();
-    startAnalysis (std::move (out), sr, start, wasRendered || renderWhenReady);
+    std::vector<sc::BandChord> band = owned->analysis != nullptr ? owned->analysis->bandChords : std::vector<sc::BandChord>{};
+    for (auto& b : band)
+    {
+        b.start = (int64_t) std::llround ((double) b.start / ratio);
+        b.end = (int64_t) std::llround ((double) b.end / ratio);
+    }
+    startAnalysis (std::move (out), sr, start, wasRendered || renderWhenReady, {}, std::move (band));
 }
 
 //==============================================================================
@@ -825,8 +867,12 @@ void LearnSession::writeState (OutputStream& out) const
         out.writeInt (0);
         return;
     }
+    // Version 2 adds the band's chords; takes without a band stay version 1, so projects remain
+    // readable by earlier versions of the plug-in.
+    const auto* band = owned->analysis != nullptr ? &owned->analysis->bandChords : nullptr;
+    const bool withBand = band != nullptr && ! band->empty();
     out.writeInt (kStateMagic);
-    out.writeInt (1);
+    out.writeInt (withBand ? 2 : 1);
     out.writeDouble (owned->sampleRate);
     out.writeInt64 (owned->timelineStart);
     out.writeBool (owned->stems != nullptr && ! owned->stale.load());
@@ -855,6 +901,17 @@ void LearnSession::writeState (OutputStream& out) const
     }
     out.writeInt64 ((int64) encodedFlac.getSize());
     out.write (encodedFlac.getData(), encodedFlac.getSize());
+    if (withBand)
+    {
+        out.writeInt ((int) band->size());
+        for (const auto& b : *band)
+        {
+            out.writeInt64 (b.start);
+            out.writeInt64 (b.end);
+            out.writeInt (b.index);
+            out.writeInt (b.bass);
+        }
+    }
 }
 
 void LearnSession::readState (InputStream& in)
@@ -866,7 +923,7 @@ void LearnSession::readState (InputStream& in)
         return;
     }
     const int version = in.readInt();
-    if (version != 1)
+    if (version != 1 && version != 2)
         return;
     const double rate = in.readDouble();
     const int64_t timelineStart = in.readInt64();
@@ -885,6 +942,23 @@ void LearnSession::readState (InputStream& in)
     float* dest[] = { audio.data() };
     reader->read (dest, 1, 0, (int) reader->lengthInSamples);
 
+    // The band's chords (version 2).
+    std::vector<sc::BandChord> band;
+    if (version >= 2 && in.getNumBytesRemaining() >= 4)
+    {
+        const int count = in.readInt();
+        for (int i = 0; i < count && i < 100000 && in.getNumBytesRemaining() >= 24; ++i)
+        {
+            sc::BandChord b;
+            b.start = in.readInt64();
+            b.end = in.readInt64();
+            b.index = in.readInt();
+            b.bass = in.readInt();
+            if (b.index >= 0 && b.index < sc::kBandChords && b.end > b.start && b.bass >= -1 && b.bass < 12)
+                band.push_back (b);
+        }
+    }
+
     // The same take we already have (undo, A/B compare, a host restoring what it just saved):
     // keep the analysis and stems; changed settings are picked up as usual.
     const Phase p = phase.load();
@@ -896,9 +970,13 @@ void LearnSession::readState (InputStream& in)
         bool same = true;
         for (size_t i = 0; i < audio.size() && same; ++i)
             same = std::abs (cur[i] - audio[i]) < 1.0e-5f;
+        const auto& curBand = owned->analysis != nullptr ? owned->analysis->bandChords : std::vector<sc::BandChord>{};
+        same = same && curBand.size() == band.size();
+        for (size_t i = 0; i < band.size() && same; ++i)
+            same = curBand[i].start == band[i].start && curBand[i].end == band[i].end && curBand[i].index == band[i].index && curBand[i].bass == band[i].bass;
         if (same)
             return;
     }
-    startAnalysis (std::move (audio), rate, timelineStart, wasRendered);
+    startAnalysis (std::move (audio), rate, timelineStart, wasRendered, {}, std::move (band));
 }
 } // namespace sanctuary

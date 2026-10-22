@@ -127,6 +127,8 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                                AudioParameterBoolAttributes().withAutomatable (false)));
     settings->addChild (std::make_unique<APB> (pid (ParamIDs::midiParts), "MIDI Parts (Ch 1-4)", false,
                                                AudioParameterBoolAttributes().withAutomatable (false)));
+    settings->addChild (std::make_unique<APB> (pid (ParamIDs::followBand), "Follow the Band", true,
+                                               AudioParameterBoolAttributes().withAutomatable (false)));
     settings->addChild (std::make_unique<APF> (pid (ParamIDs::tuning), "Tuning (A4)", NormalisableRange<float> (415.0f, 466.0f, 0.1f), 440.0f,
                                                AudioParameterFloatAttributes().withAutomatable (false).withLabel ("Hz")
                                                    .withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " Hz"; })));
@@ -145,7 +147,7 @@ struct ParameterCache::Ptrs
     std::atomic<float>* ensemble;
     std::atomic<float>* venue, *decay, *preDelay, *brightness, *leadReverb, *lowCut, *highCut, *warmth, *glue;
     std::atomic<float>* rhythmPattern, *rhythmRate, *rhythmLength, *rhythmDepth, *rhythmSections;
-    std::atomic<float>* midiEnabled, *midiParts, *tuning, *latencyMode;
+    std::atomic<float>* midiEnabled, *midiParts, *followBand, *tuning, *latencyMode;
     std::array<std::atomic<float>*, sc::NumSections> level, pan, mute, solo, low, high;
 };
 
@@ -174,7 +176,7 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.rhythmPattern = get (ParamIDs::rhythmPattern); p.rhythmRate = get (ParamIDs::rhythmRate);
     p.rhythmLength = get (ParamIDs::rhythmLength); p.rhythmDepth = get (ParamIDs::rhythmDepth);
     p.rhythmSections = get (ParamIDs::rhythmSections);
-    p.midiEnabled = get (ParamIDs::midiEnabled); p.midiParts = get (ParamIDs::midiParts); p.tuning = get (ParamIDs::tuning);
+    p.midiEnabled = get (ParamIDs::midiEnabled); p.midiParts = get (ParamIDs::midiParts); p.followBand = get (ParamIDs::followBand); p.tuning = get (ParamIDs::tuning);
     p.latencyMode = get (ParamIDs::latencyMode);
     for (int s = 0; s < sc::NumSections; ++s)
     {
@@ -247,6 +249,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
 
     e.midiEnabled = f (p.midiEnabled) > 0.5f;
     e.midiParts = f (p.midiParts) > 0.5f;
+    e.followBand = f (p.followBand) > 0.5f;
     e.a4 = f (p.tuning);
     e.lowLatency = i (p.latencyMode) == 1;
 }
@@ -254,7 +257,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
 bool affectsHarmony (const String& id)
 {
     return id == ParamIDs::harmonyMode || id == ParamIDs::key || id == ParamIDs::scale || id == ParamIDs::style
-        || id == ParamIDs::ensemble || id == ParamIDs::vocalType || id == ParamIDs::choirSize || id == ParamIDs::tuning || id == ParamIDs::harmonySpeed
+        || id == ParamIDs::ensemble || id == ParamIDs::followBand || id == ParamIDs::vocalType || id == ParamIDs::choirSize || id == ParamIDs::tuning || id == ParamIDs::harmonySpeed
         || id.endsWith ("Low") || id.endsWith ("High");
 }
 

@@ -2,6 +2,7 @@
 #include "TestSignals.h"
 
 #include <sanctuary/ChoirEngine.h>
+#include <sanctuary/ChordDetector.h>
 #include <sanctuary/FFT.h>
 #include <sanctuary/Learn.h>
 
@@ -1027,6 +1028,172 @@ TEST (midiPartsSingTheirChannels)
         std::printf ("  section %d: %.1f (wanted %d)\n", s, m, want[s]);
         CHECK_NEAR (m, want[s], 0.6);
     }
+}
+
+static std::vector<test::BandChordSpec> bandProgression()
+{
+    // C  G/B  Am  F  Dm7  G7  C  Em  Fmaj7  Gsus4  G  Am7
+    return { { { 60, 64, 67 }, 36, 2.0f }, { { 59, 62, 67 }, 35, 2.0f }, { { 57, 60, 64 }, 33, 2.0f }, { { 57, 60, 65 }, 41, 2.0f },
+             { { 57, 60, 62, 65 }, 38, 2.0f }, { { 59, 62, 65, 67 }, 43, 2.0f }, { { 60, 64, 67 }, 36, 2.0f }, { { 59, 64, 67 }, 40, 2.0f },
+             { { 57, 60, 64, 65 }, 41, 2.0f }, { { 60, 62, 67 }, 43, 1.0f }, { { 59, 62, 67 }, 43, 1.0f }, { { 57, 60, 64, 67 }, 33, 2.0f } };
+}
+
+TEST (bandChordsAreHeard)
+{
+    // The side-chain detector names the band's chords (triads, sevenths, sus, inversions) and
+    // its bass note, live and offline, at the common sample rates.
+    const char* want[] = { "C", "G", "Am", "F", "Dm7", "G7", "C", "Em", "Fmaj7", "Gsus4", "G", "Am7" };
+    const int wantBass[] = { 0, 11, 9, 5, 2, 7, 0, 4, 5, 7, 7, 9 };
+    const auto prog = bandProgression();
+    for (double sr : { 44100.0, 48000.0, 96000.0 })
+    {
+        auto x = test::playBand (prog, sr, 0.5f, 0.5f);
+        ChordDetector det;
+        det.prepare (sr);
+        int chords = 0, basses = 0;
+        int64_t pos = 0;
+        double t = 0.5;
+        for (size_t k = 0; k < prog.size(); ++k)
+        {
+            while ((double) pos / sr < t + prog[k].seconds * 0.85) { det.push (x.data() + pos, 256); pos += 256; }
+            chords += det.chord() != nullptr && det.chord()->name == want[k];
+            basses += det.bass() == wantBass[k];
+            t += prog[k].seconds;
+        }
+        const auto lane = analyseBandChords (x.data(), (int64_t) x.size(), sr);
+        int laneOk = 0;
+        t = 0.5;
+        for (size_t k = 0; k < prog.size(); ++k)
+        {
+            const double mid = t + 0.5 * prog[k].seconds;
+            for (const auto& bc : lane)
+                if (bc.start <= mid * sr && bc.end > mid * sr && bc.chord().name == want[k] && bc.bass == wantBass[k])
+                    ++laneOk;
+            // Chord changes are found within a quarter of a second of where they happen.
+            if (k > 0)
+            {
+                double nearest = 1.0e9;
+                for (const auto& bc : lane) nearest = std::min (nearest, std::abs ((double) bc.start / sr - t));
+                CHECK (nearest < 0.25);
+            }
+            t += prog[k].seconds;
+        }
+        std::printf ("  %.0f Hz: live %d/12 chords, %d/12 basses; offline %d/12 (%zu segments)\n", sr, chords, basses, laneOk, lane.size());
+        CHECK (chords == 12);
+        CHECK (basses == 12);
+        CHECK (laneOk == 12);
+        CHECK (lane.size() == 12);
+    }
+}
+
+TEST (choirFollowsTheBand)
+{
+    // A held E fits both C (third) and A minor (fifth): the melody alone can't tell, the band
+    // can. With the band on the side-chain the basses follow it from C to A; without, they
+    // don't move.
+    const double sr = 48000.0;
+    auto voice = test::singMelody ({ { 64, 8.0f, 0.5f } }, sr, Soprano, 10.0f);
+    auto band = test::playBand ({ { { 60, 64, 67 }, 36, 4.0f }, { { 57, 60, 64 }, 33, 4.0f } }, sr);
+    band.resize (voice.size(), 0.0f);
+    float bassFirst[2] = {}, bassSecond[2] = {};
+    for (int follow = 0; follow < 2; ++follow)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.followBand = follow == 1;
+        eng.setParams (p);
+        auto st = runStems (eng, voice, [&] (int64_t pos) { eng.setSidechain (band.data() + pos, nullptr); });
+        const double lat = eng.getLatencySamples() / sr;
+        bassFirst[follow] = medianPitch (st[Bass * 2], sr, 1.5 + lat, 3.5 + lat);
+        bassSecond[follow] = medianPitch (st[Bass * 2], sr, 5.5 + lat, 7.5 + lat);
+        std::printf ("  follow band %d: basses sing %.1f then %.1f\n", follow, bassFirst[follow], bassSecond[follow]);
+    }
+    CHECK (wrapPc ((int) std::lround (bassFirst[1])) == 0);    // C
+    CHECK (wrapPc ((int) std::lround (bassSecond[1])) == 9);   // A
+    CHECK (std::abs (bassFirst[0] - bassSecond[0]) < 0.5f);    // the melody alone keeps one chord
+}
+
+TEST (learnHarmonisesWithTheBand)
+{
+    // LEARN with the band recorded too: every note is harmonised with the chord the band plays
+    // under it, inversions included, and the band helps find the key.
+    const double sr = 48000.0;
+    const auto prog = bandProgression();
+    // The melody sits on notes common to neighbouring chords, so it can't give the chords away.
+    std::vector<test::SungNote> melody;
+    const int line[] = { 67, 67, 64, 65, 65, 67, 67, 64, 64, 67, 67, 64 };
+    for (size_t k = 0; k < prog.size(); ++k)
+        melody.push_back ({ (float) line[k], prog[k].seconds - 0.1f, 0.1f });
+    auto voice = test::singMelody (melody, sr, Soprano, 15.0f);
+    std::vector<test::SungNote> lead = { { 0.0f, 0.5f, 0.0f } };
+    auto band = test::playBand (prog, sr);
+    auto take = analyseTake (voice.data(), (int64_t) voice.size(), sr);
+    take.bandChords = analyseBandChords (band.data(), (int64_t) band.size(), sr);
+    HarmonySettings hs;
+    const auto score = harmoniseTake (take, hs);
+    std::printf ("  %s, %zu band chords\n", score.describe().c_str(), take.bandChords.size());
+    CHECK (score.scale.tonic == 0);   // C major
+    const char* want[] = { "C", "G", "Am", "F", "Dm7", "G7", "C", "Em", "Fmaj7", "Gsus4", "G", "Am7" };
+    const int wantBass[] = { 0, 11, 9, 5, 2, 7, 0, 4, 5, 7, 7, 9 };
+    int ok = 0, bassOk = 0, n = 0;
+    double t = 0.0;
+    for (size_t k = 0; k < prog.size(); ++k)
+    {
+        const double mid = t + 0.5 * prog[k].seconds;
+        for (const auto& e : score.events)
+            if (e.start <= mid * sr && e.end > mid * sr)
+            {
+                ++n;
+                ok += e.chord.name == want[k];
+                bassOk += e.voicing.primary (Bass) >= 0 && wrapPc (e.voicing.primary (Bass)) == wantBass[k];
+                if (! (e.voicing.primary (Bass) >= 0 && wrapPc (e.voicing.primary (Bass)) == wantBass[k]))
+                    std::printf ("    %s: choir S %d A %d T %d B %d, band bass %d\n", want[k], e.voicing.primary (Soprano), e.voicing.primary (Alto),
+                                 e.voicing.primary (Tenor), e.voicing.primary (Bass), wantBass[k]);
+            }
+        t += prog[k].seconds;
+    }
+    std::printf ("  %d/%d chords and %d/%d bass notes as the band plays them\n", ok, n, bassOk, n);
+    CHECK (n == 12);
+    CHECK (ok == 12);
+    CHECK (bassOk >= 11);
+
+    // Without the band the harmony is the choir's own guess (some chords differ).
+    HarmonySettings own = hs;
+    own.followBand = false;
+    const auto guess = harmoniseTake (take, own);
+    int same = 0;
+    t = 0.0;
+    for (size_t k = 0; k < prog.size(); ++k)
+    {
+        const double mid = t + 0.5 * prog[k].seconds;
+        for (const auto& e : guess.events)
+            if (e.start <= mid * sr && e.end > mid * sr) same += e.chord.name == want[k];
+        t += prog[k].seconds;
+    }
+    CHECK (same < 12);
+}
+
+TEST (bandHelpsFindTheKey)
+{
+    // C, D and E fit C, F and G major alike; a band playing F, Bb and C settles it.
+    const double sr = 48000.0;
+    std::vector<test::SungNote> m;
+    for (int r = 0; r < 4; ++r)
+        for (int n : { 60, 62, 64, 62 })
+            m.push_back ({ (float) n, 0.45f, 0.05f });
+    auto voice = test::singMelody (m, sr, Soprano, 15.0f);
+    auto band = test::playBand ({ { { 53, 57, 60 }, 41, 2.0f }, { { 58, 62, 65 }, 46, 2.0f }, { { 55, 60, 64 }, 48, 2.0f }, { { 53, 57, 60 }, 41, 2.0f } }, sr);
+    band.resize (voice.size(), 0.0f);
+    ChoirEngine eng;
+    eng.prepare (sr, 256);
+    auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+    p.key = 0;   // auto
+    eng.setParams (p);
+    runEngine (eng, voice, sr, nullptr, [&] (int64_t pos) { eng.setSidechain (band.data() + pos, nullptr); });
+    const auto snap = eng.takeSnapshot();
+    std::printf ("  key with the band: %d (F = 5)\n", snap.keyTonic);
+    CHECK (snap.keyTonic == 5);
 }
 
 TEST (performanceBudget)

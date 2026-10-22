@@ -44,6 +44,8 @@ struct HarmonyContext
     bool freeze = false;
     NoteSet midi;          // held MIDI notes (sorted ascending), empty if none
     bool midiControlsHarmony = true;
+    const Chord* band = nullptr;   // the chord the band is playing (side-chain), nullptr if none
+    int bandBass = -1;             // the band's bass note (pitch class), -1 if unclear
     float speed = 0.5f;    // 0 = hold chords through passing notes, 1 = new chord for every note
 };
 
@@ -81,6 +83,7 @@ private:
     Voicing voicing;
     uint32_t voicingId = 0;
     NoteSet lastMidi;
+    int lastBand = -1;   // the band chord last voiced (triad identity), -1 if none
     HarmonyMode lastMode = HarmonyMode::Count;
     std::array<bool, NumSections> lastActive { true, true, true, true };
 

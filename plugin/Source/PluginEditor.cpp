@@ -203,6 +203,11 @@ void SanctuaryEditor::sendMeters()
     o->setProperty ("in", snap.inputPeak);
     o->setProperty ("out", snap.outputPeak);
     o->setProperty ("frozen", snap.frozen);
+    // The band on the side-chain: connected, heard, and the chord the choir follows.
+    o->setProperty ("sidechain", processor.sidechainConnected.load (std::memory_order_relaxed));
+    o->setProperty ("bandHeard", snap.bandHeard);
+    o->setProperty ("followingBand", snap.followingBand);
+    o->setProperty ("bandChord", String (snap.bandChord));
     // Beat now, extrapolated from the last audio block, for singers that move with the song.
     // No audio for a moment (host stopped, plug-in bypassed or suspended) means no beat.
     double bpm = processor.songBpm.load (std::memory_order_acquire);

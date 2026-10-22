@@ -177,6 +177,49 @@ std::vector<SungNote> amazingGrace (float tr)
     return m;
 }
 
+std::vector<float> playBand (const std::vector<BandChordSpec>& chords, double sr, float beat, float leadIn, uint32_t seed)
+{
+    float total = leadIn;
+    for (const auto& c : chords) total += c.seconds;
+    std::vector<float> out ((size_t) ((total + 1.0f) * sr), 0.0f);
+    Rng rng (seed);
+    auto addNote = [&] (int midi, double t0, double dur, float gain, int harmonics, float decay)
+    {
+        const double f0 = 440.0 * std::pow (2.0, (midi - 69) / 12.0);
+        const int64_t a = (int64_t) (t0 * sr), len = (int64_t) (dur * sr);
+        for (int h = 1; h <= harmonics; ++h)
+        {
+            const double f = f0 * h * (1.0 + 0.0004 * h * h);   // a little piano-like inharmonicity
+            if (f > 0.45 * sr)
+                break;
+            const float ah = gain / std::pow ((float) h, 1.3f);
+            const double w = 2.0 * kPiD * f / sr;
+            const double ph = rng.uni() * 6.2831853;
+            for (int64_t i = 0; i < len && a + i < (int64_t) out.size(); ++i)
+            {
+                const float env = std::exp (-(float) i / (float) sr / (decay / (0.6f + 0.4f * (float) h))) * std::min (1.0f, (float) i / (0.004f * (float) sr));
+                out[(size_t) (a + i)] += ah * env * (float) std::sin (w * (double) i + ph);
+            }
+        }
+    };
+    double t = leadIn;
+    for (const auto& c : chords)
+    {
+        for (double b = 0.0; b < c.seconds - 1.0e-6; b += beat)
+        {
+            const double dur = std::min ((double) beat, c.seconds - b) + 0.05;
+            for (int n : c.notes)
+                addNote (n, t + b, dur, 0.06f, 10, 0.9f);
+            if (c.bass >= 0)
+                addNote (c.bass, t + b, dur, 0.12f, 4, 1.2f);
+        }
+        t += c.seconds;
+    }
+    for (auto& v : out)
+        v += 0.0015f * rng.bi();
+    return out;
+}
+
 std::vector<SungNote> cMajorScale (float base, float secs)
 {
     const int steps[] = { 0, 2, 4, 5, 7, 9, 11, 12, 11, 9, 7, 5, 4, 2, 0 };

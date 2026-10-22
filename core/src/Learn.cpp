@@ -208,8 +208,9 @@ std::string LearnedScore::describe() const
 {
     char buf[160];
     const int secs = (int) std::lround (durationSeconds);
-    std::snprintf (buf, sizeof (buf), "LEARNED %d:%02d \xC2\xB7 %s \xC2\xB7 %d PHRASE%s \xC2\xB7 %d NOTES",
-                   secs / 60, secs % 60, keyName().c_str(), numPhrases, numPhrases == 1 ? "" : "S", numNotes);
+    std::snprintf (buf, sizeof (buf), "LEARNED %d:%02d \xC2\xB7 %s \xC2\xB7 %d PHRASE%s \xC2\xB7 %d NOTES%s",
+                   secs / 60, secs % 60, keyName().c_str(), numPhrases, numPhrases == 1 ? "" : "S", numNotes,
+                   followsBand ? " \xC2\xB7 WITH THE BAND" : "");
     return buf;
 }
 
@@ -235,11 +236,28 @@ bool LearnedScore::voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopSh
 /** The key of every phrase. Songs often change key (the last chorus a step up): each phrase is
     scored against every key, and a Viterbi path pays a price for each change, so one phrase
     with a few odd notes never moves the key but a run of phrases in a new key does. */
+/** Pitch classes the band played between a and b (seconds of each chord note, half weight). */
+static void addBandNotes (const TakeAnalysis& take, int64_t a, int64_t b, std::array<float, 12>& hist)
+{
+    for (const auto& bc : take.bandChords)
+    {
+        const int64_t overlap = std::min (b, bc.end) - std::max (a, bc.start);
+        if (overlap <= 0)
+            continue;
+        const float secs = (float) ((double) overlap / take.sampleRate);
+        const Chord& ch = bc.chord();
+        for (int i = 0; i < ch.numTones; ++i)
+            hist[(size_t) ch.tones[(size_t) i]] += 0.5f * secs * (i == 0 ? 1.4f : 1.0f);
+    }
+}
+
 static std::vector<int> phraseKeys (const TakeAnalysis& take, Scale base)
 {
     const bool minor = base.isMinorFamily();
     const int P = (int) take.phrases.size();
-    const int global = estimateKey (take.pcHistogram, minor, ! minor).tonic;
+    auto overall = take.pcHistogram;
+    addBandNotes (take, 0, take.length, overall);
+    const int global = estimateKey (overall, minor, ! minor).tonic;
     std::vector<int> key ((size_t) P, global);
     if (P < 3 || base.type == ScaleType::Chromatic)
         return key;
@@ -253,6 +271,8 @@ static std::vector<int> phraseKeys (const TakeAnalysis& take, Scale base)
         hist[(size_t) note.phrase][(size_t) wrapPc ((int) std::lround (note.pitch))] += d;
         dur[(size_t) note.phrase] += d;
     }
+    for (int p = 0; p < P; ++p)
+        addBandNotes (take, take.phrases[(size_t) p].start, take.phrases[(size_t) p].end, hist[(size_t) p]);
 
     constexpr float switchCost = 1.6f;
     std::vector<std::array<float, 12>> cost ((size_t) P);
@@ -320,7 +340,9 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
     else
     {
         const bool minor = scale.isMinorFamily();
-        scale.tonic = estimateKey (take.pcHistogram, minor, ! minor).tonic;
+        auto hist = take.pcHistogram;
+        addBandNotes (take, 0, take.length, hist);
+        scale.tonic = estimateKey (hist, minor, ! minor).tonic;
         score.keyWasDetected = true;
     }
     score.scale = scale;
@@ -467,6 +489,22 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         }
     }
 
+    // The band's chord under each note (the one sounding over most of it), if the take has one.
+    const bool band = hs.followBand && ! take.bandChords.empty() && hs.mode != HarmonyMode::Drone;
+    score.followsBand = band;
+    auto bandChordFor = [&take] (const LearnedNote& note) -> const BandChord*
+    {
+        const BandChord* best = nullptr;
+        int64_t bestOverlap = 0;
+        for (const auto& bc : take.bandChords)
+        {
+            if (bc.start >= note.end) break;
+            const int64_t overlap = std::min (note.end, bc.end) - std::max (note.start, bc.start);
+            if (overlap > bestOverlap) { bestOverlap = overlap; best = &bc; }
+        }
+        return best;
+    };
+
     // Voice each note with voice leading from the previous one.
     Voicing prev;
     for (int i = 0; i < N; ++i)
@@ -486,6 +524,14 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         }
         else
             req.chord = vocab.empty() ? chordFromPitchClasses (&req.scale.tonic, 1) : vocab.front();
+        if (band)
+        {
+            if (const BandChord* bc = bandChordFor (note))
+            {
+                req.chord = bc->chord();
+                req.bassPc = bc->bass;
+            }
+        }
         req.melody = q[(size_t) i];
         req.sopranoOctaveShift = phraseShift[(size_t) note.phrase];
         req.ranges = hs.ranges;
