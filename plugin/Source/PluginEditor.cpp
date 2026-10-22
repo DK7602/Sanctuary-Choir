@@ -215,6 +215,7 @@ void SanctuaryEditor::sendStatus()
     o->setProperty ("presetIndex", presets.getCurrentIndex());
     o->setProperty ("presetName", presets.getCurrentName());
     o->setProperty ("monoOutput", processor.getTotalNumOutputChannels() < 2);
+    o->setProperty ("voices", processor.getVoices().getStatus());
     addLatencyInfo (*o);
     web->emitEventIfBrowserIsVisible ("status", var (o.release()));
 }
@@ -244,7 +245,7 @@ void SanctuaryEditor::timerCallback()
     sendParams (processor.takeChangedParameters());
     sendMeters();
     const int v = processor.statusVersion.load();
-    const bool latencyChanged = processor.getSampleRate() != sentRate || processor.getAlignedLatency() != sentLatency;
+    const bool latencyChanged = std::abs (processor.getSampleRate() - sentRate) > 0.5 || processor.getAlignedLatency() != sentLatency;
     if (v != lastStatusVersion || latencyChanged)
     {
         lastStatusVersion = v;
@@ -328,6 +329,26 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
                                       toast ("Loaded " + file.getFileName());
                                   }
                               });
+    }
+    else if (name == "voicesLoad")
+    {
+        chooser = std::make_unique<FileChooser> ("Choose the folder with your choir recordings", processor.getVoices().getFolder().exists()
+                                                     ? processor.getVoices().getFolder() : File::getSpecialLocation (File::userMusicDirectory));
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectDirectories,
+                              [this] (const FileChooser& fc)
+                              {
+                                  const auto dir = fc.getResult();
+                                  if (dir.isDirectory())
+                                  {
+                                      processor.getVoices().loadFolder (dir);
+                                      toast ("Loading the recordings in " + dir.getFileName() + "...");
+                                  }
+                              });
+    }
+    else if (name == "voicesClear")
+    {
+        processor.getVoices().clear();
+        toast ("Back to the built-in voices");
     }
     else if (name == "export")
     {

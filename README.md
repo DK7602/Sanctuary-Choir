@@ -51,6 +51,9 @@
   - Low/high cut, Warmth and a Glue compressor on the choir bus.
 - **MIDI**: hold chords on a keyboard to dictate the harmony. With no voice coming in, the choir becomes a playable instrument.
 - **Live monitoring**: your voice comes through instantly while you record; the choir follows about 15 ms behind (Settings → Monitoring).
+- **Your own choir**: record a few held notes per section and the vowel modes sing with those real voices ([guide](docs/RECORDING_YOUR_CHOIR.md)).
+- **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
+- **Chord Speed** and a one-click **key lock** for the detected key.
 - **Stem export**: Sopranos, Altos, Tenors, Basses, Room and Full Choir as 24-bit WAVs.
 - **15 factory presets** (Heavenly Praise, Cathedral Hymn, Sunday Gospel, Gregorian Chant, Angelic Voices, Epic Cinematic…) plus your own.
 

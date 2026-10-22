@@ -18,6 +18,13 @@ StyleProfile getStyleProfile (Style s)
     }
 }
 
+float passingNoteTime (float speed)
+{
+    speed = clampv (speed, 0.0f, 1.0f);
+    return speed <= 0.5f ? 0.45f - 0.5f * speed           // 0.45 s .. 0.2 s
+                         : 0.2f - 0.3f * (speed - 0.5f);  // 0.2 s .. 0.05 s
+}
+
 //==============================================================================
 void LiveHarmonizer::reset()
 {
@@ -127,13 +134,14 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
         outOfChordTime += dt;
     else
         outOfChordTime = 0.0f;
-    if (outOfChordTime > 0.2f)
+    const float holdTime = passingNoteTime (ctx.speed);
+    if (outOfChordTime > holdTime)
         changed = true;
 
     if (changed && (leadNote >= 0 || midiOn || ctx.mode == HarmonyMode::Drone))
     {
         // A quick stepwise note outside the chord is a passing note: keep the chord.
-        if (! newPhrase && ! midiOn && outOfChordTime <= 0.2f && holdThroughPassingNote (ctx, previousLead))
+        if (! newPhrase && ! midiOn && outOfChordTime <= holdTime && holdThroughPassingNote (ctx, previousLead))
             return;
         choose (ctx, newPhrase);
     }
@@ -145,7 +153,10 @@ bool LiveHarmonizer::holdThroughPassingNote (const HarmonyContext& ctx, int prev
         return false;
     if (ctx.mode != HarmonyMode::FullChoir && ctx.mode != HarmonyMode::OpenVoicing)
         return false;
-    if (std::abs (leadNote - previousLead) > 2 || ctx.scale.type == ScaleType::Chromatic)
+    // Slow harmony also lets small leaps (thirds) ride over the chord; the fastest setting
+    // gives every note its own chord.
+    const int maxStep = ctx.speed < 0.3f ? 4 : 2;
+    if (ctx.speed >= 0.95f || std::abs (leadNote - previousLead) > maxStep || ctx.scale.type == ScaleType::Chromatic)
         return false;
     if (ctx.active[Soprano] && voicing.count[Soprano] > 0)
         voicing.set (Soprano, leadNote + sopShift);
@@ -205,7 +216,7 @@ void LiveHarmonizer::choose (const HarmonyContext& ctx, bool newPhrase)
             float score = c.prior + roleBonus[role];
             if (haveChord)
             {
-                if (c.name == chord.name) score += newPhrase ? 0.1f : 0.45f;
+                if (c.name == chord.name) score += newPhrase ? 0.1f : 0.45f * (1.6f - 1.2f * clampv (ctx.speed, 0.0f, 1.0f));
                 score += progressionBonus (chord, c, minor);
             }
             else if (c.degree == 0)

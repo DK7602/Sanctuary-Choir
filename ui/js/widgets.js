@@ -408,10 +408,25 @@
       this.text.innerHTML = "";
       this.text.append(label.main !== undefined ? label.main : label);
       if (label.extra) { const s = document.createElement("small"); s.textContent = label.extra; this.text.append(s); }
+      if (this.opts.action) {
+        // Optional one-click button inside the field (e.g. lock the detected key).
+        const a = this.opts.action();
+        if (!this.actionBtn) {
+          this.actionBtn = document.createElement("button");
+          this.actionBtn.className = "dd-action";
+          this.actionBtn.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2h.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zm1.6 0h3.8V5a1.9 1.9 0 0 0-3.8 0z"/></svg>';
+          this.actionBtn.addEventListener("click", (e) => { e.stopPropagation(); const now = this.opts.action(); if (now.visible) now.onClick(); });
+          this.el.appendChild(this.actionBtn);
+        }
+        this.actionBtn.style.display = a.visible ? "" : "none";
+        this.actionBtn.title = a.title || "";
+        this.el.classList.toggle("has-action", !!a.visible);
+      }
     }
     open() {
       const d = Params.def(this.id);
       Menu.open(stageRect(this.el), (m) => {
+        if (this.opts.menuTop) this.opts.menuTop(m);
         d.choices.forEach((c, i) => Menu.item(m, c, Math.round(Params.get(this.id)) === i, () => Params.set(this.id, i)));
       });
     }

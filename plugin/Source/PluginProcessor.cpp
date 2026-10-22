@@ -26,6 +26,9 @@ SanctuaryProcessor::SanctuaryProcessor()
     learn.getParams = [this] { return currentParams(); };
     learn.standalone = standaloneApp;
     learn.onStatusChanged = [this] { ++statusVersion; };
+    learn.getVoices = [this] { return voices.getCurrent(); };
+    voices.onStatusChanged = [this] { ++statusVersion; };
+    voices.onSetChanged = [this] { learn.renderSettingsChanged(); };   // rendered takes used the old voices
     startTimerHz (10);
 }
 
@@ -147,6 +150,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     const sc::ScoreSource* score = nullptr;
     const sc::StemPlayback* stems = learn.preparePlayback (info, n, score);
     engine.setScore (score);
+    engine.setSampleSet (voices.getLive());
 
     const float* inL = buffer.getReadPointer (0);
     const float* inR = numIn > 1 ? buffer.getReadPointer (1) : nullptr;
@@ -272,6 +276,7 @@ void SanctuaryProcessor::getStateInformation (MemoryBlock& destData)
     tree.setProperty ("editorWidth", editorWidth, nullptr);
     tree.setProperty ("editorHeight", editorHeight, nullptr);
     tree.setProperty ("detectedKey", rememberedKey.load(), nullptr);   // Auto key starts right next time
+    tree.setProperty ("voicesFolder", voices.getFolder().getFullPathName(), nullptr);
     std::unique_ptr<XmlElement> xml (tree.createXml());
 
     MemoryOutputStream out (destData, false);
@@ -327,6 +332,16 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
         uiTab = tree.getProperty ("uiTab", "perform").toString();
         editorWidth = tree.getProperty ("editorWidth", 0);
         editorHeight = tree.getProperty ("editorHeight", 0);
+        const String voicesFolder = tree.getProperty ("voicesFolder", "").toString();
+        if (voicesFolder.isNotEmpty() && File::isAbsolutePath (voicesFolder) && File (voicesFolder).isDirectory())
+        {
+            if (File (voicesFolder) != voices.getFolder())
+                voices.loadFolder (File (voicesFolder));
+        }
+        else if (voices.getLive() != nullptr)
+        {
+            voices.clear();
+        }
         const int key = tree.getProperty ("detectedKey", -1);
         if (key >= 0 && key < 24)
         {

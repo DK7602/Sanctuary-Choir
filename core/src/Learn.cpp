@@ -280,6 +280,10 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
             return e;
         };
 
+        // Harmony speed scales the price of changing chord (slow = longer chords, passing notes).
+        const float speed = clampv (hs.speed, 0.0f, 1.0f);
+        const float changeCost = speed <= 0.5f ? 2.2f - 2.4f * speed : 1.0f - 1.2f * (speed - 0.5f);
+
         for (int c = 0; c < numChords; ++c)
             cost[(size_t) c] = emission (0, c) - (vocab[(size_t) c].degree == 0 ? 0.3f : 0.0f);
 
@@ -298,7 +302,7 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
                     float tr = 0.0f;
                     if (a != b)
                     {
-                        tr = phraseStart ? 0.15f : 0.5f * (dur < 0.15f ? 1.5f : 1.0f);
+                        tr = (phraseStart ? 0.15f : 0.5f * (dur < 0.15f ? 1.5f : 1.0f)) * changeCost;
                         tr -= progressionBonus (vocab[(size_t) a], vocab[(size_t) b], scale.isMinorFamily()) * 1.5f;
                     }
                     const float v = cost[(size_t) (i - 1) * (size_t) numChords + (size_t) a] + tr;
@@ -392,7 +396,7 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
 //==============================================================================
 bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParams& paramsIn,
                  const LearnedScore& score, RenderedStems& out, const ProgressFn& progress,
-                 const std::atomic<bool>* cancel)
+                 const std::atomic<bool>* cancel, const SampleSet* voices)
 {
     out = RenderedStems{};
     if (n <= 0)
@@ -432,6 +436,7 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
         engine.prepare (sampleRate, block);
         engine.setParams (params);
         engine.setScore (&score);
+        engine.setSampleSet (voices);
         engine.setRenderSections ((uint8_t) (1u << section));
         float* taps[NumSections * 2] {};
         taps[section * 2] = raw[(size_t) section * 2].data();

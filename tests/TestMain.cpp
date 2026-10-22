@@ -179,6 +179,35 @@ TEST (harmonyHoldsThroughPassingNotes)
     CHECK (h.getChord().name != "Eb");
 }
 
+TEST (chordSpeedControlsHarmonicRhythm)
+{
+    // The same melody (G, quick F, G, quick Bb-ish leap) changes chord more often as Chord Speed rises.
+    auto changesAt = [] (float speed)
+    {
+        HarmonyContext ctx;
+        ctx.scale = { 3, ScaleType::Major };
+        ctx.speed = speed;
+        LiveHarmonizer h;
+        h.reset();
+        const float dt = 0.005f;
+        int changes = 0;
+        std::string last;
+        const float melody[] = { 55, 53, 55, 53, 51, 53, 55, 58, 55, 53 };
+        for (int rep = 0; rep < 3; ++rep)
+            for (float m : melody)
+                for (float t = 0; t < 0.16f; t += dt)
+                {
+                    h.process (sung (m), ctx, dt);
+                    if (h.getChord().name != last) { ++changes; last = h.getChord().name; }
+                }
+        return changes;
+    };
+    const int slow = changesAt (0.0f), mid = changesAt (0.5f), fast = changesAt (1.0f);
+    std::printf ("  chord changes: slow %d, default %d, fast %d\n", slow, mid, fast);
+    CHECK (slow <= mid && mid < fast);
+    CHECK (passingNoteTime (0.0f) > passingNoteTime (0.5f) && passingNoteTime (0.5f) > passingNoteTime (1.0f));
+}
+
 TEST (harmonyIgnoresWobblesBetweenScaleNotes)
 {
     // An out-of-key F sung with vibrato in G major sits between E and F#: the melody must not
@@ -443,6 +472,135 @@ TEST (echoAnswersAfterThePhrase)
         // The echo carries the melody: its pitch follows the phrase (C then E in some octave).
         const float pitch = medianPitch (y, sr, 2.8, 3.6);
         CHECK (pitch > 0.0f);
+    }
+}
+
+static double bandRatioDb (const std::vector<float>& x, double sr, double t0, double t1)
+{
+    // Energy 2.2-4.5 kHz relative to 250-1200 Hz (the male "ring" vs the body of the voice).
+    const int N = 4096;
+    std::vector<double> acc (N / 2 + 1, 0.0);
+    for (size_t i = (size_t) (t0 * sr); i + N < (size_t) (t1 * sr) && i + N < x.size(); i += N / 2)
+    {
+        std::vector<std::complex<float>> buf (N);
+        for (int k = 0; k < N; ++k) buf[(size_t) k] = x[i + (size_t) k] * (0.5f - 0.5f * std::cos (kTwoPi * (float) k / (float) N));
+        FFT fft (12);
+        fft.forward (buf.data());
+        for (int k = 0; k <= N / 2; ++k) acc[(size_t) k] += std::norm (buf[(size_t) k]);
+    }
+    double hi = 0, body = 0;
+    for (int k = 0; k <= N / 2; ++k)
+    {
+        const double f = k * sr / N;
+        if (f >= 2200 && f < 4500) hi += acc[(size_t) k];
+        if (f >= 250 && f < 1200) body += acc[(size_t) k];
+    }
+    return 10.0 * std::log10 ((hi + 1e-20) / (body + 1e-20));
+}
+
+TEST (wordsSectionsTakeTheOtherVoiceType)
+{
+    // Words mode re-uses the lead's own voice. With a male lead the sopranos must lose the male
+    // ring around 3 kHz; with a female lead the tenors gain it.
+    const double sr = 48000.0;
+    struct Case { float leadMidi; int leadSection, target; bool moreRing; };
+    for (const Case cs : { Case { 55.0f, Tenor, Soprano, false }, Case { 67.0f, Soprano, Tenor, true } })
+    {
+        auto lead = test::singMelody ({ { cs.leadMidi, 2.5f, 0.2f } }, sr, cs.leadSection, 0.0f);
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Words, HarmonyMode::Unison);
+        p.sections[(size_t) cs.target].solo = true;
+        eng.setParams (p);
+        auto y = runEngine (eng, lead, sr);
+        const double src = bandRatioDb (lead, sr, 0.8, 2.4), out = bandRatioDb (y, sr, 0.8, 2.4);
+        std::printf ("  %s lead -> %s: ring/body %.1f dB -> %.1f dB\n", cs.moreRing ? "female" : "male", cs.target == Soprano ? "sopranos" : "tenors", src, out);
+        if (cs.moreRing) CHECK (out > src + 2.0);
+        else CHECK (out < src - 6.0);
+    }
+}
+
+static SampleSet makeRecordedChoir (double sr, int* keptOut = nullptr)
+{
+    // A pretend recording session: each section sings five held notes with breaths between.
+    SampleSet set;
+    const std::array<std::array<float, 5>, NumSections> notes { { { 62, 65, 69, 72, 76 }, { 55, 58, 62, 65, 69 },
+                                                                  { 50, 53, 57, 60, 64 }, { 41, 45, 48, 52, 55 } } };
+    int kept = 0;
+    for (int s = 0; s < NumSections; ++s)
+    {
+        std::vector<test::SungNote> take;
+        for (float m : notes[(size_t) s]) take.push_back ({ m, 2.0f, 0.5f });
+        const auto x = test::singMelody (take, sr, s, 18.0f, (uint32_t) (11 + s));
+        kept += set.addRecording (s, 0, x.data(), (int64_t) x.size(), sr);
+    }
+    set.finalise();
+    if (keptOut != nullptr) *keptOut = kept;
+    return set;
+}
+
+TEST (recordedChoirSlicesTakes)
+{
+    const double sr = 48000.0;
+    int kept = 0;
+    const auto set = makeRecordedChoir (sr, &kept);
+    std::printf ("  %s\n", set.describe().c_str());
+    CHECK (kept == 20);
+    const auto* sop = set.layerFor (Soprano, VocalType::Oo);   // falls back to Ah
+    CHECK (sop != nullptr && sop->zones.size() == 5);
+    if (sop != nullptr && sop->zones.size() == 5)
+    {
+        const float expected[] = { 62, 65, 69, 72, 76 };
+        for (int i = 0; i < 5; ++i)
+            CHECK_NEAR (sop->zones[(size_t) i].rootMidi, expected[i], 0.25);
+    }
+    CHECK (SampleSet::sectionFromPath ("My Choir/Altos/alto_ah_take2.wav") == Alto);
+    CHECK (SampleSet::vowelFromPath ("My Choir/Altos/alto_ah_take2.wav") == 0);
+    CHECK (SampleSet::vowelFromPath ("bass hum.wav") == 5);
+    CHECK (SampleSet::sectionFromPath ("bassoon.wav") == -1);
+}
+
+TEST (recordedChoirSingsInTuneAndSustains)
+{
+    // The same Unison check as the synthesised voices, sung from the recordings, on a note held
+    // far longer than any recorded note.
+    const double sr = 48000.0;
+    const auto set = makeRecordedChoir (sr);
+    auto x = test::singMelody ({ { 60.0f, 6.0f, 0.3f } }, sr, Tenor, 0.0f);
+    const std::array<float, NumSections> expected = { 72.0f, 60.0f, 60.0f, 48.0f };
+    auto levelRangeDb = [&] (const std::vector<float>& y)
+    {
+        float lo = 1e9f, hi = 0.0f;
+        const size_t w = (size_t) (0.05 * sr);
+        for (size_t i = (size_t) (1.2 * sr); i + w < (size_t) (5.8 * sr); i += w)
+        {
+            double e = 0; for (size_t k = i; k < i + w; ++k) e += (double) y[k] * y[k];
+            const float r = (float) std::sqrt (e / (double) w);
+            lo = std::min (lo, r); hi = std::max (hi, r);
+        }
+        return 20.0f * std::log10 (hi / std::max (lo, 1e-9f));
+    };
+    for (int s = 0; s < NumSections; ++s)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        eng.setSampleSet (&set);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::Unison);
+        p.sections[(size_t) s].solo = true;
+        eng.setParams (p);
+        const float pitch = medianPitch (runEngine (eng, x, sr), sr, 0.8, 5.8);
+
+        // One singer per section: the loop must carry the note with no dropouts (the recording's
+        // own vibrato moves the level by a few dB).
+        ChoirEngine one;
+        one.prepare (sr, 256);
+        one.setSampleSet (&set);
+        p.choirSize = 10.0f;
+        one.setParams (p);
+        const float range = levelRangeDb (runEngine (one, x, sr));
+        std::printf ("  recorded section %d: pitch %.2f (expected %.0f), solo singer level range %.1f dB\n", s, pitch, expected[(size_t) s], range);
+        CHECK_NEAR (pitch, expected[(size_t) s], 0.3);
+        CHECK (range > 0.0f && range < 6.0f);
     }
 }
 

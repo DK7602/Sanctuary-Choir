@@ -18,6 +18,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <string>
 
@@ -35,14 +36,14 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--synth-demo]\n", argv[0]);
         return 2;
     }
 
     const std::string inPath = argv[1], outPath = argv[2];
     EngineParams p;
     bool learn = false, demo = false;
-    std::string stemsDir;
+    std::string stemsDir, voicesDir;
 
     const std::map<std::string, int> voices { { "ah", 0 }, { "oh", 1 }, { "oo", 2 }, { "ee", 3 }, { "eh", 4 }, { "mm", 5 }, { "words", 6 } };
     const std::map<std::string, int> modes { { "full", 0 }, { "gospel", 1 }, { "open", 2 }, { "unison", 3 }, { "thirds", 4 }, { "organum", 5 }, { "upper", 6 }, { "lower", 7 }, { "drone", 8 } };
@@ -65,6 +66,7 @@ int main (int argc, char** argv)
         else if (a == "--reverb") p.reverb = std::stof (next());
         else if (a == "--lead") p.leadDb = std::stof (next());
         else if (a == "--stems") stemsDir = next();
+        else if (a == "--voices") voicesDir = next();
         else { std::fprintf (stderr, "unknown option %s\n", a.c_str()); return 2; }
     }
 
@@ -81,6 +83,34 @@ int main (int argc, char** argv)
         std::fprintf (stderr, "error: %s\n", err.c_str());
         return 1;
     }
+
+    // Recorded choir voices: every audio file under the folder, sorted by its name.
+    SampleSet recorded;
+    if (! voicesDir.empty())
+    {
+        namespace fs = std::filesystem;
+        for (const auto& entry : fs::recursive_directory_iterator (voicesDir))
+        {
+            if (! entry.is_regular_file() || entry.path().extension() != ".wav")
+                continue;
+            const std::string rel = fs::relative (entry.path(), voicesDir).string();
+            const int section = SampleSet::sectionFromPath (rel);
+            if (section < 0)
+                continue;
+            test::Audio rec;
+            std::string e;
+            if (! test::readWav (entry.path().string(), rec, e))
+                continue;
+            std::vector<float> m (rec.channels[0].size(), 0.0f);
+            for (const auto& ch : rec.channels)
+                for (size_t i = 0; i < m.size(); ++i)
+                    m[i] += ch[i] / (float) rec.channels.size();
+            recorded.addRecording (section, std::max (0, SampleSet::vowelFromPath (rel)), m.data(), (int64_t) m.size(), rec.sampleRate);
+        }
+        recorded.finalise();
+        std::printf ("recorded voices: %s\n", recorded.describe().c_str());
+    }
+    const SampleSet* voicesPtr = recorded.isEmpty() ? nullptr : &recorded;
 
     const double sr = in.sampleRate;
     const int64_t n = in.length();
@@ -105,7 +135,7 @@ int main (int argc, char** argv)
         std::printf ("%s\n", score.describe().c_str());
 
         RenderedStems stems;
-        if (! renderTake (mono.data(), n, sr, p, score, stems, [] (float f) { std::printf ("\rrendering %3d%%", (int) (f * 100)); std::fflush (stdout); }))
+        if (! renderTake (mono.data(), n, sr, p, score, stems, [] (float f) { std::printf ("\rrendering %3d%%", (int) (f * 100)); std::fflush (stdout); }, nullptr, voicesPtr))
         {
             std::fprintf (stderr, "render failed\n");
             return 1;
@@ -135,6 +165,7 @@ int main (int argc, char** argv)
         ChoirEngine eng;
         eng.prepare (sr, 512);
         eng.setParams (p);
+        eng.setSampleSet (voicesPtr);
         const int lat = eng.getLatencySamples();
         const int64_t total = n + lat + (int64_t) (sr * 4.0);
         std::vector<float> l ((size_t) total), r ((size_t) total), x ((size_t) total, 0.0f), xr ((size_t) total, 0.0f);

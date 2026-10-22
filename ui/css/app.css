@@ -140,6 +140,12 @@ html, body {
 }
 .dropdown .text small { font-size: 15px; color: var(--muted); margin-left: 4px; }
 .dropdown:hover { box-shadow: 0 0 12px rgba(255, 210, 140, 0.2); background: rgba(255, 230, 180, 0.04); }
+.dropdown.has-action .text { right: 52px; }
+.dropdown .dd-action {
+  position: absolute; right: 28px; top: 8px; width: 20px; height: 20px; padding: 0; border: 0; background: none;
+  color: var(--gold); opacity: 0.8; cursor: pointer;
+}
+.dropdown .dd-action:hover { opacity: 1; filter: drop-shadow(0 0 4px rgba(255, 210, 140, 0.8)); }
 
 #menuLayer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 50; }
 .menu {
@@ -304,6 +310,7 @@ html, body {
 .big-btn:hover { border-color: var(--gold); box-shadow: 0 0 12px rgba(255, 210, 140, 0.25); }
 .big-btn.gold { color: #1b1209; background: linear-gradient(180deg, #ffe3a3, #c69a52); border-color: #ffe9b8; }
 .big-btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+.big-btn.small { height: 30px; padding: 0 12px; font-size: 10.5px; letter-spacing: 1.6px; }
 .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 18px; }
 .switch .track { width: 44px; height: 24px; border-radius: 12px; background: #17110e; border: 1px solid rgba(232,201,138,0.45); position: relative; transition: background 150ms; }
 .switch .track::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #8a7a62; transition: transform 150ms, background 150ms; }

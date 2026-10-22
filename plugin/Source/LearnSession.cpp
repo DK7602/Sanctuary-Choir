@@ -83,6 +83,7 @@ static sc::HarmonySettings harmonySettingsFor (const sc::EngineParams& p)
     for (int s = 0; s < sc::NumSections; ++s)
         hs.ranges[(size_t) s] = p.sections[(size_t) s].range;
     hs.wordsMode = p.vocalType == sc::VocalType::Words;
+    hs.speed = p.harmonySpeed / 100.0f;
 
     // Mirror the engine's singer allocation so small choirs get sensible parts.
     const int n = sc::singersForChoirSize (p.choirSize);
@@ -467,6 +468,7 @@ void LearnSession::render()
     progress = 0.0f;
 
     sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
+    auto voices = getVoices ? getVoices() : nullptr;   // held for the whole render
     auto take = owned->take;
     auto analysis = owned->analysis;
     const double rate = owned->sampleRate;
@@ -476,7 +478,7 @@ void LearnSession::render()
 
     cancel = false;
     workDone = false;
-    worker = std::make_unique<std::thread> ([this, result, params, take, analysis, rate, timelineStart]
+    worker = std::make_unique<std::thread> ([this, result, params, voices, take, analysis, rate, timelineStart]
     {
         auto d = std::make_unique<PlaybackData>();
         d->sampleRate = rate;
@@ -486,7 +488,7 @@ void LearnSession::render()
         d->score = sc::harmoniseTake (*analysis, harmonySettingsFor (params));
         sc::RenderedStems stems;
         if (sc::renderTake (take->data(), (int64_t) take->size(), rate, params, d->score, stems,
-                            [this] (float f) { progress = f; }, &cancel))
+                            [this] (float f) { progress = f; }, &cancel, voices.get()))
         {
             d->stems = toStemSet (stems);
             *result = std::move (d);

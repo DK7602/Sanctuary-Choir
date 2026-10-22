@@ -20,6 +20,7 @@ public:
     ~LearnSession() override;
 
     std::function<sc::EngineParams()> getParams;   // set by the processor
+    std::function<std::shared_ptr<const sc::SampleSet>()> getVoices;   // recorded choir voices, if any
     bool standalone = false;                        // capture immediately instead of waiting for the host
     std::function<void()> onStatusChanged;          // message thread
 

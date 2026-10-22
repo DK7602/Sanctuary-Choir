@@ -57,7 +57,7 @@
       db("leadLevel", "Lead Vocal", 0, -60, 6), db("choirLevel", "Choir Level", 0, -60, 6),
       pct("humanize", "Humanize", 100, 200), pct("vibrato", "Vibrato", 100, 200), pct("glide", "Glide", 100, 300),
       { id: "formant", name: "Formant", type: "float", min: -100, max: 100, interval: 1, skew: 1, default: 0 },
-      pct("pitchCorrection", "Pitch Correction", 60), pct("breath", "Breath", 100, 200),
+      pct("pitchCorrection", "Pitch Correction", 60), pct("breath", "Breath", 100, 200), pct("harmonySpeed", "Chord Speed", 50),
       choice("venue", "Venue", ["Grand Cathedral", "Stone Abbey", "Wooden Chapel", "Concert Hall", "Gospel Church", "Studio Room"]),
       { id: "decay", name: "Decay", type: "float", min: 30, max: 250, interval: 1, skew: 1, default: 100, label: "%" },
       { id: "preDelay", name: "Pre-Delay", type: "float", min: 0, max: 150, interval: 0.1, skew: 1, default: 30, label: "ms" },
@@ -79,8 +79,9 @@
     const learn = { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", progress: 0, hasTake: false, hasStems: false, stale: false, previewing: false };
     let learnTimer = null;
 
+    const voices = { loading: false, name: "", text: "", error: "" };
     function status() {
-      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "" });
+      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices) });
     }
     function setParam(id, v) {
       values[id] = v;
@@ -171,6 +172,11 @@
           case "render": renderSim(); break;
           case "load": emit("toast", { text: "In the plugin this opens a file browser for a vocal take" }); setTimeout(stopLearnSim, 300); break;
           case "export": emit("toast", { text: learn.hasStems ? "Stems saved to Documents/Sanctuary Choir/Exports" : "Render first, then export the stems" }); break;
+          case "voicesLoad":
+            Object.assign(voices, { loading: true, name: "", text: "", error: "" }); status();
+            setTimeout(() => { Object.assign(voices, { loading: false, name: "St. Mark's Choir", text: "4 SECTIONS \u00b7 2 VOWELS \u00b7 96 NOTES" }); status(); }, 900);
+            break;
+          case "voicesClear": Object.assign(voices, { loading: false, name: "", text: "", error: "" }); status(); break;
           case "preview": learn.previewing = !learn.previewing; status(); break;
           case "presetLoad": presetIndex = msg.index; status(); break;
           case "presetNext": presetIndex = (presetIndex + 1) % presets.length; status(); break;

@@ -50,6 +50,7 @@ struct HarmonySettings
     std::array<SectionRange, NumSections> ranges = defaultSectionRanges();
     std::array<bool, NumSections> active { true, true, true, true };
     bool wordsMode = false;
+    float speed = 0.5f;          // harmony speed 0..1 (see HarmonyContext::speed)
 };
 
 struct LearnedEvent
@@ -93,7 +94,7 @@ using ProgressFn = std::function<void (float)>;
 /** Render the learned take with the given settings. Runs one engine per section in parallel. */
 bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParams& params,
                  const LearnedScore& score, RenderedStems& out, const ProgressFn& progress = {},
-                 const std::atomic<bool>* cancel = nullptr);
+                 const std::atomic<bool>* cancel = nullptr, const SampleSet* voices = nullptr);
 
 /** Mix rendered stems through the choir bus and room (reverb). Returns stereo (2 channels). */
 std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& params,

@@ -1,6 +1,7 @@
 // Sanctuary Choir - audio processor.
 #pragma once
 
+#include "ChoirVoices.h"
 #include "LearnSession.h"
 #include "Parameters.h"
 #include "Presets.h"
@@ -49,6 +50,7 @@ public:
     juce::AudioProcessorValueTreeState& getState() noexcept { return state; }
     PresetManager& getPresets() noexcept { return presets; }
     LearnSession& getLearn() noexcept { return learn; }
+    ChoirVoices& getVoices() noexcept { return voices; }
     sc::EngineSnapshot takeSnapshot() { return engine.takeSnapshot(); }
     sc::EngineParams currentParams() const;
     /** Latency reported to the host: the full alignment delay in Studio mode, 0 in Live mode. */
@@ -74,6 +76,7 @@ private:
     ParameterCache cache;
     PresetManager presets;
     LearnSession learn;
+    ChoirVoices voices;
     sc::ChoirEngine engine;
 
     // MIDI state (audio thread)

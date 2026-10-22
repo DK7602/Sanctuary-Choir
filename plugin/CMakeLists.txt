@@ -47,6 +47,7 @@ juce_add_binary_data(SanctuaryChoirAssets
 add_dependencies(SanctuaryChoirAssets SanctuaryChoirUIZip)
 
 target_sources(SanctuaryChoir PRIVATE
+    Source/ChoirVoices.cpp
     Source/LearnSession.cpp
     Source/Parameters.cpp
     Source/PluginEditor.cpp

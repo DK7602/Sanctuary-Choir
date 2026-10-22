@@ -7,6 +7,7 @@ namespace sc
 {
 static constexpr int kSingersPerSection = 20;
 static constexpr int kChunk = 64;
+static constexpr float kSampleGain = 1.37f;  // recorded notes are levelled to 0.1 RMS; this matches the synth choir
 static constexpr float kMinInputHz = 75.0f;
 static constexpr float kMaxInputHz = 1150.0f;
 
@@ -64,7 +65,10 @@ struct ChoirEngine::Singer
     PsolaVoice psola;
     PsolaControl pctl;
     VowelSinger vowel;
+    SamplePlayer sampler;
     float synthF0 = 220.0f;
+    float sampleHz = 220.0f;     // recorded voices carry their own vibrato: less is added
+    float rJitter = 0.0f;
 };
 
 ChoirEngine::ChoirEngine() = default;
@@ -156,6 +160,9 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
 
 void ChoirEngine::reset()
 {
+    leadCentre = -1.0f;
+    leadVoice = -1;
+    shapedVoice = -2;
     tracker.reset();
     analyzer.reset();
     harmonizer.reset();
@@ -172,6 +179,7 @@ void ChoirEngine::reset()
         s->currentMidi = s->targetMidi = -1.0f;
         s->psola.reset (0.0);
         s->vowel.reset();
+        s->sampler.reset();
     }
     sectionCount.fill (0);
     lastSingerTarget = -1;
@@ -223,7 +231,53 @@ const ChoirEngine::Replay* ChoirEngine::findReplay (int64_t t) const
     return nullptr;
 }
 
+void ChoirEngine::setSampleSet (const SampleSet* set) noexcept
+{
+    if (set == sampleSet)
+        return;
+    sampleSet = set;
+    for (auto& s : singers)
+        s->sampler.reset();   // they may point into the previous set
+}
+
 //==============================================================================
+void ChoirEngine::updateVoiceCharacter()
+{
+    const int voice = leadVoice < 0 ? 0 : leadVoice;
+    if (voice == shapedVoice)
+        return;
+    shapedVoice = voice;
+
+    // Vocal tract length relative to the lead (formant scale), and tone per section.
+    // A low (male) lead: sopranos and altos get a shorter, female tract, lose the male
+    // "ring" around 3 kHz and some chest. A high (female) lead: tenors and basses get a longer
+    // tract, the singer's formant and more chest.
+    struct Shape { float tract, highDb, ringDb, lowDb, shelfHz, ringHz; };
+    // Tuned against SATB singing-voice formant data over five vowels: a male source sung by the
+    // sopranos/altos moves toward the female voices and well away from a pitched-up man.
+    static const Shape fromMale[] = { { 1.2f, -12.0f, -6.0f, -2.5f, 2200.0f, 3200.0f }, { 1.14f, -9.0f, -5.0f, -1.5f, 2200.0f, 3200.0f },
+                                      { 1.0f, 0, 0, 0, 2200.0f, 3200.0f }, { 0.96f, 0, 0, 0, 2200.0f, 3200.0f } };
+    static const Shape fromFemale[] = { { 1.0f, 0, 0, 0, 2400.0f, 2900.0f }, { 0.97f, 0, 0, 0, 2400.0f, 2900.0f },
+                                        { 0.86f, 2.0f, 4.0f, 3.0f, 2400.0f, 2900.0f }, { 0.82f, 1.0f, 3.0f, 4.0f, 2400.0f, 2900.0f } };
+    const Shape* table = voice == 0 ? fromMale : fromFemale;
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const Shape& sh = table[s];
+        vocalTract[(size_t) s] = sh.tract;
+        auto& vs = voiceShape[(size_t) s];
+        vs.active = sh.highDb != 0.0f || sh.ringDb != 0.0f || sh.lowDb != 0.0f;
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            vs.high[(size_t) ch].highShelf (sr, sh.shelfHz, sh.highDb, 0.8);
+            vs.ring[(size_t) ch].peak (sr, sh.ringHz, 1.4, sh.ringDb);
+            vs.low[(size_t) ch].lowShelf (sr, 220.0, sh.lowDb);
+            vs.high[(size_t) ch].reset();
+            vs.ring[(size_t) ch].reset();
+            vs.low[(size_t) ch].reset();
+        }
+    }
+}
+
 int ChoirEngine::choirLatency() const noexcept
 {
     return params.lowLatency && params.vocalType != VocalType::Words ? liveLatency : latency;
@@ -301,6 +355,7 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
     s.rGlide = 0.7f + 0.6f * s.rng.uni();
     s.rScoop = 0.5f + s.rng.uni();
     s.rAttack = 0.75f + 0.5f * s.rng.uni();
+    s.rJitter = std::fmod ((float) (s.index * 4 + s.section + 1) * 0.6180340f, 1.0f);   // spread starts without using the rng
     s.vibPhase = s.rng.uni();
     s.drift = Wander{};
     s.drift.timeConstant = 0.9f + 0.8f * s.rng.uni();
@@ -449,7 +504,14 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     cf.inputMidi = g.voiced ? g.midi : lastInputMidi;
     cf.inputHz = g.voiced ? g.hz : midiToHz (lastInputMidi, params.a4);
     if (g.voiced)
+    {
         lastInputMidi = g.midi;
+        // Is the lead a low (male) or high (female) voice? Slow average with hysteresis.
+        leadCentre = leadCentre < 0.0f ? g.midi : leadCentre + (g.midi - leadCentre) * (1.0f - std::exp (-hop / 6.0f));
+        if (leadVoice != 0 && leadCentre < 58.0f) leadVoice = 0;
+        else if (leadVoice != 1 && leadCentre > 62.0f) leadVoice = 1;
+        else if (leadVoice < 0) leadVoice = leadCentre < 60.0f ? 0 : 1;
+    }
 
     const bool frozen = params.freeze;
     if (scoreSource != nullptr)
@@ -482,6 +544,7 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
         ctx.freeze = frozen;
         ctx.midi = params.midiEnabled ? midiHeld : NoteSet{};
         ctx.midiControlsHarmony = params.midiEnabled;
+        ctx.speed = clampv (params.harmonySpeed / 100.0f, 0.0f, 1.0f);
         harmonizer.process (g, ctx, hop);
         cf.voicing = harmonizer.getVoicing();
         cf.leadNote = harmonizer.getLeadNote();
@@ -640,10 +703,10 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
     const float melodyMicro = detune + drift + vib * 0.35f + s.scoop;
 
     // Words: PSOLA controls.
-    static const float sectionFormant[] = { 1.05f, 1.02f, 0.98f, 0.94f };
+
     const float formantParam = std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f);
     if (cf.voiced && cf.inputHz > 30.0f)
-        s.lastFollow = clampv (std::pow (hz / cf.inputHz, 0.2f), 0.82f, 1.22f);
+        s.lastFollow = clampv (std::pow (hz / cf.inputHz, 0.08f), 0.9f, 1.12f);
     if (s.doublesMelody && correction < 0.999f)
     {
         s.pctl.fixedRatio = std::exp2 ((s.octaveShift + melodyMicro) / 12.0f);
@@ -653,15 +716,18 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
         s.pctl.fixedRatio = 0.0f;
         s.pctl.targetHz = hz;
     }
-    s.pctl.formant = sectionFormant[sec] * s.rFormant * formantParam * s.lastFollow;
+    s.pctl.formant = vocalTract[(size_t) sec] * s.rFormant * formantParam * s.lastFollow;
     s.pctl.gain = s.rGain * s.depthGain;
     s.pctl.unvoicedGain = 0.6f;
 
     // Vowels: synth pitch and amplitude.
-    if (s.doublesMelody && cf.voiced && correction < 0.999f)
+    const bool followLead = s.doublesMelody && cf.voiced && correction < 0.999f;
+    if (followLead)
         s.synthF0 = cf.inputHz * std::exp2 ((s.octaveShift + melodyMicro) / 12.0f);
     else
         s.synthF0 = hz;
+    // Recorded voices already have their own vibrato: add only a touch on top.
+    s.sampleHz = s.synthF0 * std::exp2 (-0.75f * (followLead ? vib * 0.35f : vib) / 12.0f);
     const float shimmer = 1.0f + 0.06f * s.shimmer.tick (s.rng, dt) * humanize;
     s.ampTarget = singing ? cf.level * s.rGain * s.depthGain * shimmer : 0.0f;
     s.ampTarget = clampv (s.ampTarget, 0.0f, 1.5f);
@@ -776,6 +842,8 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
     else
     {
         const bool words = params.vocalType == VocalType::Words;
+        if (words)
+            updateVoiceCharacter();
         const float breath = style.breath * clampv (params.breath / 100.0f, 0.0f, 2.0f) * 0.35f;
         const float attC = onePoleCoeff (style.attackS, sr);
         const float relC = onePoleCoeff (style.releaseS, sr);
@@ -799,6 +867,14 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 sp->psola.reset ((double) (tWords - echoOffset - sp->delay));
                 sp->amp = sp->gate = 0.0f;
             }
+        }
+
+        std::array<const SampleLayer*, NumSections> sampleLayers {};
+        if (sampleSet != nullptr)
+        {
+            const VocalType vt = words ? VocalType::Ah : params.vocalType;
+            for (int s = 0; s < NumSections; ++s)
+                sampleLayers[(size_t) s] = sampleSet->layerFor (s, vt);
         }
 
         std::array<float, NumSections> norm {};
@@ -841,7 +917,14 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                     ampBuf[i] = s.amp;
                     peakAmp = std::max (peakAmp, s.amp);
                 }
-                if (peakAmp > 1.0e-4f)
+                if (sampleLayers[(size_t) s.section] != nullptr)
+                {
+                    // Recorded choir voices.
+                    s.sampler.render (*sampleLayers[(size_t) s.section], s.sampleHz, ampBuf, scratch.data(), c, sr, s.index, s.rJitter);
+                    for (int i = 0; i < c; ++i)
+                        scratch[(size_t) i] *= kSampleGain;
+                }
+                else if (peakAmp > 1.0e-4f)
                     s.vowel.render (glottal, s.synthF0, style.softness, breath, s.rng, ampBuf, scratch.data(), c);
                 s.gate = 0.0f;
             }
@@ -857,6 +940,23 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 const float v = scratch[(size_t) i] * g * fade;
                 L[i] += v * s.panL;
                 R[i] += v * s.panR;
+            }
+        }
+    }
+
+    // Words mode: give each section the vocal tract and tone of the voices that sing there.
+    if (stems == nullptr && params.vocalType == VocalType::Words)
+    {
+        for (int s = 0; s < NumSections; ++s)
+        {
+            auto& vs = voiceShape[(size_t) s];
+            if (! vs.active)
+                continue;
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                float* x = sec (s, ch);
+                for (int i = 0; i < c; ++i)
+                    x[i] = vs.low[(size_t) ch].process (vs.ring[(size_t) ch].process (vs.high[(size_t) ch].process (x[i])));
             }
         }
     }

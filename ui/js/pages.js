@@ -85,8 +85,14 @@
       Params.on("response", (x) => b.classList.toggle("on", Math.round(x) === v));
     });
     const knobs = el("div", "knob-row", bottom);
-    [["humanize", "HUMANIZE"], ["vibrato", "VIBRATO"], ["glide", "GLIDE"], ["formant", "FORMANT"], ["pitchCorrection", "PITCH LOCK"], ["breath", "BREATH"]]
-      .forEach(([id, label]) => new MiniKnob(knobs, id, label, { bipolar: id === "formant" }));
+    const tips = {
+      harmonySpeed: "How readily the choir changes chord. Low holds chords through passing notes; high gives every note its own chord.",
+    };
+    [["humanize", "HUMANIZE"], ["vibrato", "VIBRATO"], ["glide", "GLIDE"], ["formant", "FORMANT"], ["pitchCorrection", "PITCH LOCK"], ["breath", "BREATH"], ["harmonySpeed", "CHORD SPEED"]]
+      .forEach(([id, label]) => {
+        const k = new MiniKnob(knobs, id, label, { bipolar: id === "formant" });
+        if (tips[id] && k.el) k.el.title = tips[id];
+      });
   }
 
   const VENUES = [
@@ -197,6 +203,7 @@
         info.monoOutput = !!st.monoOutput;
         describe(Params.get("latencyMode"));
       }
+      showVoices(st.voices);
       const l = st.learn || {};
       preview.disabled = !l.hasTake;
       preview.textContent = l.previewing ? "\u25a0  STOP PREVIEW" : "\u25b6  PREVIEW";
@@ -204,22 +211,48 @@
       takeInfo.textContent = l.hasTake ? (l.text || "") : "No take yet. Press LEARN and sing, or LOAD a vocal file.";
     };
 
-    const right = el("div", "group", row);
+    const rightCol = el("div", "", row);
+    rightCol.style.cssText = "flex:1;display:flex;flex-direction:column;gap:12px;min-width:0";
+
+    // Recorded choir voices for the vowel modes.
+    const voices = el("div", "group", rightCol);
+    voices.style.cssText = "padding:10px 14px";
+    const vHead = el("div", "", voices);
+    vHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
+    el("h3", "", vHead, "CHOIR VOICES").style.margin = "0";
+    const vBtns = el("div", "", vHead);
+    vBtns.style.cssText = "display:flex;gap:8px";
+    const vLoad = el("button", "big-btn small", vBtns, "LOAD RECORDINGS");
+    vLoad.title = "Choose a folder of recordings: held notes per section and vowel (see the guide)";
+    vLoad.addEventListener("click", () => SC.send({ type: "cmd", name: "voicesLoad" }));
+    const vClear = el("button", "big-btn small", vBtns, "BUILT-IN");
+    vClear.title = "Go back to the built-in synthesised voices";
+    vClear.addEventListener("click", () => SC.send({ type: "cmd", name: "voicesClear" }));
+    const vText = el("p", "", voices);
+    vText.style.cssText = "font-size:15.5px;line-height:1.3;margin-top:6px";
+    const showVoices = (v) => {
+      v = v || {};
+      vClear.disabled = !v.name && !v.loading;
+      if (v.loading) vText.innerHTML = "<b>Loading</b> the recordings\u2026";
+      else if (v.error) vText.textContent = v.error;
+      else if (v.name) vText.innerHTML = "<b>" + v.name.replace(/[<>&]/g, "") + "</b> \u00b7 " + (v.text || "") + ". The vowel modes (Ah, Oh, Oo\u2026) sing with these voices.";
+      else vText.innerHTML = "Built-in voices. Load recordings of real singers (held notes per section and vowel) to sing the vowel modes with them.";
+    };
+    showVoices(null);
+
+    const right = el("div", "group", rightCol);
     right.style.cssText = "flex:1";
     el("h3", "", right, "HOW TO USE SANCTUARY CHOIR");
     const ol = el("ol", "", right);
     ol.style.cssText = "margin:4px 0 0;padding-left:22px";
     [
-      "<b>Sing</b> into the plugin on your vocal track. The choir harmonises you live in the key you choose (or Auto).",
-      "<b>Choir Size</b> adds singers one by one. Up to 40 voices fill the loft.",
-      "<b>Learn</b>: press it, play your track and press it again. Sanctuary studies the whole melody for smarter, phrase-aware harmony.",
-      "<b>Render</b> sings every voice at the highest quality. It plays back in sync with your song, and you can export stems.",
-      "<b>Freeze</b> holds the current chord forever, for pads and endings.",
-      "<b>Response: Echo</b> (MIX page) makes the choir answer each phrase right after you sing it.",
-      "<b>Vocal Type</b>: Words keeps your lyrics; Ah, Oh, Oo and Mm sing pure vowels.",
-    ].forEach((html) => { const li = el("li", "", ol); li.innerHTML = html; });
+      "<b>Sing</b> into the plugin on a stereo track. The choir harmonises you live in your key.",
+      "<b>Learn</b>, then <b>Render</b>: phrase-aware harmony at the best quality, in sync with your song.",
+      "<b>Chord Speed</b> (MIX) sets how often the chords change. Click the lock by Auto to keep the detected key.",
+      "<b>Freeze</b> holds the chord. <b>Response: Echo</b> answers each phrase.",
+    ].forEach((html) => { const li = el("li", "", ol); li.innerHTML = html; li.style.fontSize = "15.5px"; });
     foot = el("p", "", right);
-    foot.style.cssText = "margin-top:12px;color:#8f7f66;font-size:15px";
+    foot.style.cssText = "margin-top:8px;color:#8f7f66;font-size:14px";
     Params.on("latencyMode", describe);
     describe(Params.get("latencyMode"));
   }

@@ -9,6 +9,7 @@
 #include "Effects.h"
 #include "Harmonizer.h"
 #include "Psola.h"
+#include "SampleSet.h"
 #include "VowelSynth.h"
 
 #include <atomic>
@@ -58,6 +59,7 @@ struct EngineParams
     float formant = 0.0f;        // -100..100 (% darker .. brighter)
     float pitchCorrection = 60.0f; // % how strictly harmony voices sit on pitch
     float breath = 100.0f;       // % breath noise in vowel modes
+    float harmonySpeed = 50.0f;  // % how readily the choir changes chord (0 holds chords, 100 follows every note)
 
     // FX page
     Venue venue = Venue::GrandCathedral;
@@ -141,6 +143,9 @@ public:
     void setScore (const ScoreSource* score) { scoreSource = score; }
     /** When set, dry section buses (pre level/pan/width) are written here: 8 channels (S L/R, A L/R, ...). */
     void setStemTap (float* const* tap) { stemTap = tap; stemTapOffset = 0; }
+    /** Recorded choir voices to sing the vowel modes (nullptr = the built-in synthesised voices).
+        Call from the audio thread; the set must stay alive while it is in use. */
+    void setSampleSet (const SampleSet* set) noexcept;
     /** Only render singers of these sections (bit mask, used to parallelise offline renders). */
     void setRenderSections (uint8_t mask) { renderMask = mask; }
 
@@ -184,6 +189,7 @@ private:
     KeyTracker keyTracker;
     GlottalTables glottal;
     const ScoreSource* scoreSource = nullptr;
+    const SampleSet* sampleSet = nullptr;
     float* const* stemTap = nullptr;
     int64_t stemTapOffset = 0;
     uint8_t renderMask = 0x0F;
@@ -217,6 +223,20 @@ private:
     SafetyLimiter limiter;
     Smoothed volume, leadGain, choirGain, wetGain, dryChoirGain, leadSend, warmthAmt;
     std::array<Smoothed, NumSections> sectionGain, sectionPanL, sectionPanR, sectionWidth;
+
+    // Words mode voice character: every singer is the lead's own voice, so sections that sing
+    // in the other gender's register get that gender's vocal tract and tone.
+    struct VoiceShape
+    {
+        std::array<Biquad, 2> high, ring, low;   // L/R
+        bool active = false;
+    };
+    std::array<VoiceShape, NumSections> voiceShape;
+    std::array<float, NumSections> vocalTract { 1.0f, 1.0f, 1.0f, 1.0f };
+    float leadCentre = -1.0f;    // where the lead sings (MIDI), slowly averaged
+    int leadVoice = -1;          // 0 = low (male) lead, 1 = high (female) lead, -1 unknown
+    int shapedVoice = -2;
+    void updateVoiceCharacter();
 
     // Analysis state
     int keyTonic = 0;

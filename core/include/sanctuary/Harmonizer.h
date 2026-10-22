@@ -44,7 +44,11 @@ struct HarmonyContext
     bool freeze = false;
     NoteSet midi;          // held MIDI notes (sorted ascending), empty if none
     bool midiControlsHarmony = true;
+    float speed = 0.5f;    // 0 = hold chords through passing notes, 1 = new chord for every note
 };
+
+/** How long a melody note outside the chord may last before the chord changes (seconds). */
+float passingNoteTime (float speed);
 
 class LiveHarmonizer
 {

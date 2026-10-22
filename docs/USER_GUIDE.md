@@ -25,13 +25,14 @@ Pro Tools (AAX) isn't supported yet.
 ## 3. Sing
 
 - **Turn up Choir Size** to add singers. You'll see each one walk into the loft.
-- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note.
+- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note. Once Auto has found it, click the small **lock** next to *Auto · E♭* to keep it.
 - **Harmony Mode** chooses the arrangement. *Full Choir* is the classic four-part hymn sound.
 - **Style** changes how the choir performs. *Gospel* adds 7th chords, scoops and more vibrato; *Gregorian* gives pure, still voices.
 - **Vocal Type**:
-  - *Words* keeps your lyrics: every singer is your own voice, re-pitched.
+  - *Words* keeps your lyrics: every singer is your own voice, re-pitched. Sanctuary hears whether you have a low or a high voice. With a man singing lead, the sopranos and altos get a woman's vocal tract and lose the male "ring"; with a woman singing lead, the tenors and basses gain it.
   - *Ah, Oh, Oo, Ee, Eh* sing pure vowels.
   - *Mm* hums.
+  - The vowel modes can sing with **recordings of real singers**: see [Recording your own choir voices](RECORDING_YOUR_CHOIR.md).
 
 ### Latency: Studio or Live
 
@@ -67,6 +68,7 @@ The learned take is saved inside your project.
 ## 5. More things to try
 
 - **FREEZE**: hold a big final chord, then keep it ringing while you sing over it.
+- **Chord Speed** (MIX page) sets how often the choir changes chord. Turn it down and quick passing notes ride over one chord, like a real choir; turn it up and every note gets its own chord.
 - **Response: Echo** (MIX page, or the *Call & Response* preset): the choir answers each phrase right after you sing it.
 - **MIDI chords**: hold chords on a keyboard to decide the harmony yourself. With no voice coming in, the choir becomes an instrument you can play.
 - **Section panels**:

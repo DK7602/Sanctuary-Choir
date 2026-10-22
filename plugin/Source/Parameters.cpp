@@ -92,6 +92,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                               return std::abs (v) < 0.5f ? String ("Natural") : (v > 0 ? "+" : "") + String (roundToInt (v));
                                           })));
     mix->addChild (std::make_unique<APF> (pid (ParamIDs::pitchCorrection), "Pitch Correction", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 60.0f, percentAttrs()));
+    mix->addChild (std::make_unique<APF> (pid (ParamIDs::harmonySpeed), "Chord Speed", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 50.0f, percentAttrs()));
     mix->addChild (std::make_unique<APF> (pid (ParamIDs::breath), "Breath", NormalisableRange<float> (0.0f, 200.0f, 1.0f), 100.0f, percentAttrs()));
     layout.add (std::move (mix));
 
@@ -131,7 +132,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 struct ParameterCache::Ptrs
 {
     std::atomic<float>* volume, *choirSize, *space, *reverb, *tone, *presence, *harmonyMode, *key, *scale, *style, *vocalType, *freeze, *response;
-    std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath;
+    std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath, *harmonySpeed;
     std::atomic<float>* venue, *decay, *preDelay, *brightness, *leadReverb, *lowCut, *highCut, *warmth, *glue;
     std::atomic<float>* midiEnabled, *tuning, *latencyMode;
     std::array<std::atomic<float>*, sc::NumSections> level, pan, mute, solo, low, high;
@@ -154,6 +155,7 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.leadLevel = get (ParamIDs::leadLevel); p.choirLevel = get (ParamIDs::choirLevel); p.humanize = get (ParamIDs::humanize);
     p.vibrato = get (ParamIDs::vibrato); p.glide = get (ParamIDs::glide); p.formant = get (ParamIDs::formant);
     p.pitchCorrection = get (ParamIDs::pitchCorrection); p.breath = get (ParamIDs::breath);
+    p.harmonySpeed = get (ParamIDs::harmonySpeed);
     p.venue = get (ParamIDs::venue); p.decay = get (ParamIDs::decay); p.preDelay = get (ParamIDs::preDelay);
     p.brightness = get (ParamIDs::brightness); p.leadReverb = get (ParamIDs::leadReverb); p.lowCut = get (ParamIDs::lowCut);
     p.highCut = get (ParamIDs::highCut); p.warmth = get (ParamIDs::warmth); p.glue = get (ParamIDs::glue);
@@ -209,6 +211,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.glide = f (p.glide);
     e.formant = f (p.formant);
     e.pitchCorrection = f (p.pitchCorrection);
+    e.harmonySpeed = f (p.harmonySpeed);
     e.breath = f (p.breath);
 
     e.venue = (sc::Venue) jlimit (0, (int) sc::Venue::Count - 1, i (p.venue));
@@ -229,7 +232,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
 bool affectsHarmony (const String& id)
 {
     return id == ParamIDs::harmonyMode || id == ParamIDs::key || id == ParamIDs::scale || id == ParamIDs::style
-        || id == ParamIDs::vocalType || id == ParamIDs::choirSize || id == ParamIDs::tuning
+        || id == ParamIDs::vocalType || id == ParamIDs::choirSize || id == ParamIDs::tuning || id == ParamIDs::harmonySpeed
         || id.endsWith ("Low") || id.endsWith ("High");
 }
 

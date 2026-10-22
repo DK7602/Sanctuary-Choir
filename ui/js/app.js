@@ -17,7 +17,7 @@
     { icon: [1005, 888], level: [1055, 912, 139], wave: [987, 930, 207, 26], keys: [979, 960, 238, 49], range: [1095, 1012] },
   ];
 
-  const state = { info: {}, tab: "perform", meters: null, status: null, detectedKey: 0, detectedMinor: false, sections: [], built: false, lastSizeChange: 0, lastActivity: 0 };
+  const state = { info: {}, tab: "perform", meters: null, status: null, detectedKey: 0, detectedMinor: false, keyConfidence: 0, sections: [], built: false, lastSizeChange: 0, lastActivity: 0 };
 
   //==========================================================================
   // Stage scaling
@@ -355,6 +355,16 @@
           if (v > 0) return Params.format("key");
           return { main: "Auto", extra: "\u00b7 " + KEY_NAMES[state.detectedKey] + (state.detectedMinor ? "m" : "") };
         };
+        // One click locks the key Auto has found, so the harmony is right from the first note.
+        const canLock = () => Math.round(Params.get("key")) === 0 && state.keyConfidence >= 0.3;
+        const lockKey = () => {
+          Params.set("key", state.detectedKey + 1);
+          toast("Key locked to " + KEY_NAMES[state.detectedKey] + " " + (Params.format("scale") || "") + ". Choose Auto to let Sanctuary listen again.");
+        };
+        opts.action = () => ({ visible: canLock(), title: "Lock the detected key (" + KEY_NAMES[state.detectedKey] + ")", onClick: lockKey });
+        opts.menuTop = (m) => {
+          if (canLock()) Menu.item(m, "LOCK TO " + KEY_NAMES[state.detectedKey] + " (DETECTED)", false, lockKey, "action");
+        };
       }
       const dd = new Dropdown(el, opts);
       if (el.dataset.param === "key") state.keyDropdown = dd;
@@ -404,11 +414,14 @@
     const out = Math.min(1, Math.sqrt(m.out || 0) * 1.1);
     $("medallion").style.setProperty("--glow", out.toFixed(3));
     $("sceneGlow").style.opacity = (out * 0.8).toFixed(3);
-    if (m.keyTonic !== state.detectedKey || m.keyMinor !== state.detectedMinor) {
+    const confident = (m.keyConfidence || 0) >= 0.3;
+    if (m.keyTonic !== state.detectedKey || m.keyMinor !== state.detectedMinor || confident !== (state.keyConfidence >= 0.3)) {
       state.detectedKey = m.keyTonic;
       state.detectedMinor = m.keyMinor;
+      state.keyConfidence = m.keyConfidence || 0;
       if (state.keyDropdown) state.keyDropdown.render();
     }
+    state.keyConfidence = m.keyConfidence || 0;
     const scaleName = (Params.format("scale") || "").toUpperCase();
     $("keyReadout").textContent = "KEY " + KEY_NAMES[m.keyTonic] + " " + scaleName;
     $("chordReadout").textContent = m.chord ? "\u00b7  " + m.chord : "";
