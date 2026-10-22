@@ -189,8 +189,11 @@ struct ChoirEngine::Singer
     VowelSinger vowel;
     SamplePlayer sampler;
     float synthF0 = 220.0f;
-    float sampleHz = 220.0f;     // recorded voices carry their own vibrato: less is added
     float rJitter = 0.0f;
+    SampleNote sampleNote;       // what the recorded voice sings (it carries its own vibrato: less is added)
+    float noteMidi = -1.0f;      // the note sampleNote.serial counts
+    float silentFor = 1.0f;      // seconds since the singer last sang
+    bool wasSinging = false;
 };
 
 ChoirEngine::ChoirEngine() = default;
@@ -298,7 +301,9 @@ void ChoirEngine::reset()
         s->active = false;
         s->fade = 0.0f;
         s->amp = s->ampTarget = s->gate = 0.0f;
-        s->currentMidi = s->targetMidi = -1.0f;
+        s->currentMidi = s->targetMidi = s->noteMidi = -1.0f;
+        s->silentFor = 1.0f;
+        s->wasSinging = false;
         s->psola.reset (0.0);
         s->vowel.reset();
         s->sampler.reset();
@@ -464,6 +469,8 @@ void ChoirEngine::setParams (const EngineParams& in)
         fix (p.rhythmDepth, d.rhythmDepth);
         if ((int) p.ensemble < 0 || p.ensemble >= Ensemble::Count)
             p.ensemble = Ensemble::Choir;
+        if ((int) p.singing < 0 || p.singing >= Singing::Count)
+            p.singing = Singing::Natural;
     }
     for (int s = 0; s < NumSections; ++s)
         p.sections[(size_t) s].range = ensembleRange (p.ensemble, s, p.sections[(size_t) s].range);
@@ -491,6 +498,20 @@ void ChoirEngine::setParams (const EngineParams& in)
             style.scoopCents *= 2.0f; style.glideMs *= 1.5f; style.attackS *= 1.6f; style.releaseS *= 1.2f; style.breath *= 1.3f;
             style.softness = clampv (style.softness + 0.1f, 0.0f, 1.0f);
             ens.formantSpread = 2.5f;
+            break;
+        default:
+            break;
+    }
+    // So does the way of singing (the recorded voices switch to breathy or belted takes too).
+    switch (p.singing)
+    {
+        case Singing::Breathy:      // airy and soft, a lighter vibrato
+            style.breath *= 2.4f; style.vibratoCents *= 0.7f; style.attackS *= 1.3f;
+            style.softness = clampv (style.softness + 0.22f, 0.0f, 1.0f);
+            break;
+        case Singing::Belt:         // pressed and bright, scooped into the notes
+            style.breath *= 0.6f; style.scoopCents *= 1.4f; style.attackS *= 0.8f;
+            style.softness = clampv (style.softness - 0.3f, 0.0f, 1.0f);
             break;
         default:
             break;
@@ -604,7 +625,9 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
     s.panL = std::cos (theta);
     s.panR = std::sin (theta);
 
-    s.currentMidi = s.targetMidi = -1.0f;
+    s.currentMidi = s.targetMidi = s.noteMidi = -1.0f;
+    s.silentFor = 1.0f;
+    s.wasSinging = false;
     s.amp = s.ampTarget = 0.0f;
     s.gate = 0.0f;
     s.noteAge = 0.0f;
@@ -980,8 +1003,29 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
         s.synthF0 = cf.inputHz * std::exp2 ((s.octaveShift + melodyMicro) / 12.0f);
     else
         s.synthF0 = hz;
-    // Recorded voices already have their own vibrato: add only a touch on top.
-    s.sampleHz = s.synthF0 * std::exp2 (-0.75f * (followLead ? vib * 0.35f : vib) / 12.0f);
+    // Recorded voices already have their own vibrato: add only a touch on top. They also sing
+    // their own slides between notes, so they get the note without the glide, and every new
+    // note (or a note sung again after a gap) is counted.
+    auto& sn = s.sampleNote;
+    sn.hz = s.synthF0 * std::exp2 (-0.75f * (followLead ? vib * 0.35f : vib) / 12.0f);
+    sn.noteHz = sn.hz * std::exp2 ((s.targetMidi - s.currentMidi - s.scoop) / 12.0f);
+    sn.noteMidi = followLead || s.targetMidi < 0.0f ? -1.0f : s.targetMidi;
+    if (singing)
+    {
+        const bool resumed = ! s.wasSinging && s.silentFor >= 0.03f;
+        if (resumed || s.targetMidi != s.noteMidi)
+        {
+            ++sn.serial;
+            sn.detached = resumed;
+            s.noteMidi = s.targetMidi;
+        }
+        s.silentFor = 0.0f;
+    }
+    else
+    {
+        s.silentFor += dt;
+    }
+    s.wasSinging = singing;
     const float shimmer = 1.0f + 0.06f * s.shimmer.tick (s.rng, dt) * humanize;
     s.ampTarget = singing ? cf.level * s.rGain * shimmer : 0.0f;
     s.ampTarget = clampv (s.ampTarget, 0.0f, 1.5f);
@@ -1009,7 +1053,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
 
     // Reconfigure on parameter changes that affect the singers.
     allocateSingers();
-    const bool styleChanged = params.style != lastStyle || params.ensemble != lastEnsemble;
+    const bool styleChanged = params.style != lastStyle || params.ensemble != lastEnsemble || params.singing != lastSinging;
     if (params.vocalType != lastVocal || params.formant != lastFormantParam || styleChanged)
     {
         lastVocal = params.vocalType;
@@ -1022,6 +1066,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         lastSpace = params.space;
         lastStyle = params.style;
         lastEnsemble = params.ensemble;
+        lastSinging = params.singing;
         for (auto& sp : singers)
         {
             const float delayMs = sp->rDelay * style.timingMs * params.humanize / 100.0f;
@@ -1187,7 +1232,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         {
             const VocalType vt = words ? VocalType::Ah : params.vocalType;
             for (int s = 0; s < NumSections; ++s)
-                sampleLayers[(size_t) s] = sampleSet->layerFor (formantSection (s), vt);
+                sampleLayers[(size_t) s] = sampleSet->layerFor (formantSection (s), vt, params.singing);
         }
 
         // Section level by head count, eased so singers joining or leaving don't step the level
@@ -1245,7 +1290,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 if (sampleLayers[(size_t) s.section] != nullptr)
                 {
                     // Recorded choir voices.
-                    s.sampler.render (*sampleLayers[(size_t) s.section], s.sampleHz, ampBuf, scratch.data(), c, sr, s.index, s.rJitter, ens.zoneOffset);
+                    s.sampler.render (*sampleLayers[(size_t) s.section], s.sampleNote, ampBuf, scratch.data(), c, sr, s.index, s.rJitter, ens.zoneOffset);
                     for (int i = 0; i < c; ++i)
                         scratch[(size_t) i] *= kSampleGain;
                 }

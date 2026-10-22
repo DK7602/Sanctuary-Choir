@@ -51,6 +51,12 @@
     const stageBtn = el("button", "pill page-link", page, "STAGE & MICS");
     stageBtn.title = "Arrange the sections on the stage and choose the microphones";
     stageBtn.addEventListener("click", () => info && info.openStage && info.openStage());
+    const singing = choicePills(page, "singing", "SINGING", [
+      ["NATURAL", 0, "Sung as written: clear, open vowels"],
+      ["BREATHY", 1, "Airy and soft: the recorded voices switch to their breathy takes"],
+      ["BELT", 2, "Bright and pressed, sung out: the recorded voices switch to their belted takes"],
+    ]);
+    singing.classList.add("page-pills");
     const top = el("div", "row", page);
     top.style.justifyContent = "space-between";
 
@@ -360,7 +366,7 @@
     ol.style.cssText = "margin:4px 0 0;padding-left:22px";
     [
       "<b>Sing</b> into the plugin on a stereo track; <b>Learn</b>, then <b>Render</b> for the best quality.",
-      "<b>Ensemble</b> and <b>Chord Speed</b> are on MIX, <b>Rhythm</b> on FX.",
+      "<b>Singing</b>, <b>Ensemble</b> and <b>Chord Speed</b> are on MIX, <b>Rhythm</b> on FX.",
     ].forEach((html) => { const li = el("li", "", ol); li.innerHTML = html; li.style.fontSize = "15.5px"; });
     foot = el("p", "", right);
     foot.style.cssText = "margin-top:8px;color:#8f7f66;font-size:14px";

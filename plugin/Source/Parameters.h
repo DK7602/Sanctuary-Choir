@@ -38,6 +38,7 @@ namespace ParamIDs
     inline constexpr const char* pitchCorrection = "pitchCorrection";
     inline constexpr const char* harmonySpeed = "harmonySpeed";
     inline constexpr const char* breath = "breath";
+    inline constexpr const char* singing = "singing";
     // FX
     inline constexpr const char* venue = "venue";
     inline constexpr const char* decay = "decay";

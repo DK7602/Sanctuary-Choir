@@ -39,6 +39,13 @@ const char* const* getVocalTypeNames()
     return names;
 }
 
+const char* const* getSingingNames()
+{
+    static const char* names[] = { "Natural", "Breathy", "Belt" };
+    static_assert (sizeof (names) / sizeof (names[0]) == (size_t) Singing::Count);
+    return names;
+}
+
 const char* const* getKeyNames()
 {
     static const char* names[] = { "Auto", "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };

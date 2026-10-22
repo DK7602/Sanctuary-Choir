@@ -51,7 +51,7 @@
   - Low/high cut, Warmth and a Glue compressor on the choir bus.
 - **MIDI**: hold chords on a keyboard to dictate the harmony. With no voice coming in, the choir becomes a playable instrument.
 - **Live monitoring**: your voice comes through instantly while you record; the choir follows about 15 ms behind (Settings → Monitoring).
-- **Sanctuary Voices**: real recorded singers sing the vowel modes (Ah, Oh, Oo, Ee, Eh): 753 held notes from 19 professional singers, sorted into SATB sections. Installed with the plug-in; switch back to the synthesised voices any time (Settings → Choir Voices).
+- **Sanctuary Voices**: real recorded singers sing the vowel modes (Ah, Oh, Oo, Ee, Eh): 1,703 held notes from 19 professional singers, sorted into SATB sections, plus their real onsets and note-to-note slides, so legato lines join up and short notes start like sung notes. **Singing** (MIX page) switches them between natural, breathy and belted takes. Installed with the plug-in; switch back to the synthesised voices any time (Settings → Choir Voices).
 - **Your own choir**: record a few held notes per section and the vowel modes sing with those real voices ([guide](docs/RECORDING_YOUR_CHOIR.md)).
 - **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
 - **Chord Speed** and a one-click **key lock** for the detected key.

@@ -2,6 +2,7 @@
 //
 // Drives a LearnSession the way the processor does: audio blocks in, button presses and
 // setting changes on the message thread, with the session's timer running in between.
+#include "../Source/ChoirVoices.h"
 #include "../Source/LearnSession.h"
 #include "TestSignals.h"
 
@@ -445,9 +446,72 @@ static void chordLaneAndDragOut()
     }
 }
 
+static void voicePackLoads()
+{
+    // The voice pack that ships with the plug-in: held notes, onsets, legato moves, and the
+    // breathy and belted takes, all loaded, and singing a legato line from them.
+    std::printf ("[ voicePackLoads ]\n");
+    const File dir (String (SANCTUARY_SOURCE_DIR) + "/voices/SanctuaryVoices");
+    if (! dir.isDirectory())
+    {
+        std::printf ("  (no voice pack in this checkout)\n");
+        return;
+    }
+    sanctuary::ChoirVoices voices;
+    const auto t0 = Time::getMillisecondCounterHiRes();
+    voices.loadFolder (dir);
+    for (int waited = 0; waited < 120000 && (voices.isBusy() || voices.getLive() == nullptr); waited += 20)
+        pump (20);
+    const auto* set = voices.getLive();
+    check (set != nullptr, "voice pack loaded");
+    if (set == nullptr)
+        return;
+    std::printf ("  %s in %.1f s\n", set->describe().c_str(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
+    check (set->numNotes() > 1500, "held notes in every way of singing");
+    check (set->has (sc::Singing::Breathy) && set->has (sc::Singing::Belt), "breathy and belted takes");
+    size_t onsets = 0, moves = 0;
+    for (int s = 0; s < sc::NumSections; ++s)
+        for (auto how : { sc::Singing::Natural, sc::Singing::Breathy, sc::Singing::Belt })
+            if (const auto* l = set->layerFor (s, sc::VocalType::Ah, how))
+            {
+                onsets += l->onsets.size();
+                moves += l->moves.size();
+                check (l != set->layerFor (s, sc::VocalType::Ah) || how == sc::Singing::Natural, "a layer of its own per way of singing");
+            }
+    std::printf ("  Ah: %zu onsets, %zu moves\n", onsets, moves);
+    check (onsets > 40 && moves > 200, "onsets and moves");
+
+    // Sing a melody (learned, so every section moves note to note) in each way of singing.
+    for (auto how : { sc::Singing::Natural, sc::Singing::Breathy, sc::Singing::Belt })
+    {
+        sc::ChoirEngine engine;
+        engine.prepare (48000.0, 512);
+        engine.setSampleSet (set);
+        sc::EngineParams p;
+        p.singing = how;
+        p.reverb = 0.0f;
+        p.leadDb = -60.0f;
+        engine.setParams (p);
+        const auto x = sc::test::singMelody (sc::test::amazingGrace(), 48000.0, sc::Tenor);
+        std::vector<float> l (x.size()), r (x.size());
+        double e = 0.0;
+        bool finite = true;
+        for (size_t i = 0; i < x.size(); i += 512)
+        {
+            const int n = (int) std::min<size_t> (512, x.size() - i);
+            engine.process (x.data() + i, x.data() + i, l.data() + i, r.data() + i, n);
+        }
+        for (float v : l) { e += (double) v * v; finite = finite && std::isfinite (v); }
+        const double rmsDb = 10.0 * std::log10 (e / (double) l.size() + 1e-20);
+        std::printf ("  %s: %.1f dB\n", sc::getSingingNames()[(int) how], rmsDb);
+        check (finite && rmsDb > -40.0 && rmsDb < -6.0, "sings from the pack");
+    }
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI juce;
+    voicePackLoads();
     renderPressedWhileLearning();
     settingsChangedWhileRendering();
     projectReopenedAtAnotherRate();

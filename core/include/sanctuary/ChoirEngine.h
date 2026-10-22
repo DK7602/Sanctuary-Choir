@@ -70,6 +70,7 @@ struct EngineParams
     ScaleType scale = ScaleType::Major;
     Style style = Style::Sacred;
     VocalType vocalType = VocalType::Ah;
+    Singing singing = Singing::Natural;   // breathy or belted vowels (recorded voices, and the synth's tone)
     bool freeze = false;
     int response = 0;            // 0 = sing with me, 1 = echo each phrase right after it
     Ensemble ensemble = Ensemble::Choir;
@@ -284,6 +285,7 @@ private:
         bool trebles = false;         // tenors and basses sing as trebles
     } ens;
     Ensemble lastEnsemble = Ensemble::Count;
+    Singing lastSinging = Singing::Count;
 
     // Rhythm: song position and per-section gates.
     bool transportPlaying = false;

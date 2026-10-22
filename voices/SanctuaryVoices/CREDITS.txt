@@ -15,4 +15,13 @@ Changes made for Sanctuary Choir: held notes were cut from the singers'
 straight-tone long tones, scales and arpeggios, checked for steady pitch,
 trimmed, sorted into soprano, alto, tenor and bass sections by voice and pitch,
 and re-encoded as Ogg Vorbis. The pitch of each note is written in its file
-name (m6312 = MIDI note 63.12). Rebuild with tools/voicepack.
+name (m6312 = MIDI note 63.12). Alongside them:
+  short/    the first moments of notes sung from silence (from the long
+            tones, scales, arpeggios and fast scales), so a note starts the
+            way a singer starts it;
+  legato/   the slide from one note to the next, cut from the scales and
+            arpeggios (to6500 = the note it arrives at, x100 = when the pitch
+            is halfway there, in milliseconds);
+  breathy/, belt/   the same from the breathy and belted scales and
+            arpeggios.
+Rebuild with tools/voicepack.

@@ -82,11 +82,13 @@ if(SANCTUARY_BUILD_TESTS)
     juce_add_console_app(SanctuarySessionTests PRODUCT_NAME "SanctuarySessionTests")
     target_sources(SanctuarySessionTests PRIVATE
         Tests/SessionTests.cpp
+        Source/ChoirVoices.cpp
         Source/LearnSession.cpp
         Source/TakeExport.cpp
         "${PROJECT_SOURCE_DIR}/tests/TestSignals.cpp")
     target_include_directories(SanctuarySessionTests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
     target_compile_definitions(SanctuarySessionTests PRIVATE
+        SANCTUARY_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_MODAL_LOOPS_PERMITTED=1)

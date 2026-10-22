@@ -606,6 +606,239 @@ TEST (recordedChoirSingsInTuneAndSustains)
     }
 }
 
+/** A test recording: a sine-rich tone gliding from `from` to `to` (MIDI) around `cross`
+    seconds, with an attack over `attack` seconds. */
+static std::vector<float> testTone (double sr, double seconds, float from, float to, double cross, double attack)
+{
+    std::vector<float> x ((size_t) (seconds * sr));
+    double ph = 0.0;
+    for (size_t i = 0; i < x.size(); ++i)
+    {
+        const double t = (double) i / sr;
+        const double k = 0.5 + 0.5 * std::tanh ((t - cross) / 0.02);   // the slide, halfway at `cross`
+        const double m = from + (to - from) * k;
+        ph += 440.0 * std::exp2 ((m - 69.0) / 12.0) / sr;
+        const double env = attack > 0.0 ? std::min (1.0, t / attack) : 1.0;
+        x[i] = (float) (0.3 * env * (std::sin (2.0 * kPi * ph) + 0.4 * std::sin (4.0 * kPi * ph) + 0.2 * std::sin (6.0 * kPi * ph)));
+    }
+    return x;
+}
+
+static float rmsAt (const std::vector<float>& y, double sr, double t0, double t1)
+{
+    double e = 0.0;
+    const size_t a = (size_t) (t0 * sr), b = std::min (y.size(), (size_t) (t1 * sr));
+    for (size_t i = a; i < b; ++i) e += (double) y[i] * y[i];
+    return b > a ? (float) std::sqrt (e / (double) (b - a)) : 0.0f;
+}
+
+TEST (recordedNamesDescribeTheirTakes)
+{
+    const auto move = SampleSet::infoFromPath ("Sopranos/ah/breathy/legato/f2_ah_007_m6561_to6342_x152.wav");
+    CHECK (move.singing == Singing::Breathy);
+    CHECK (move.kind == SampleKind::Move);
+    CHECK_NEAR (move.toMidi, 63.42, 0.001);
+    CHECK_NEAR (move.crossingSeconds, 0.152, 0.0001);
+    CHECK (move.singer == 102);
+    CHECK_NEAR (SampleSet::rootFromPath ("Sopranos/ah/breathy/legato/f2_ah_007_m6561_to6342_x152.wav"), 65.61, 0.001);
+    const auto onset = SampleSet::infoFromPath ("Basses/oh/belt/short/m11_oh_003_m4512.wav");
+    CHECK (onset.singing == Singing::Belt);
+    CHECK (onset.kind == SampleKind::Onset);
+    CHECK (onset.singer == 211);
+    const auto plain = SampleSet::infoFromPath ("My Choir/Altos/alto_ah_take2.wav");
+    CHECK (plain.singing == Singing::Natural && plain.kind == SampleKind::Held && plain.singer == -1);
+}
+
+TEST (recordedSingingStylesFallBack)
+{
+    const double sr = 48000.0;
+    SampleSet set;
+    const auto x = testTone (sr, 2.0, 60.0f, 60.0f, 99.0, 0.0);
+    set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), sr, 60.0f);
+    SampleNoteInfo breathy;
+    breathy.singing = Singing::Breathy;
+    set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), sr, 62.0f, breathy);
+    set.finalise();
+    CHECK (set.numNotes() == 2);
+    CHECK (set.has (Singing::Breathy) && ! set.has (Singing::Belt));
+    const auto* natural = set.layerFor (Tenor, VocalType::Ah);
+    const auto* airy = set.layerFor (Tenor, VocalType::Ah, Singing::Breathy);
+    const auto* belt = set.layerFor (Tenor, VocalType::Ah, Singing::Belt);
+    CHECK (natural != nullptr && airy != nullptr && natural != airy);
+    CHECK (belt == natural);   // nothing belted: natural singing
+    if (airy != nullptr) CHECK_NEAR (airy->zones[0].rootMidi, 62.0, 0.01);
+}
+
+TEST (recordedLegatoSingsTheRecordedMove)
+{
+    // Held notes on 60 and 62 and a recorded move between them. Stepping 60 -> 62 while the
+    // engine's own glide is still slow, the voice must take the recording's slide: past halfway
+    // within ~0.1 s, at the new note's pitch, then settle on the held 62.
+    const double sr = 48000.0;
+    SampleSet set;
+    for (float m : { 60.0f, 62.0f })
+    {
+        const auto x = testTone (sr, 2.0, m, m, 99.0, 0.0);
+        set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), sr, m);
+    }
+    SampleNoteInfo move;
+    move.kind = SampleKind::Move;
+    move.toMidi = 62.0f;
+    move.crossingSeconds = 0.15f;
+    const auto mx = testTone (sr, 0.4, 60.0f, 62.0f, 0.15, 0.0);
+    set.addNote (Tenor, 0, mx.data(), (int64_t) mx.size(), sr, 60.0f, move);
+    set.finalise();
+    const auto* layer = set.layerFor (Tenor, VocalType::Ah);
+    CHECK (layer != nullptr && layer->moves.size() == 1);
+    if (layer == nullptr) return;
+
+    auto sing = [&] (bool withMove)
+    {
+        SampleLayer l = *layer;
+        if (! withMove) l.moves.clear();
+        SamplePlayer player;
+        std::vector<float> y ((size_t) (1.2 * sr), 0.0f);
+        std::vector<float> amp (64, 0.5f);
+        SampleNote note;
+        float glide = 60.0f;
+        for (size_t i = 0; i + 64 <= y.size(); i += 64)
+        {
+            const double t = (double) i / sr;
+            const float target = t < 0.5 ? 60.0f : 62.0f;
+            if (t >= 0.5) glide += (target - glide) * (1.0f - std::exp (-64.0f / (float) sr / 0.3f));   // a slow glide
+            if (target != note.noteMidi) { note.noteMidi = target; ++note.serial; }
+            note.hz = midiToHz (glide);
+            note.noteHz = midiToHz (target);
+            player.render (l, note, amp.data(), y.data() + i, 64, sr, 0, 0.0f);
+        }
+        return y;
+    };
+    const auto legato = sing (true), plain = sing (false);
+    const float pLegato = medianPitch (legato, sr, 0.58, 0.64), pPlain = medianPitch (plain, sr, 0.58, 0.64);
+    const float settled = medianPitch (legato, sr, 0.95, 1.15);
+    std::printf ("  0.1 s after the step: %.2f with the recorded move, %.2f gliding; settled %.2f\n", pLegato, pPlain, settled);
+    CHECK (pLegato > 61.5f);
+    CHECK (pPlain < 61.2f);
+    CHECK_NEAR (settled, 62.0, 0.1);
+    // No dropouts across the move and the hand-over to the held note.
+    float lo = 1e9f, hi = 0.0f;
+    for (double t = 0.45; t < 1.15; t += 0.02)
+    {
+        const float r = rmsAt (legato, sr, t, t + 0.02);
+        lo = std::min (lo, r); hi = std::max (hi, r);
+    }
+    std::printf ("  level through the move: %.1f dB range\n", 20.0f * std::log10 (hi / lo));
+    CHECK (20.0f * std::log10 (hi / lo) < 3.0f);
+}
+
+TEST (recordedMoveStretchesToANearbyStep)
+{
+    // Only a tone up (60 -> 62) was recorded; stepping a minor third (60 -> 63) the voice still
+    // takes that slide, widened: it starts on 60, slides when the recording does, lands on 63.
+    const double sr = 48000.0;
+    SampleSet set;
+    for (float m : { 60.0f, 63.0f })
+    {
+        const auto x = testTone (sr, 2.0, m, m, 99.0, 0.0);
+        set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), sr, m);
+    }
+    SampleNoteInfo move;
+    move.kind = SampleKind::Move;
+    move.toMidi = 62.0f;
+    move.crossingSeconds = 0.15f;
+    const auto mx = testTone (sr, 0.4, 60.0f, 62.0f, 0.15, 0.0);
+    set.addNote (Tenor, 0, mx.data(), (int64_t) mx.size(), sr, 60.0f, move);
+    set.finalise();
+    const auto* layer = set.layerFor (Tenor, VocalType::Ah);
+    if (layer == nullptr) { CHECK (false); return; }
+    CHECK (layer->nearestMove (60.0f, 63.0f, 0) == 0);
+    CHECK (layer->nearestMove (60.0f, 58.0f, 0) == -1);   // the other way: never
+    CHECK (layer->nearestMove (60.0f, 67.0f, 0) == -1);   // a fifth from a tone: too far
+
+    SamplePlayer player;
+    std::vector<float> y ((size_t) (1.2 * sr), 0.0f);
+    std::vector<float> amp (64, 0.5f);
+    SampleNote note;
+    for (size_t i = 0; i + 64 <= y.size(); i += 64)
+    {
+        const float target = (double) i / sr < 0.5 ? 60.0f : 63.0f;
+        if (target != note.noteMidi) { note.noteMidi = target; ++note.serial; }
+        note.hz = note.noteHz = midiToHz (target);
+        player.render (*layer, note, amp.data(), y.data() + i, 64, sr, 0, 0.0f);
+    }
+    const float before = medianPitch (y, sr, 0.5, 0.54), after = medianPitch (y, sr, 0.62, 0.7), settled = medianPitch (y, sr, 0.9, 1.1);
+    std::printf ("  60 -> 63 on a recorded tone: %.2f before the slide, %.2f after, settled %.2f\n", before, after, settled);
+    CHECK (before < 60.5f);   // unstretched, the recording would start on 61
+    CHECK_NEAR (after, 63.0, 0.25);
+    CHECK_NEAR (settled, 63.0, 0.1);
+}
+
+TEST (recordedNotesStartWithAnOnset)
+{
+    // A held note that starts at full level and a recorded onset that speaks over 80 ms: a
+    // note from silence starts with the onset, then carries on as the held note; with the gap
+    // before a note sung again, it is sung afresh.
+    const double sr = 48000.0;
+    SampleSet set;
+    const auto x = testTone (sr, 2.0, 60.0f, 60.0f, 99.0, 0.0);
+    set.addNote (Alto, 0, x.data(), (int64_t) x.size(), sr, 60.0f);
+    SampleNoteInfo onset;
+    onset.kind = SampleKind::Onset;
+    const auto ox = testTone (sr, 0.3, 60.0f, 60.0f, 99.0, 0.08);
+    set.addNote (Alto, 0, ox.data(), (int64_t) ox.size(), sr, 60.0f, onset);
+    set.finalise();
+    const auto* layer = set.layerFor (Alto, VocalType::Ah);
+    if (layer == nullptr) { CHECK (false); return; }
+
+    auto sing = [&] (bool withOnset)
+    {
+        SampleLayer l = *layer;
+        if (! withOnset) l.onsets.clear();
+        SamplePlayer player;
+        std::vector<float> y ((size_t) (1.0 * sr), 0.0f);
+        std::vector<float> amp (64, 0.5f);
+        SampleNote note;
+        note.hz = note.noteHz = midiToHz (60.0f);
+        note.noteMidi = 60.0f;
+        for (size_t i = 0; i + 64 <= y.size(); i += 64)
+            player.render (l, note, amp.data(), y.data() + i, 64, sr, 0, 0.0f);
+        return y;
+    };
+    const auto withOnset = sing (true), without = sing (false);
+    const float early = rmsAt (withOnset, sr, 0.0, 0.03), later = rmsAt (withOnset, sr, 0.15, 0.25), held = rmsAt (withOnset, sr, 0.6, 0.9);
+    std::printf ("  onset: first 30 ms %.1f dB below the note (%.1f dB without an onset); held after it %.1f dB\n",
+                 20.0f * std::log10 (later / early), 20.0f * std::log10 (rmsAt (without, sr, 0.15, 0.25) / rmsAt (without, sr, 0.0, 0.03)),
+                 20.0f * std::log10 (held / later));
+    CHECK (20.0f * std::log10 (later / early) > 6.0f);
+    CHECK (std::abs (20.0f * std::log10 (held / later)) < 1.5f);
+    CHECK (std::abs (20.0f * std::log10 (rmsAt (without, sr, 0.15, 0.25) / rmsAt (without, sr, 0.0, 0.03))) < 1.5f);
+
+    // Sung again after a short gap (the release had not finished): afresh, from the onset,
+    // where a note carried on legato just comes back up.
+    auto again = [&] (bool detached)
+    {
+        SamplePlayer player;
+        std::vector<float> y ((size_t) (1.0 * sr), 0.0f);
+        std::vector<float> amp (64);
+        SampleNote note;
+        note.hz = note.noteHz = midiToHz (60.0f);
+        note.noteMidi = 60.0f;
+        float a = 0.0f;
+        for (size_t i = 0; i + 64 <= y.size(); i += 64)
+        {
+            const double t = (double) i / sr;
+            const bool on = t < 0.4 || t >= 0.45;
+            if (t >= 0.45 && note.serial == 0) { note.serial = 1; note.detached = detached; }
+            for (auto& v : amp) { a += ((on ? 0.5f : 0.0f) - a) * 0.002f; v = a; }
+            player.render (*layer, note, amp.data(), y.data() + i, 64, sr, 0, 0.0f);
+        }
+        return rmsAt (y, sr, 0.455, 0.48);
+    };
+    const float afresh = again (true), carried = again (false);
+    std::printf ("  sung again after a gap: %.1f dB softer at the restart than carried on\n", 20.0f * std::log10 (carried / afresh));
+    CHECK (20.0f * std::log10 (carried / afresh) > 4.0f);
+}
+
 TEST (leadLatencyAlignment)
 {
     const double sr = 48000.0;

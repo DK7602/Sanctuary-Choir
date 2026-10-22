@@ -27,10 +27,17 @@ enum class VocalType : int
     Ah = 0, Oh, Oo, Ee, Eh, Mm, Words, Count
 };
 
+/** How the choir sings its vowels: as written, breathy (airy, soft) or belted (bright, pressed). */
+enum class Singing : int
+{
+    Natural = 0, Breathy, Belt, Count
+};
+
 const char* const* getScaleNames();       // ScaleType::Count entries
 const char* const* getHarmonyModeNames(); // HarmonyMode::Count entries
 const char* const* getStyleNames();       // Style::Count entries
 const char* const* getVocalTypeNames();   // VocalType::Count entries
+const char* const* getSingingNames();     // Singing::Count entries
 const char* const* getKeyNames();         // 13 entries: "Auto", "C", ... "B"
 const char* getPitchClassName (int pc, bool preferFlats);
 std::string getNoteName (int midi);       // e.g. "C4"

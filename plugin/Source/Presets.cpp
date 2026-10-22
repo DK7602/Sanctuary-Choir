@@ -16,6 +16,7 @@ namespace
     using V = std::vector<std::pair<String, float>>;
 
     enum { Choir = 0, Kids, Gang, Congregation };
+    enum { Natural = 0, Breathy, Belted };   // sc::getSingingNames
     // Rhythm patterns (sc::getRhythmPatternNames).
     enum { Pulse4 = 1, Pulse8, Pulse16, Offbeats, Dotted, Gallop, Syncopated, Stutter, TranceGate, Heartbeat, ArpUp, ArpDown, ArpBounce, CallAnswer };
 
@@ -75,7 +76,7 @@ namespace
             p ("Mass Choir",        { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 100 }, { space, 70 }, { reverb, 40 }, { presence, 50 }, { glue, 50 }, { venue, GospelChurch } }),
             p ("Praise Break",      { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 60 }, { space, 55 }, { reverb, 30 }, { presence, 55 }, { glue, 55 }, { harmonySpeed, 70 }, { warmth, 15 }, { venue, GospelChurch } }),
             p ("Gospel Quartet",    { { harmonyMode, Full }, { style, Gospel }, { vocalType, Words }, { choirSize, 10 }, { space, 30 }, { reverb, 25 }, { presence, 50 }, { venue, Studio } }),
-            p ("Sweet Hour",        { { harmonyMode, Thirds }, { style, Gospel }, { vocalType, Oo }, { choirSize, 35 }, { space, 50 }, { reverb, 45 }, { warmth, 20 }, { venue, GospelChurch } }),
+            p ("Sweet Hour",        { { harmonyMode, Thirds }, { style, Gospel }, { vocalType, Oo }, { choirSize, 35 }, { space, 50 }, { reverb, 45 }, { warmth, 20 }, { singing, Breathy }, { venue, GospelChurch } }),
             p ("Lining Out",        { { harmonyMode, Unison }, { style, Spiritual }, { vocalType, Words }, { response, 1 }, { ensemble, Congregation }, { choirSize, 60 }, { space, 60 }, { reverb, 42 }, { venue, Chapel } }),
         });
 
@@ -83,18 +84,18 @@ namespace
         add ({
             p ("Epic Cinematic",    { { harmonyMode, Open }, { style, Cinematic }, { vocalType, Ah }, { choirSize, 100 }, { space, 90 }, { reverb, 72 }, { decay, 140 }, { tone, -2 }, { warmth, 25 }, { glue, 45 }, { venue, Cathedral } }),
             p ("Dark Ritual",       { { harmonyMode, Lower }, { style, Cinematic }, { vocalType, Oh }, { choirSize, 80 }, { space, 80 }, { reverb, 75 }, { decay, 160 }, { tone, -5 }, { presence, 20 }, { warmth, 30 }, { venue, Cathedral } }),
-            p ("Ethereal Rise",     { { harmonyMode, Upper }, { style, Cinematic }, { vocalType, Oo }, { choirSize, 50 }, { space, 90 }, { reverb, 85 }, { brightness, 75 }, { venue, Cathedral } }),
+            p ("Ethereal Rise",     { { harmonyMode, Upper }, { style, Cinematic }, { vocalType, Oo }, { choirSize, 50 }, { space, 90 }, { reverb, 85 }, { brightness, 75 }, { singing, Breathy }, { venue, Cathedral } }),
             p ("Battle Hymn",       { { harmonyMode, Open }, { style, Cinematic }, { vocalType, Words }, { choirSize, 100 }, { space, 85 }, { reverb, 60 }, { presence, 50 }, { warmth, 30 }, { glue, 55 }, { venue, Hall } }),
-            p ("Heroes Unison",     { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Oh }, { choirSize, 90 }, { space, 80 }, { reverb, 65 }, { glue, 45 }, { venue, Cathedral } }),
+            p ("Heroes Unison",     { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Oh }, { choirSize, 90 }, { space, 80 }, { reverb, 65 }, { glue, 45 }, { singing, Belted }, { venue, Cathedral } }),
             p ("Mystery",           { { harmonyMode, Drone }, { style, Cinematic }, { vocalType, Mm }, { choirSize, 40 }, { space, 75 }, { reverb, 80 }, { decay, 150 }, { tone, -4 }, { venue, Abbey } }),
-            p ("Trailer Hits",      { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Ah }, { choirSize, 100 }, { space, 90 }, { reverb, 70 }, { glue, 60 }, { rhythmPattern, Pulse4 }, { rhythmLength, 28 }, { venue, Cathedral } }),
+            p ("Trailer Hits",      { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Ah }, { choirSize, 100 }, { space, 90 }, { reverb, 70 }, { glue, 60 }, { rhythmPattern, Pulse4 }, { rhythmLength, 28 }, { singing, Belted }, { venue, Cathedral } }),
         });
 
         category = "Pop & Backing";
         add ({
             p ("Backing Stack",     { { harmonyMode, Thirds }, { style, Worship }, { vocalType, Words }, { choirSize, 12 }, { space, 40 }, { reverb, 20 }, { presence, 55 }, { humanize, 60 }, { venue, Studio } }),
             p ("Pop Doubles",       { { harmonyMode, Unison }, { style, Worship }, { vocalType, Words }, { choirSize, 10 }, { space, 50 }, { reverb, 15 }, { vibrato, 50 }, { venue, Studio } }),
-            p ("Oohs & Aahs",       { { harmonyMode, Full }, { style, Worship }, { vocalType, Oo }, { choirSize, 20 }, { space, 45 }, { reverb, 30 }, { presence, 35 }, { venue, Studio } }),
+            p ("Oohs & Aahs",       { { harmonyMode, Full }, { style, Worship }, { vocalType, Oo }, { choirSize, 20 }, { space, 45 }, { reverb, 30 }, { presence, 35 }, { singing, Breathy }, { venue, Studio } }),
             p ("Soul Harmonies",    { { harmonyMode, Thirds }, { style, Gospel }, { vocalType, Words }, { choirSize, 15 }, { space, 40 }, { reverb, 25 }, { presence, 50 }, { warmth, 20 }, { venue, Studio } }),
             p ("R&B Stack",         { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 14 }, { space, 35 }, { reverb, 22 }, { presence, 52 }, { venue, Studio } }),
             p ("Wide Octaves",      { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Words }, { choirSize, 30 }, { space, 100 }, { reverb, 35 }, { presence, 40 }, { venue, Hall } }),
@@ -103,11 +104,11 @@ namespace
         category = "Pads & Drones";
         add ({
             p ("Midnight Hum",      { { harmonyMode, Full }, { style, Sacred }, { vocalType, Mm }, { choirSize, 50 }, { space, 65 }, { reverb, 60 }, { presence, 10 }, { tone, -3 }, { venue, Abbey } }),
-            p ("Heavenly Drone",    { { harmonyMode, Drone }, { style, Sacred }, { vocalType, Oo }, { choirSize, 55 }, { space, 80 }, { reverb, 85 }, { decay, 150 }, { venue, Cathedral } }),
+            p ("Heavenly Drone",    { { harmonyMode, Drone }, { style, Sacred }, { vocalType, Oo }, { choirSize, 55 }, { space, 80 }, { reverb, 85 }, { decay, 150 }, { singing, Breathy }, { venue, Cathedral } }),
             p ("Endless Ah",        { { harmonyMode, Full }, { style, Sacred }, { vocalType, Ah }, { choirSize, 70 }, { space, 80 }, { reverb, 85 }, { decay, 200 }, { glide, 200 }, { harmonySpeed, 10 }, { venue, Cathedral } }),
             p ("Choir Pad",         { { harmonyMode, Open }, { style, Cinematic }, { vocalType, Oo }, { choirSize, 60 }, { space, 85 }, { reverb, 80 }, { harmonySpeed, 15 }, { venue, Hall } }),
             p ("Warm Hum",          { { harmonyMode, Full }, { style, Worship }, { vocalType, Mm }, { choirSize, 50 }, { space, 60 }, { reverb, 60 }, { tone, -2 }, { warmth, 35 }, { venue, Chapel } }),
-            p ("Shimmer Pad",       { { harmonyMode, Upper }, { style, Cinematic }, { vocalType, Ee }, { choirSize, 45 }, { space, 90 }, { reverb, 90 }, { decay, 180 }, { brightness, 85 }, { venue, Cathedral } }),
+            p ("Shimmer Pad",       { { harmonyMode, Upper }, { style, Cinematic }, { vocalType, Ee }, { choirSize, 45 }, { space, 90 }, { reverb, 90 }, { decay, 180 }, { brightness, 85 }, { singing, Breathy }, { venue, Cathedral } }),
         });
 
         category = "Rhythmic";

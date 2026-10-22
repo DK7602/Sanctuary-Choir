@@ -33,6 +33,8 @@ Pro Tools (AAX) isn't supported yet.
   - *Ah, Oh, Oo, Ee, Eh* sing pure vowels.
   - *Mm* hums.
   - The vowel modes are sung by **real recorded singers** (Sanctuary Voices, installed with the plug-in). *Settings → Choir Voices* switches between **SANCTUARY** (recorded), **YOUR OWN…** (your singers; see [Recording your own choir voices](RECORDING_YOUR_CHOIR.md)) and **SYNTH** (the synthesised voices). *Mm* (humming) is always synthesised.
+  - The recorded singers sing like singers, not like a keyboard. When the melody steps to the next note they **slide into it the way they were recorded sliding**, so legato lines join up. A note that starts from silence, such as a short or detached note, begins with a **real sung onset**.
+  - **Singing** (top left of the MIX page) sets how they sing: **Natural**, **Breathy** (airy and soft) or **Belt** (bright and pressed, sung out). With Sanctuary Voices the singers switch to takes recorded that way. The synthesised voices change their tone to match. You can automate it, for example breathy verses and a belted last chorus.
 
 ### Latency: Studio or Live
 

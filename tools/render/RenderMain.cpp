@@ -13,6 +13,7 @@
 //     --stems DIR          also write the dry section stems (learn mode)
 //     --mics C,T,R         close, tree and room microphone levels in dB (-60 = off; default -60,0,-60)
 //     --formation NAME     blocks | across | mencentre | mixed
+//     --singing NAME       natural | breathy | belt  (recorded voices: their breathy or belted takes)
 //     --synth-demo         ignore the input and sing a demo melody (writes it next to the output)
 #include "TestSignals.h"
 
@@ -38,7 +39,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--synth-demo]\n", argv[0]);
         return 2;
     }
 
@@ -70,6 +71,7 @@ int main (int argc, char** argv)
         else if (a == "--stems") stemsDir = next();
         else if (a == "--voices") voicesDir = next();
         else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
+        else if (a == "--singing") p.singing = (Singing) indexOf ({ { "natural", 0 }, { "breathy", 1 }, { "belt", 2 } }, next(), 0);
         else if (a == "--rhythm") p.rhythmPattern = std::clamp (std::stoi (next()), 0, kNumRhythmPatterns - 1);
         else if (a == "--mics")
         {
@@ -132,7 +134,7 @@ int main (int argc, char** argv)
                     m[i] += ch[i] / (float) rec.channels.size();
             const int vowel = std::max (0, SampleSet::vowelFromPath (rel));
             if (const float root = SampleSet::rootFromPath (rel); root > 0.0f)
-                recorded.addNote (section, vowel, m.data(), (int64_t) m.size(), rec.sampleRate, root);
+                recorded.addNote (section, vowel, m.data(), (int64_t) m.size(), rec.sampleRate, root, SampleSet::infoFromPath (rel));
             else
                 recorded.addRecording (section, vowel, m.data(), (int64_t) m.size(), rec.sampleRate);
         }

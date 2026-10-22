@@ -115,6 +115,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                           })));
     mix->addChild (std::make_unique<APF> (pid (ParamIDs::pitchCorrection), "Pitch Correction", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 60.0f, percentAttrs()));
     mix->addChild (std::make_unique<APF> (pid (ParamIDs::harmonySpeed), "Chord Speed", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 50.0f, percentAttrs()));
+    mix->addChild (std::make_unique<APC> (pid (ParamIDs::singing), "Singing", toStringArray (sc::getSingingNames(), (int) sc::Singing::Count), 0));
     mix->addChild (std::make_unique<APF> (pid (ParamIDs::breath), "Breath", NormalisableRange<float> (0.0f, 200.0f, 1.0f), 100.0f, percentAttrs()));
     layout.add (std::move (mix));
 
@@ -163,7 +164,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 struct ParameterCache::Ptrs
 {
     std::atomic<float>* volume, *choirSize, *space, *reverb, *tone, *presence, *harmonyMode, *key, *scale, *style, *vocalType, *freeze, *response;
-    std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath, *harmonySpeed;
+    std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath, *harmonySpeed, *singing;
     std::atomic<float>* ensemble, *micClose, *micTree, *micRoom;
     std::atomic<float>* venue, *decay, *preDelay, *brightness, *leadReverb, *lowCut, *highCut, *warmth, *glue;
     std::atomic<float>* rhythmPattern, *rhythmRate, *rhythmLength, *rhythmDepth, *rhythmSections;
@@ -190,7 +191,7 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.leadLevel = get (ParamIDs::leadLevel); p.choirLevel = get (ParamIDs::choirLevel); p.humanize = get (ParamIDs::humanize);
     p.vibrato = get (ParamIDs::vibrato); p.glide = get (ParamIDs::glide); p.formant = get (ParamIDs::formant);
     p.pitchCorrection = get (ParamIDs::pitchCorrection); p.breath = get (ParamIDs::breath);
-    p.harmonySpeed = get (ParamIDs::harmonySpeed);
+    p.harmonySpeed = get (ParamIDs::harmonySpeed); p.singing = get (ParamIDs::singing);
     p.venue = get (ParamIDs::venue); p.decay = get (ParamIDs::decay); p.preDelay = get (ParamIDs::preDelay);
     p.brightness = get (ParamIDs::brightness); p.leadReverb = get (ParamIDs::leadReverb); p.lowCut = get (ParamIDs::lowCut);
     p.highCut = get (ParamIDs::highCut); p.warmth = get (ParamIDs::warmth); p.glue = get (ParamIDs::glue);
@@ -232,6 +233,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.freeze = f (p.freeze) > 0.5f;
     e.response = jlimit (0, 1, i (p.response));
     e.ensemble = (sc::Ensemble) jlimit (0, (int) sc::Ensemble::Count - 1, i (p.ensemble));
+    e.singing = (sc::Singing) jlimit (0, (int) sc::Singing::Count - 1, i (p.singing));
     e.micCloseDb = f (p.micClose);
     e.micTreeDb = f (p.micTree);
     e.micRoomDb = f (p.micRoom);
@@ -292,6 +294,6 @@ bool affectsHarmony (const String& id)
 bool affectsRender (const String& id)
 {
     return affectsHarmony (id) || id == ParamIDs::response || id == ParamIDs::humanize || id == ParamIDs::vibrato || id == ParamIDs::glide
-        || id == ParamIDs::formant || id == ParamIDs::pitchCorrection || id == ParamIDs::breath;
+        || id == ParamIDs::formant || id == ParamIDs::pitchCorrection || id == ParamIDs::breath || id == ParamIDs::singing;
 }
 } // namespace sanctuary

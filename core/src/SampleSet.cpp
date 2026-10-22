@@ -62,7 +62,36 @@ namespace
 }
 
 //==============================================================================
-int SampleLayer::nearest (float midi, int variant) const noexcept
+namespace
+{
+    /** Every zone costing no more than the best plus `slack` is a candidate (none above
+        `limit`); each choir member (variant) takes a different one, among the given singer's
+        if there are any. -1 if nothing qualifies. */
+    template <typename Cost>
+    int pickZone (const std::vector<SampleZone>& zones, Cost cost, float slack, float limit, int variant, int singer) noexcept
+    {
+        float best = 1.0e9f;
+        for (const auto& z : zones)
+            best = std::min (best, cost (z));
+        if (! (best <= limit))
+            return -1;
+        int candidates[64], own[64];
+        int count = 0, ownCount = 0;
+        for (int i = 0; i < (int) zones.size() && count < 64; ++i)
+        {
+            if (cost (zones[(size_t) i]) > best + slack)
+                continue;
+            candidates[count++] = i;
+            if (singer >= 0 && zones[(size_t) i].singer == singer)
+                own[ownCount++] = i;
+        }
+        if (ownCount > 0)
+            return own[(unsigned) variant % (unsigned) ownCount];
+        return count > 0 ? candidates[(unsigned) variant % (unsigned) count] : -1;
+    }
+}
+
+int SampleLayer::nearest (float midi, int variant, int singer) const noexcept
 {
     if (zones.empty())
         return -1;
@@ -70,17 +99,30 @@ int SampleLayer::nearest (float midi, int variant) const noexcept
     // loops are shorter). Every recording within a semitone of the best is a candidate, and
     // each choir member takes a different one: real different singers, not copies.
     auto cost = [midi] (const SampleZone& z) { return std::abs (z.rootMidi - midi) + (z.seconds() < 1.2f ? 0.6f : 0.0f); };
-    float best = 1.0e9f;
-    for (const auto& z : zones)
-        best = std::min (best, cost (z));
-    int candidates[64];
-    int count = 0;
-    for (int i = 0; i < (int) zones.size() && count < 64; ++i)
-        if (cost (zones[(size_t) i]) <= best + 1.0f)
-            candidates[count++] = i;
-    if (count == 0)
-        return 0;   // only when midi is not a number
-    return candidates[(unsigned) variant % (unsigned) count];
+    const int i = pickZone (zones, cost, 1.0f, 1.0e8f, variant, singer);
+    return i >= 0 ? i : 0;   // -1 only when midi is not a number
+}
+
+int SampleLayer::nearestOnset (float midi, int variant, int singer) const noexcept
+{
+    auto cost = [midi] (const SampleZone& z) { return std::abs (z.rootMidi - midi); };
+    return pickZone (onsets, cost, 1.0f, 2.5f, variant, singer);
+}
+
+int SampleLayer::nearestMove (float from, float to, int variant, int singer) const noexcept
+{
+    // A step the same way, as close in size as possible (a recorded third for a third; a step
+    // of a tone can stretch to a third), re-pitched as little as possible.
+    const float step = to - from;
+    auto cost = [to, step] (const SampleZone& z)
+    {
+        const float zStep = z.toMidi - z.rootMidi;
+        const float stretch = std::abs (zStep - step);
+        if ((zStep > 0.0f) != (step > 0.0f) || stretch > std::max (1.25f, 0.4f * std::abs (step)))
+            return 1.0e9f;
+        return 0.6f * std::abs (z.toMidi - to) + stretch;
+    };
+    return pickZone (moves, cost, 0.75f, 2.6f, variant, singer);
 }
 
 //==============================================================================
@@ -110,29 +152,87 @@ int SampleSet::addRecording (int section, int vowel, const float* x, int64_t n, 
     return kept;
 }
 
-void SampleSet::addNote (int section, int vowel, const float* x, int64_t n, double sampleRate, float rootMidi)
+void SampleSet::addNote (int section, int vowel, const float* x, int64_t n, double sampleRate, float rootMidi, const NoteInfo& info)
 {
-    if (section < 0 || section >= NumSections || vowel < 0 || vowel >= kVowels || n <= 0)
+    const int singing = (int) info.singing;
+    if (section < 0 || section >= NumSections || vowel < 0 || vowel >= kVowels || n <= 0 || singing < 0 || singing >= kSingings)
         return;
     SampleZone z;
     z.sampleRate = sampleRate;
     z.rootMidi = rootMidi;
+    z.singer = info.singer;
+    Kind kind = info.kind;
+    if (kind == Kind::Move)
+    {
+        z.toMidi = info.toMidi;
+        z.crossing = (int64_t) (info.crossingSeconds * sampleRate);
+        if (! (z.toMidi > 0.0f) || z.crossing <= 0 || z.crossing >= n)
+            kind = Kind::Held;   // not a usable move: keep it as a note
+    }
     float peak = 1.0e-6f;
     for (int64_t i = 0; i < n; ++i) peak = std::max (peak, std::abs (x[i]));
     z.scale = peak / 32767.0f;
     z.pcm.resize ((size_t) n);
     for (int64_t i = 0; i < n; ++i)
         z.pcm[(size_t) i] = (int16_t) std::lround (x[i] / peak * 32767.0f);
-    layers[(size_t) section][(size_t) vowel].zones.push_back (std::move (z));
+    auto& layer = layers[(size_t) section][(size_t) vowel][(size_t) singing];
+    (kind == Kind::Onset ? layer.onsets : kind == Kind::Move ? layer.moves : layer.zones).push_back (std::move (z));
+}
+
+namespace
+{
+    /** Short fades so the edges never click. */
+    void fadeEdges (SampleZone& z, double inSeconds, double outSeconds)
+    {
+        const int64_t len = z.length();
+        const int64_t fadeIn = std::min<int64_t> (len / 4, (int64_t) (inSeconds * z.sampleRate));
+        const int64_t fadeOut = std::min<int64_t> (len / 4, (int64_t) (outSeconds * z.sampleRate));
+        for (int64_t i = 0; i < fadeIn; ++i) z.pcm[(size_t) i] = (int16_t) (z.pcm[(size_t) i] * i / fadeIn);
+        for (int64_t i = 0; i < fadeOut; ++i) z.pcm[(size_t) (len - 1 - i)] = (int16_t) (z.pcm[(size_t) (len - 1 - i)] * i / fadeOut);
+    }
+
+    double rmsOf (const SampleZone& z, int64_t a, int64_t b)
+    {
+        a = std::max<int64_t> (0, a);
+        b = std::min (z.length(), b);
+        double e = 0.0;
+        for (int64_t i = a; i < b; ++i) e += (double) z.pcm[(size_t) i] * z.pcm[(size_t) i];
+        return b > a ? std::sqrt (e / (double) (b - a)) * z.scale : 0.0;
+    }
+
+    /** Scales z so that `rms` (measured on it) becomes the common level. */
+    void level (SampleZone& z, double rms)
+    {
+        if (rms > 1.0e-6)
+            z.scale *= (float) (kTargetRms / rms);
+    }
 }
 
 void SampleSet::finalise()
 {
+    auto byPitch = [] (const SampleZone& a, const SampleZone& b) { return a.rootMidi < b.rootMidi; };
     for (auto& section : layers)
+    for (auto& vowel : section)
     {
-        for (auto& layer : section)
+        for (auto& layer : vowel)
         {
-            std::sort (layer.zones.begin(), layer.zones.end(), [] (const SampleZone& a, const SampleZone& b) { return a.rootMidi < b.rootMidi; });
+            // Onsets: levelled by where they settle, so they meet the held note they hand over to.
+            std::sort (layer.onsets.begin(), layer.onsets.end(), byPitch);
+            for (auto& z : layer.onsets)
+            {
+                fadeEdges (z, 0.002, 0.03);
+                level (z, rmsOf (z, z.length() * 55 / 100, z.length() - (int64_t) (0.03 * z.sampleRate)));
+            }
+            // Moves: levelled by the notes either side of the move.
+            std::sort (layer.moves.begin(), layer.moves.end(), byPitch);
+            for (auto& z : layer.moves)
+            {
+                fadeEdges (z, 0.01, 0.03);
+                const auto w = (int64_t) (0.06 * z.sampleRate);
+                level (z, 0.5 * (rmsOf (z, 0, w) + rmsOf (z, z.length() - w - (int64_t) (0.03 * z.sampleRate), z.length())));
+            }
+
+            std::sort (layer.zones.begin(), layer.zones.end(), byPitch);
             for (auto& z : layer.zones)
             {
                 const int64_t len = z.length();
@@ -155,40 +255,57 @@ void SampleSet::finalise()
                 z.crossfade = std::min<int64_t> ((z.loopEnd - z.loopStart) / 3, (int64_t) (0.15 * sr));
 
                 // Level: the sustain at a common loudness, so notes and singers blend evenly.
-                double e = 0.0;
-                for (int64_t i = z.loopStart; i < z.loopEnd; ++i) e += (double) z.pcm[(size_t) i] * z.pcm[(size_t) i];
-                const double rms = std::sqrt (e / (double) std::max<int64_t> (1, z.loopEnd - z.loopStart)) * z.scale;
-                if (rms > 1.0e-6)
-                    z.scale *= (float) (kTargetRms / rms);
+                level (z, rmsOf (z, z.loopStart, z.loopEnd));
             }
         }
     }
 }
 
-const SampleLayer* SampleSet::layerFor (int section, VocalType vowel) const noexcept
+const SampleLayer* SampleSet::layerFor (int section, VocalType vowel, Singing singing) const noexcept
 {
     if (section < 0 || section >= NumSections)
         return nullptr;
     const auto& s = layers[(size_t) section];
-    const int v = (int) vowel;
-    if (v >= 0 && v < kVowels && ! s[(size_t) v].empty())
-        return &s[(size_t) v];
-    if (vowel == VocalType::Mm)
-        return nullptr;   // no recorded humming: the synthesised hum is closer than an open vowel
-    if (! s[0].empty())
-        return &s[0];
-    for (const auto& layer : s)
-        if (! layer.empty())
-            return &layer;
-    return nullptr;
+    auto find = [&] (int how) -> const SampleLayer*
+    {
+        const int v = (int) vowel;
+        if (v >= 0 && v < kVowels && ! s[(size_t) v][(size_t) how].empty())
+            return &s[(size_t) v][(size_t) how];
+        if (vowel == VocalType::Mm)
+            return nullptr;   // no recorded humming: the synthesised hum is closer than an open vowel
+        if (! s[0][(size_t) how].empty())
+            return &s[0][(size_t) how];
+        for (const auto& layer : s)
+            if (! layer[(size_t) how].empty())
+                return &layer[(size_t) how];
+        return nullptr;
+    };
+    const int how = clampv ((int) singing, 0, kSingings - 1);
+    if (how != 0)
+        if (const auto* l = find (how))
+            return l;
+    return find (0);
+}
+
+bool SampleSet::has (Singing singing) const noexcept
+{
+    const int how = (int) singing;
+    if (how < 0 || how >= kSingings)
+        return false;
+    for (const auto& s : layers)
+        for (const auto& v : s)
+            if (! v[(size_t) how].empty())
+                return true;
+    return false;
 }
 
 int SampleSet::numNotes() const noexcept
 {
     int n = 0;
     for (const auto& s : layers)
-        for (const auto& l : s)
-            n += (int) l.zones.size();
+        for (const auto& v : s)
+            for (const auto& l : v)
+                n += (int) l.zones.size();
     return n;
 }
 
@@ -196,7 +313,7 @@ int SampleSet::numSections() const noexcept
 {
     int n = 0;
     for (const auto& s : layers)
-        n += std::any_of (s.begin(), s.end(), [] (const SampleLayer& l) { return ! l.empty(); }) ? 1 : 0;
+        n += std::any_of (s.begin(), s.end(), [] (const auto& v) { return ! v[0].empty(); }) ? 1 : 0;
     return n;
 }
 
@@ -204,7 +321,7 @@ int SampleSet::numVowels() const noexcept
 {
     int n = 0;
     for (int v = 0; v < kVowels; ++v)
-        n += std::any_of (layers.begin(), layers.end(), [v] (const auto& s) { return ! s[(size_t) v].empty(); }) ? 1 : 0;
+        n += std::any_of (layers.begin(), layers.end(), [v] (const auto& s) { return ! s[(size_t) v][0].empty(); }) ? 1 : 0;
     return n;
 }
 
@@ -238,6 +355,23 @@ float SampleSet::rootFromPath (const std::string& path)
     return root;
 }
 
+SampleSet::NoteInfo SampleSet::infoFromPath (const std::string& path)
+{
+    auto digits = [] (const std::string& t, size_t from) { return t.size() > from && std::all_of (t.begin() + (long) from, t.end(), [] (char c) { return c >= '0' && c <= '9'; }); };
+    NoteInfo info;
+    for (const auto& t : tokens (path))
+    {
+        if (t == "breathy") info.singing = Singing::Breathy;
+        else if (t == "belt" || t == "belted") info.singing = Singing::Belt;
+        else if (t == "short" || t == "onset" || t == "onsets") info.kind = Kind::Onset;
+        else if (t == "legato" || t == "moves") info.kind = Kind::Move;
+        else if ((t.size() == 6 || t.size() == 7) && t[0] == 't' && t[1] == 'o' && digits (t, 2)) info.toMidi = (float) std::atoi (t.c_str() + 2) / 100.0f;
+        else if (t.size() >= 2 && t.size() <= 5 && t[0] == 'x' && digits (t, 1)) info.crossingSeconds = (float) std::atoi (t.c_str() + 1) / 1000.0f;
+        else if (t.size() >= 2 && t.size() <= 3 && (t[0] == 'f' || t[0] == 'm') && digits (t, 1)) info.singer = (t[0] == 'f' ? 100 : 200) + std::atoi (t.c_str() + 1);
+    }
+    return info;
+}
+
 int SampleSet::vowelFromPath (const std::string& path)
 {
     int found = -1;
@@ -264,74 +398,238 @@ int64_t SamplePlayer::loopPointFor (const SampleZone& z, float jitter) noexcept
 
 void SamplePlayer::reset() noexcept
 {
-    cur = old = Head{};
-    fade = 1.0f;
+    for (auto& h : heads)
+        h = Head{};
+    cur = -1;
+    next = nullptr;
+    lastSerial = 0;
+    lastNote = -1.0f;
     lastLayer = nullptr;
 }
 
+void SamplePlayer::start (const Head& h, float fadeSeconds, double outRate, bool freeze) noexcept
+{
+    const float step = fadeSeconds > 0.0f ? (float) (1.0 / ((double) fadeSeconds * outRate)) : 1.0f;
+    // A free slot, else the quietest head (by then nearly faded out).
+    int slot = -1;
+    for (int i = 0; i < kHeads && slot < 0; ++i)
+        if (heads[i].zone == nullptr)
+            slot = i;
+    if (slot < 0)
+    {
+        slot = 0;
+        for (int i = 1; i < kHeads; ++i)
+            if (i != cur && (slot == cur || heads[i].level < heads[slot].level))
+                slot = i;
+    }
+    for (int i = 0; i < kHeads; ++i)
+        if (heads[i].zone != nullptr)
+        {
+            heads[i].step = -step;
+            heads[i].frozen = heads[i].frozen || (freeze && heads[i].rate > 0.0);
+        }
+    heads[slot] = h;
+    heads[slot].level = fadeSeconds > 0.0f ? 0.0f : 1.0f;
+    heads[slot].step = step;
+    if (fadeSeconds <= 0.0f)
+        for (int i = 0; i < kHeads; ++i)
+            if (i != slot)
+                heads[i] = Head{};
+    cur = slot;
+}
+
 void SamplePlayer::render (const SampleLayer& layer, float hz, const float* amp, float* out, int n,
+                           double outRate, int variant, float jitter, float zoneOffset) noexcept
+{
+    SampleNote note;
+    note.hz = note.noteHz = hz;
+    render (layer, note, amp, out, n, outRate, variant, jitter, zoneOffset);
+}
+
+void SamplePlayer::render (const SampleLayer& layer, const SampleNote& note, const float* amp, float* out, int n,
                            double outRate, int variant, float jitter, float zoneOffset) noexcept
 {
     const bool silent = amp[0] < 1.0e-5f && amp[n - 1] < 1.0e-5f;
     if (silent || layer.empty())
     {
         // Between notes: forget the position so the next note starts with its attack.
-        if (silent) cur.zone = old.zone = nullptr;
+        if (silent)
+        {
+            for (auto& h : heads)
+                h = Head{};
+            cur = -1;
+            next = nullptr;
+        }
         std::fill (out, out + n, 0.0f);
         return;
     }
-
-    if (! (hz > 20.0f && hz < 20000.0f))
-        hz = 220.0f;
-    const float midi = hzToMidi (hz) + zoneOffset;
-    const int zi = layer.nearest (midi, variant);
-    const SampleZone* want = &layer.zones[(size_t) zi];
     if (&layer != lastLayer)
     {
+        for (auto& h : heads)
+            h = Head{};
+        cur = -1;
+        next = nullptr;
         lastLayer = &layer;
-        cur.zone = old.zone = nullptr;
     }
 
-    if (cur.zone == nullptr)
+    float hz = note.hz, noteHz = note.noteHz;
+    if (! (hz > 20.0f && hz < 20000.0f))
+        hz = 220.0f;
+    if (! (noteHz > 20.0f && noteHz < 20000.0f))
+        noteHz = hz;
+    const float midi = hzToMidi (hz) + zoneOffset;
+    const bool notes = note.noteMidi >= 0.0f;
+    const float target = notes ? note.noteMidi + zoneOffset : midi;
+
+    auto held = [&] (const SampleZone* z, bool fromStart) -> Head
     {
-        // New note: start at the attack, staggered a little per singer.
-        cur = { want, jitter * 0.05 * want->sampleRate, 1.0f, loopPointFor (*want, jitter) };
-        old.zone = nullptr;
-        fade = 1.0f;
+        Head h;
+        h.zone = z;
+        h.mode = Mode::Held;
+        h.loopStart = loopPointFor (*z, jitter);
+        h.pos = fromStart ? jitter * 0.05 * z->sampleRate   // staggered a little per singer
+                          : (double) z->loopStart + jitter * 0.5 * (double) (z->loopEnd - z->loopStart);
+        return h;
+    };
+    // A note from silence (or sung afresh after a gap): its recorded onset if there is one,
+    // handing over to the held note; else the held note from its start.
+    auto sing = [&] (float fadeSeconds)
+    {
+        const SampleZone* h = &layer.zones[(size_t) layer.nearest (target, variant)];
+        const int o = layer.nearestOnset (target, variant, h->singer);
+        if (o >= 0)
+        {
+            const SampleZone& z = layer.onsets[(size_t) o];
+            Head head;
+            head.zone = &z;
+            head.mode = Mode::Onset;
+            head.pos = jitter * 0.006 * z.sampleRate;
+            start (head, fadeSeconds, outRate, true);
+            next = &layer.zones[(size_t) layer.nearest (target, variant, z.singer)];
+            handover = (double) z.length() - 0.09 * z.sampleRate;
+        }
+        else
+        {
+            start (held (h, true), fadeSeconds, outRate, true);
+            next = nullptr;
+        }
+    };
+
+    Head* c = current();
+    if (c == nullptr)
+    {
+        sing (0.0f);
+        lastSerial = note.serial;
+        lastNote = target;
     }
-    else if (fade >= 1.0f && want != cur.zone && std::abs (midi - cur.zone->rootMidi) > 1.6f)
+    else if (note.serial != lastSerial)
     {
-        // The melody moved on: crossfade into the nearer recorded note, mid-sustain (after any
-        // crossfade still running, so a fast glide never cuts one off halfway).
-        old = cur;
-        const double span = (double) (want->loopEnd - want->loopStart);
-        cur = { want, (double) want->loopStart + jitter * 0.5 * span, 0.0f, loopPointFor (*want, jitter) };
-        fade = 0.0f;
+        const float from = lastNote;
+        lastSerial = note.serial;
+        lastNote = target;
+        const int m = notes && from >= 0.0f && std::abs (target - from) >= 0.5f
+                          ? layer.nearestMove (from, target, variant, c->zone->singer) : -1;
+        if (note.detached)
+        {
+            sing (0.015f);
+        }
+        else if (m >= 0)
+        {
+            // Legato: the recorded move, from just before its pitch starts moving.
+            const SampleZone& z = layer.moves[(size_t) m];
+            Head head;
+            head.zone = &z;
+            head.mode = Mode::Move;
+            head.pos = std::max (0.0, (double) z.crossing - 0.07 * z.sampleRate);
+            head.stretch = (from - target) - (z.rootMidi - z.toMidi);
+            start (head, 0.025f, outRate, true);
+            next = &layer.zones[(size_t) layer.nearest (target, variant, z.singer)];
+            handover = std::min ((double) z.crossing + 0.12 * z.sampleRate, (double) z.length() - 0.09 * z.sampleRate);
+        }
+        else if (c->mode != Mode::Held)
+        {
+            // No recorded move for this step: straight on to the new held note.
+            start (held (&layer.zones[(size_t) layer.nearest (target, variant, c->zone->singer)], false), 0.07f, outRate);
+            next = nullptr;
+        }
+        else
+        {
+            c->onNote = false;   // follows the glide to the new note
+        }
     }
 
-    const float fadeStep = (float) (1.0 / (0.07 * outRate));
-    const double baseHz = (double) hz;
+    c = current();
+    if (c->mode != Mode::Held && (next == nullptr || c->pos >= handover))
+    {
+        // The onset or move has arrived: on into the held note (at the note: a move has already
+        // sung the slide, which the gliding pitch may still be catching up with).
+        Head h = held (next != nullptr ? next : &layer.zones[(size_t) layer.nearest (target, variant)], false);
+        h.onNote = c->mode == Mode::Move;
+        start (h, 0.06f, outRate);
+        next = nullptr;
+    }
+    else if (c->mode == Mode::Held && c->level >= 1.0f)
+    {
+        // The pitch moved on (a glide, or a step with no recorded move): crossfade into the
+        // nearer recorded note, mid-sustain (after any crossfade still running, so a fast
+        // glide never cuts one off halfway).
+        const float at = c->onNote ? hzToMidi (noteHz) + zoneOffset : midi;
+        const SampleZone* want = &layer.zones[(size_t) layer.nearest (at, variant, c->zone->singer)];
+        if (want != c->zone && std::abs (at - c->zone->rootMidi) > 1.6f)
+        {
+            Head h = held (want, false);
+            h.onNote = c->onNote;
+            start (h, 0.07f, outRate);
+        }
+    }
+
+    std::fill (out, out + n, 0.0f);
+    for (auto& h : heads)
+    {
+        if (h.zone == nullptr)
+            continue;
+        const SampleZone& z = *h.zone;
+        // Held notes and onsets follow the pitch; a move already holds its own slide, so it
+        // plays at the new note's pitch (stretched before the slide to start on the old one).
+        const double rate = h.frozen ? h.rate
+                          : (h.mode == Mode::Move ? (double) noteHz / (double) midiToHz (z.toMidi)
+                                                  : (double) (h.onNote ? noteHz : hz) / (double) midiToHz (z.rootMidi))
+                            * z.sampleRate / outRate;
+        h.rate = rate;
+        const double end = (double) (z.length() - 1);
+        const bool stretched = h.mode == Mode::Move && h.stretch != 0.0f;
+        const double slideWidth = 0.025 * z.sampleRate;
+        for (int i = 0; i < n; ++i)
+        {
+            h.level = clampv (h.level + h.step, 0.0f, 1.0f);
+            const float w = std::sin (h.level * 1.5707963f);
+            float v;
+            if (h.mode == Mode::Held)
+                v = readLooped (z, h.pos, h.loopStart);
+            else
+                v = h.pos < end ? interp (z, h.pos) : 0.0f;
+            out[i] += v * w;
+            if (stretched)
+            {
+                const double before = 0.5 - 0.5 * std::tanh ((h.pos - (double) z.crossing) / slideWidth);
+                h.pos += rate * std::exp2 ((double) h.stretch * before / 12.0);
+            }
+            else
+            {
+                h.pos += rate;
+            }
+        }
+    }
     for (int i = 0; i < n; ++i)
+        out[i] *= amp[i];
+    for (int i = 0; i < kHeads; ++i)
     {
-        if (fade < 1.0f)
-            fade = std::min (1.0f, fade + fadeStep);
-        const float wNew = std::sin (fade * 1.5707963f), wOld = std::cos (fade * 1.5707963f);
-
-        float v = 0.0f;
-        {
-            const SampleZone& z = *cur.zone;
-            v += readLooped (z, cur.pos, cur.loopStart) * wNew;
-            cur.pos += baseHz / (double) midiToHz (z.rootMidi) * z.sampleRate / outRate;
-        }
-        if (old.zone != nullptr)
-        {
-            const SampleZone& z = *old.zone;
-            v += readLooped (z, old.pos, old.loopStart) * wOld;
-            old.pos += baseHz / (double) midiToHz (z.rootMidi) * z.sampleRate / outRate;
-        }
-        out[i] = v * amp[i];
+        Head& h = heads[i];
+        if (h.zone == nullptr)
+            continue;
+        const bool gone = (h.step < 0.0f && h.level <= 0.0f) || (h.mode != Mode::Held && h.pos >= (double) (h.zone->length() - 1));
+        if (gone && i != cur)
+            h = Head{};
     }
-    if (fade >= 1.0f)
-        old.zone = nullptr;
 }
 } // namespace sc

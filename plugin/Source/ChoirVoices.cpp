@@ -1,5 +1,6 @@
 #include "ChoirVoices.h"
 
+#include <condition_variable>
 #include <map>
 
 namespace sanctuary
@@ -127,45 +128,108 @@ void ChoirVoices::loadFolder (const File& dir)
             }
         }
 
-        AudioFormatManager formats;
-        formats.registerBasicFormats();
         auto files = dir.findChildFiles (File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
         files.sort();
-
         auto set = std::make_shared<sc::SampleSet>();
         set->name = displayName (dir).toStdString();
-        for (int i = 0; i < files.size() && ! cancel; ++i)
-        {
-            const auto& f = files.getReference (i);
-            const auto path = f.getRelativePathFrom (dir).toStdString();
-            const int section = sc::SampleSet::sectionFromPath (path);
-            if (section < 0)
-                continue;
-            const int vowel = std::max (0, sc::SampleSet::vowelFromPath (path));
 
-            std::unique_ptr<AudioFormatReader> reader (formats.createReaderFor (f));
-            if (reader == nullptr || reader->sampleRate <= 0.0)
-                continue;
-            const int64 len = jmin (reader->lengthInSamples, (int64) (reader->sampleRate * 600.0));   // up to 10 minutes per file
-            if (len <= 0)
-                continue;
-            AudioBuffer<float> buffer ((int) reader->numChannels, (int) len);
-            reader->read (&buffer, 0, (int) len, 0, true, true);
-            std::vector<float> mono ((size_t) len, 0.0f);
-            const float scale = 1.0f / (float) jmax (1, buffer.getNumChannels());
-            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        // Decode on a few threads (a full voice pack is thousands of files), adding the notes
+        // to the set in file order as they arrive. Only a window of files runs ahead, so the
+        // decoded audio waiting to be added stays small.
+        struct Decoded
+        {
+            std::vector<float> mono;
+            double sampleRate = 0.0;
+            bool ready = false;
+        };
+        const int count = files.size();
+        std::vector<Decoded> slots ((size_t) count);
+        std::mutex slotLock;
+        std::condition_variable changed;
+        int nextFile = 0, consumed = 0;
+        constexpr int kWindow = 64;
+        auto decode = [&]
+        {
+            AudioFormatManager formats;
+            formats.registerBasicFormats();
+            for (;;)
             {
-                const float* src = buffer.getReadPointer (ch);
-                for (int64 k = 0; k < len; ++k)
-                    mono[(size_t) k] += src[k] * scale;
+                int i = 0;
+                {
+                    std::unique_lock<std::mutex> g (slotLock);
+                    while (! cancel && nextFile < count && nextFile >= consumed + kWindow)
+                        changed.wait_for (g, std::chrono::milliseconds (50));
+                    if (cancel || nextFile >= count)
+                        return;
+                    i = nextFile++;
+                }
+                Decoded d;
+                const auto& f = files.getReference (i);
+                if (sc::SampleSet::sectionFromPath (f.getRelativePathFrom (dir).toStdString()) >= 0)
+                {
+                    std::unique_ptr<AudioFormatReader> reader (formats.createReaderFor (f));
+                    const int64 len = reader != nullptr && reader->sampleRate > 0.0
+                                          ? jmin (reader->lengthInSamples, (int64) (reader->sampleRate * 600.0))   // up to 10 minutes per file
+                                          : 0;
+                    if (len > 0)
+                    {
+                        AudioBuffer<float> buffer ((int) reader->numChannels, (int) len);
+                        reader->read (&buffer, 0, (int) len, 0, true, true);
+                        d.mono.assign ((size_t) len, 0.0f);
+                        const float scale = 1.0f / (float) jmax (1, buffer.getNumChannels());
+                        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        {
+                            const float* src = buffer.getReadPointer (ch);
+                            for (int64 k = 0; k < len; ++k)
+                                d.mono[(size_t) k] += src[k] * scale;
+                        }
+                        d.sampleRate = reader->sampleRate;
+                    }
+                }
+                d.ready = true;
+                {
+                    std::lock_guard<std::mutex> g (slotLock);
+                    slots[(size_t) i] = std::move (d);
+                }
+                changed.notify_all();
             }
-            // Files named with their pitch ("..._m6312.ogg") are single notes, already cut.
+        };
+        std::vector<std::thread> pool;
+        const int threads = jlimit (1, 6, (int) std::thread::hardware_concurrency() - 1);
+        for (int t = 0; t < jmin (threads, count); ++t)
+            pool.emplace_back (decode);
+
+        for (int i = 0; i < count && ! cancel; ++i)
+        {
+            Decoded d;
+            {
+                std::unique_lock<std::mutex> g (slotLock);
+                while (! cancel && ! slots[(size_t) i].ready)
+                    changed.wait_for (g, std::chrono::milliseconds (50));
+                if (cancel)
+                    break;
+                d = std::move (slots[(size_t) i]);
+                slots[(size_t) i] = {};
+                consumed = i + 1;
+            }
+            changed.notify_all();
+            progress = (float) (i + 1) / (float) count;
+            if (d.mono.empty())
+                continue;
+            const auto path = files.getReference (i).getRelativePathFrom (dir).toStdString();
+            const int section = sc::SampleSet::sectionFromPath (path);
+            const int vowel = std::max (0, sc::SampleSet::vowelFromPath (path));
+            const auto len = (int64_t) d.mono.size();
+            // Files named with their pitch ("..._m6312.ogg") are already cut: held notes, or the
+            // onsets and moves their folders and names say they are.
             if (const float root = sc::SampleSet::rootFromPath (path); root > 0.0f)
-                set->addNote (section, vowel, mono.data(), (int64_t) len, reader->sampleRate, root);
+                set->addNote (section, vowel, d.mono.data(), len, d.sampleRate, root, sc::SampleSet::infoFromPath (path));
             else
-                set->addRecording (section, vowel, mono.data(), (int64_t) len, reader->sampleRate);
-            progress = (float) (i + 1) / (float) files.size();
+                set->addRecording (section, vowel, d.mono.data(), len, d.sampleRate);
         }
+        changed.notify_all();
+        for (auto& t : pool)
+            t.join();
 
         if (! cancel)
         {
