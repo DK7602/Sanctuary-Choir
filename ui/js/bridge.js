@@ -63,7 +63,7 @@
       pct("humanize", "Humanize", 100, 200), pct("vibrato", "Vibrato", 100, 200), pct("glide", "Glide", 100, 300),
       { id: "formant", name: "Formant", type: "float", min: -100, max: 100, interval: 1, skew: 1, default: 0 },
       pct("pitchCorrection", "Pitch Correction", 60), pct("breath", "Breath", 100, 200), pct("harmonySpeed", "Chord Speed", 50),
-      choice("singing", "Singing", ["Natural", "Breathy", "Belt"]),
+      choice("singing", "Singing", ["Natural", "Breathy", "Belt"]), pct("realVoices", "Real Voices", 100, 150),
       choice("venue", "Venue", ["Grand Cathedral", "Stone Abbey", "Wooden Chapel", "Concert Hall", "Gospel Church", "Studio Room"]),
       { id: "decay", name: "Decay", type: "float", min: 30, max: 250, interval: 1, skew: 1, default: 100, label: "%" },
       { id: "preDelay", name: "Pre-Delay", type: "float", min: 0, max: 150, interval: 0.1, skew: 1, default: 30, label: "ms" },

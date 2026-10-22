@@ -570,10 +570,10 @@
     if (SC.isPlugin || $("previewPanel")) return;
     // [file, label, beats per second, Choir Size while it plays]
     const demos = [["demo-input.mp3", "Solo voice", 2], ["demo-ah.mp3", "Recorded choir \u00b7 Ah", 2, 70], ["demo-gospel.mp3", "Gospel choir \u00b7 Words", 2, 45],
-                   ["demo-kyrie.mp3", "Sung words \u00b7 Kyrie", 1.25, 80]];
+                   ["demo-gospel-plain.mp3", "Words \u00b7 your voice only", 2, 45], ["demo-kyrie.mp3", "Sung words \u00b7 Kyrie", 1.25, 80]];
     const panel = document.createElement("div");
     panel.id = "previewPanel";
-    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
+    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. "Your voice only" is the gospel choir with Real Voices at 0, every singer your own voice. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
     const row = panel.querySelector(".pp-demos");
     const audio = new Audio();
     audio.preload = "none";

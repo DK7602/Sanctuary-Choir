@@ -15,6 +15,7 @@
 //     --formation NAME     blocks | across | mencentre | mixed
 //     --singing NAME       natural | breathy | belt  (recorded voices: their breathy or belted takes)
 //     --words TEXT         ignore the input: play chords over MIDI, one per syllable, and sing TEXT
+//     --real-voices PCT    Words mode: how far each singer takes on a real singer's voice (default 100)
 //     --synth-demo         ignore the input and sing a demo melody (writes it next to the output)
 #include "TestSignals.h"
 
@@ -40,7 +41,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--real-voices 100] [--synth-demo]\n", argv[0]);
         return 2;
     }
 
@@ -74,6 +75,7 @@ int main (int argc, char** argv)
         else if (a == "--voices") voicesDir = next();
         else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
         else if (a == "--words") words = next();
+        else if (a == "--real-voices") p.realVoices = std::stof (next());
         else if (a == "--singing") p.singing = (Singing) indexOf ({ { "natural", 0 }, { "breathy", 1 }, { "belt", 2 } }, next(), 0);
         else if (a == "--rhythm") p.rhythmPattern = std::clamp (std::stoi (next()), 0, kNumRhythmPatterns - 1);
         else if (a == "--mics")

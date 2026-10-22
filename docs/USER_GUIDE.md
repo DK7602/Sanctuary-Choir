@@ -30,6 +30,7 @@ Pro Tools (AAX) isn't supported yet.
 - **Style** changes how the choir performs. *Gospel* adds 7th chords, scoops and more vibrato; *Gregorian* gives pure, still voices.
 - **Vocal Type**:
   - *Words* keeps your lyrics: every singer is your own voice, re-pitched. Sanctuary hears whether you have a low or a high voice. With a man singing lead, the sopranos and altos get a woman's vocal tract and lose the male "ring"; with a woman singing lead, the tenors and basses gain it.
+  - In *Words* each singer also takes on the voice of one of 19 real singers: the size of their vocal tract, the colour of their voice and their vibrato, measured from their recordings. The choir sounds like different people singing your words, not copies of you. The sopranos and tenors get the singers with the shortest vocal tracts, the altos and basses the longest. **Real Voices** (MIX page) sets how far: 0% makes every singer your own voice again, 150% exaggerates the differences.
   - *Ah, Oh, Oo, Ee, Eh* sing pure vowels.
   - *Mm* hums.
   - The vowel modes are sung by **real recorded singers** (Sanctuary Voices, installed with the plug-in). *Settings → Choir Voices* switches between **SANCTUARY** (recorded), **YOUR OWN…** (your singers; see [Recording your own choir voices](RECORDING_YOUR_CHOIR.md)) and **SYNTH** (the synthesised voices). *Mm* (humming) is always synthesised.

@@ -10,8 +10,39 @@ static constexpr int kChunk = 64;
 static constexpr float kSampleGain = 1.37f;  // recorded notes are levelled to 0.1 RMS; this matches the synth choir
 static constexpr float kMinInputHz = 75.0f;
 static constexpr float kMaxInputHz = 1150.0f;
-
 static constexpr double kMaxEchoSeconds = 10.0;
+
+/** Words mode: four singers' voice-print EQs over a chunk, interleaved. */
+static void processVoicePrintEqs (const std::array<std::array<Biquad, 6>*, 4>& eqs, float (*x)[kChunk], int lanes, int n) noexcept
+{
+    // Four singers' cascades interleaved: independent chains the CPU can run together (and
+    // the compiler can vectorise). Unused lanes pass silence through an open filter.
+    for (size_t k = 0; k < 6; ++k)
+    {
+        float b0[4], b1[4], b2[4], a1[4], a2[4], z1[4], z2[4];
+        for (int l = 0; l < 4; ++l)
+        {
+            const Biquad q = l < lanes ? (*eqs[(size_t) l])[k] : Biquad{};
+            b0[l] = q.b0; b1[l] = q.b1; b2[l] = q.b2; a1[l] = q.a1; a2[l] = q.a2; z1[l] = q.z1; z2[l] = q.z2;
+            if (l >= lanes)
+                std::fill (x[l], x[l] + n, 0.0f);
+        }
+        for (int i = 0; i < n; ++i)
+            for (int l = 0; l < 4; ++l)
+            {
+                const float in = x[l][i];
+                const float y = b0[l] * in + z1[l];
+                z1[l] = b1[l] * in - a1[l] * y + z2[l];
+                z2[l] = b2[l] * in - a2[l] * y;
+                x[l][i] = y;
+            }
+        for (int l = 0; l < lanes; ++l)
+        {
+            (*eqs[(size_t) l])[k].z1 = z1[l];
+            (*eqs[(size_t) l])[k].z2 = z2[l];
+        }
+    }
+}
 
 const char* const* getResponseNames()
 {
@@ -195,6 +226,13 @@ struct ChoirEngine::Singer
     float noteMidi = -1.0f;      // the note sampleNote.serial counts
     float silentFor = 1.0f;      // seconds since the singer last sang
     bool wasSinging = false;
+
+    // Words mode: the real singer this one sounds like (a voice print)
+    int print = -1, printRound = 0;
+    float printFormant = 1.0f;   // formant scale, at the Voices amount
+    float wordsVibRate = 0.0f, wordsVibDepth = 1.0f;
+    std::array<Biquad, 6> printEq;
+    bool printEqOn = false;
 
     // Typed words
     int syllable = -1;           // the syllable count it is singing (-1 = none)
@@ -463,6 +501,8 @@ void ChoirEngine::setParams (const EngineParams& in)
         fix (p.leadDb, d.leadDb); fix (p.choirDb, d.choirDb); fix (p.humanize, d.humanize);
         fix (p.vibrato, d.vibrato); fix (p.glide, d.glide); fix (p.formant, d.formant);
         fix (p.pitchCorrection, d.pitchCorrection); fix (p.breath, d.breath); fix (p.harmonySpeed, d.harmonySpeed);
+        fix (p.realVoices, d.realVoices);
+        p.realVoices = clampv (p.realVoices, 0.0f, 150.0f);
         fix (p.decay, d.decay); fix (p.preDelayMs, d.preDelayMs); fix (p.brightness, d.brightness);
         fix (p.leadReverb, d.leadReverb); fix (p.lowCutHz, d.lowCutHz); fix (p.highCutHz, d.highCutHz);
         fix (p.warmth, d.warmth); fix (p.glue, d.glue); fix (p.a4, d.a4);
@@ -651,6 +691,10 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
     s.vibPhase = s.rng.uni();
     s.drift = Wander{};
     s.drift.timeConstant = 0.9f + 0.8f * s.rng.uni();
+    s.print = voicePrintFor (section, index, ens.trebles, &s.printRound);
+    for (auto& f : s.printEq)
+        f.reset();
+    applyVoicePrint (s);
     s.shimmer = Wander{};
     s.shimmer.timeConstant = 0.35f;
 
@@ -797,6 +841,46 @@ void ChoirEngine::articulate (Singer& s, const Articulation& a0, const Articulat
         s.nz2 = 2.0f * v2 - s.nz2;
         x[i] += k * v1 * level * (a0.noise + (a1.noise - a0.noise) * t);
     }
+}
+
+void ChoirEngine::applyVoicePrint (Singer& s)
+{
+    int count = 0;
+    const VoicePrint* prints = getVoicePrints (count);
+    const float a = clampv (params.realVoices / 100.0f, 0.0f, 1.5f);
+    if (s.print < 0 || s.print >= count || a <= 0.0f)
+    {
+        s.printFormant = 1.0f;
+        s.wordsVibRate = s.rVibRate;
+        s.wordsVibDepth = s.rVibDepth;
+        s.printEqOn = false;
+        return;
+    }
+    const VoicePrint& p = prints[s.print];
+    // A print used a second time is made a touch different, as two singers would be. The
+    // ensemble's spread (a congregation's voices differ more) widens the vocal tracts' range.
+    const float again = s.printRound > 0 ? 1.0f + 0.018f * (float) ((s.index * 37 + s.section * 11) % 7 - 3) / 3.0f : 1.0f;
+    const float spread = std::sqrt (std::max (1.0f, ens.formantSpread));
+    s.printFormant = 1.0f + (p.formantScale * again - 1.0f) * a * spread;
+    const float rate = p.vibratoHz - meanVibratoHz (p.female);
+    const float depth = clampv (p.vibratoCents / std::max (1.0f, meanVibratoCents (p.female)), 0.6f, 1.5f);
+    const float b = std::min (1.0f, a);
+    s.wordsVibRate = s.rVibRate * (1.0f - b) + rate * b;
+    s.wordsVibDepth = s.rVibDepth * (1.0f - b) + depth * b;
+    // Children borrow the women's colour, more gently; repeats a little less of it.
+    const float eqAmount = a * (ens.trebles ? 0.6f : 1.0f) * (s.printRound > 0 ? 0.8f : 1.0f);
+    const auto& bands = getVoicePrintBands();
+    for (size_t k = 0; k < bands.size(); ++k)
+    {
+        const float g = p.eqDb[k] * eqAmount;
+        switch (bands[k].kind)
+        {
+            case VoicePrintBand::LowShelf:  s.printEq[k].lowShelf (sr, bands[k].hz, g); break;
+            case VoicePrintBand::HighShelf: s.printEq[k].highShelf (sr, bands[k].hz, g); break;
+            default:                        s.printEq[k].peak (sr, bands[k].hz, bands[k].q, g); break;
+        }
+    }
+    s.printEqOn = true;
 }
 
 void ChoirEngine::setSingerVowel (Singer& s, VocalType vt)
@@ -1060,8 +1144,10 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
 
     // Vibrato fades in after the onset delay.
     const float onset = clampv ((s.noteAge - style.vibratoOnsetS) / 0.35f, 0.0f, 1.0f);
-    const float vibCents = style.vibratoCents * clampv (params.vibrato / 100.0f, 0.0f, 2.0f) * s.rVibDepth * onset * onset;
-    s.vibPhase += (style.vibratoRateHz + s.rVibRate) * dt;
+    // In Words mode each singer's vibrato leans toward their voice print's.
+    const bool ownVoice = params.vocalType == VocalType::Words && ! cf.midiInstrument;
+    const float vibCents = style.vibratoCents * clampv (params.vibrato / 100.0f, 0.0f, 2.0f) * (ownVoice ? s.wordsVibDepth : s.rVibDepth) * onset * onset;
+    s.vibPhase += (style.vibratoRateHz + (ownVoice ? s.wordsVibRate : s.rVibRate)) * dt;
     s.vibPhase -= std::floor (s.vibPhase);
     const float vib = vibCents * std::sin (kTwoPi * s.vibPhase) / 100.0f;
     const float drift = s.drift.tick (s.rng, dt) * style.driftCents * humanize / 100.0f;
@@ -1089,7 +1175,10 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
         s.pctl.fixedRatio = 0.0f;
         s.pctl.targetHz = hz;
     }
-    s.pctl.formant = vocalTract[(size_t) sec] * singerFormant (s) * formantParam * s.lastFollow;
+    // The voice print's vocal tract takes over from the random spread as Voices goes up.
+    const float voicesAmount = clampv (params.realVoices / 100.0f, 0.0f, 1.0f);
+    const float individual = std::pow (singerFormant (s), 1.0f - voicesAmount) * s.printFormant;
+    s.pctl.formant = vocalTract[(size_t) sec] * individual * formantParam * s.lastFollow;
     s.pctl.gain = s.rGain;
     s.pctl.unvoicedGain = 0.6f;
 
@@ -1184,6 +1273,15 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         lastVocal = params.vocalType;
         lastFormantParam = params.formant;
         refreshVowelFormants();
+    }
+    if (params.realVoices != lastRealVoices || styleChanged)
+    {
+        lastRealVoices = params.realVoices;
+        for (auto& sp : singers)
+        {
+            sp->print = voicePrintFor (sp->section, sp->index, ens.trebles, &sp->printRound);   // children sing the women's
+            applyVoicePrint (*sp);
+        }
     }
     if (params.humanize != lastHumanize || params.space != lastSpace || styleChanged)
     {
@@ -1376,11 +1474,45 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             normTo[(size_t) s] = cur;
         }
 
+        // Into the section bus: fade (joining/leaving), section level and echo hand-over, each
+        // ramped over the chunk, and the singer's place in the section.
+        auto mixSinger = [&] (const Singer& s, const float* x, float gFrom, float gTo)
+        {
+            float* L = sec (s.section, 0);
+            float* R = sec (s.section, 1);
+            const float gInc = (gTo - gFrom) / (float) c;
+            float gain = gFrom;
+            for (int i = 0; i < c; ++i)
+            {
+                gain += gInc;
+                const float v = x[i] * gain;
+                L[i] += v * s.panL;
+                R[i] += v * s.panR;
+            }
+        };
+        // Words mode: singers with a voice print wait here in fours, so their EQs run side by
+        // side (one singer's six filters in a row would each wait on the last sample).
+        struct Waiting { Singer* s; float gFrom, gTo; };
+        std::array<Waiting, 4> waiting {};
+        alignas (16) float waitBuf[4][kChunk];
+        int numWaiting = 0;
+        auto flushWaiting = [&]
+        {
+            std::array<std::array<Biquad, 6>*, 4> eqs {};
+            for (int l = 0; l < numWaiting; ++l)
+                eqs[(size_t) l] = &waiting[(size_t) l].s->printEq;
+            processVoicePrintEqs (eqs, waitBuf, numWaiting, c);
+            for (int l = 0; l < numWaiting; ++l)
+                mixSinger (*waiting[(size_t) l].s, waitBuf[l], waiting[(size_t) l].gFrom, waiting[(size_t) l].gTo);
+            numWaiting = 0;
+        };
+
         for (auto& sp : singers)
         {
             Singer& s = *sp;
             if ((! s.active && s.fade <= 0.0f) || ((renderMask >> s.section) & 1) == 0)
                 continue;
+            bool printed = false;   // its voice print still to apply (in the next four)
 
             const int64_t tSinger = tOut - echoOffset - s.delay;
             const ControlFrame& cf = controlAt (tSinger);
@@ -1393,12 +1525,21 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             {
                 s.psola.render (analyzer, tSinger, c, scratch.data(), s.pctl, s.rng);
                 const float gateTarget = cf.sounding && ! silent ? 1.0f : 0.0f;
+                float peak = 0.0f;
                 for (int i = 0; i < c; ++i)
                 {
                     s.gate = gateTarget + (s.gate - gateTarget) * (gateTarget > s.gate ? gateAtt : gateRel);
                     scratch[(size_t) i] *= s.gate;
+                    peak = std::max (peak, std::abs (scratch[(size_t) i]));
                 }
                 s.amp = 0.0f;
+                if (s.printEqOn)
+                {
+                    printed = peak >= 1.0e-9f;
+                    if (! printed)   // silent: start clean next time rather than ring down into denormals
+                        for (auto& f : s.printEq)
+                            f.reset();
+                }
             }
             else
             {
@@ -1457,21 +1598,22 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 s.gate = 0.0f;
             }
 
-            float* L = sec (s.section, 0);
-            float* R = sec (s.section, 1);
-            // Fade (joining/leaving), section level and echo hand-over, each ramped over the chunk.
             const float gFrom = normFrom[(size_t) s.section] * fadeStart * duckFrom;
             const float gTo = normTo[(size_t) s.section] * fadeEnd * duckTo;
-            const float gInc = (gTo - gFrom) / (float) c;
-            float gain = gFrom;
-            for (int i = 0; i < c; ++i)
+            if (printed)
             {
-                gain += gInc;
-                const float v = scratch[(size_t) i] * gain;
-                L[i] += v * s.panL;
-                R[i] += v * s.panR;
+                std::copy (scratch.begin(), scratch.begin() + c, waitBuf[numWaiting]);
+                waiting[(size_t) numWaiting++] = { &s, gFrom, gTo };
+                if (numWaiting == 4)
+                    flushWaiting();
+            }
+            else
+            {
+                mixSinger (s, scratch.data(), gFrom, gTo);
             }
         }
+        if (numWaiting > 0)
+            flushWaiting();
     }
 
     // Words mode: give each section the vocal tract and tone of the voices that sing there.

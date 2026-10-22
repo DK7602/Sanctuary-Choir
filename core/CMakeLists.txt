@@ -10,6 +10,7 @@ add_library(sanctuary_core STATIC
     src/Lyrics.cpp
     src/SampleSet.cpp
     src/Theory.cpp
+    src/VoicePrints.cpp
     src/VowelSynth.cpp)
 
 target_include_directories(sanctuary_core PUBLIC include)

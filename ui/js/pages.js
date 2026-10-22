@@ -114,8 +114,9 @@
     const knobs = el("div", "knob-row", bottom);
     const tips = {
       harmonySpeed: "How readily the choir changes chord. Low holds chords through passing notes; high gives every note its own chord.",
+      realVoices: "Words mode: each singer takes on the voice of one of 19 real singers (vocal tract, tone and vibrato), so the choir sounds like different people. 0: every singer is your own voice.",
     };
-    [["humanize", "HUMANIZE"], ["vibrato", "VIBRATO"], ["glide", "GLIDE"], ["formant", "FORMANT"], ["pitchCorrection", "PITCH LOCK"], ["breath", "BREATH"], ["harmonySpeed", "CHORD SPEED"]]
+    [["humanize", "HUMANIZE"], ["vibrato", "VIBRATO"], ["glide", "GLIDE"], ["formant", "FORMANT"], ["pitchCorrection", "PITCH LOCK"], ["breath", "BREATH"], ["realVoices", "REAL VOICES"], ["harmonySpeed", "CHORD SPEED"]]
       .forEach(([id, label]) => {
         const k = new MiniKnob(knobs, id, label, { bipolar: id === "formant" });
         if (tips[id] && k.el) k.el.title = tips[id];

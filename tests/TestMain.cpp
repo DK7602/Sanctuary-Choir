@@ -1982,6 +1982,69 @@ TEST (renderedTakeCanBeMovedOnStage)
     CHECK (moved > 3.0);
 }
 
+TEST (voicePrintsComeFromRealSingers)
+{
+    int count = 0;
+    const VoicePrint* prints = getVoicePrints (count);
+    int women = 0, men = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& p = prints[i];
+        (p.female ? women : men) += 1;
+        CHECK (p.formantScale > 0.85f && p.formantScale < 1.17f);
+        CHECK (p.vibratoHz > 3.5f && p.vibratoHz < 8.5f && p.vibratoCents > 10.0f && p.vibratoCents < 200.0f);
+        for (float g : p.eqDb) CHECK (std::abs (g) <= 5.01f);
+    }
+    std::printf ("  %d women, %d men\n", women, men);
+    CHECK (women == 9 && men == 10);
+
+    // Sopranos and tenors start from the shortest vocal tracts, altos and basses from the longest.
+    auto scaleOf = [&] (int section, int index) { return prints[voicePrintFor (section, index, false)].formantScale; };
+    CHECK (prints[voicePrintFor (Soprano, 0, false)].female && prints[voicePrintFor (Alto, 3, false)].female);
+    CHECK (! prints[voicePrintFor (Tenor, 0, false)].female && ! prints[voicePrintFor (Bass, 5, false)].female);
+    CHECK (scaleOf (Soprano, 0) > scaleOf (Alto, 0) + 0.05f);
+    CHECK (scaleOf (Tenor, 0) > scaleOf (Bass, 0) + 0.1f);
+    CHECK (prints[voicePrintFor (Bass, 0, true)].female);   // a children's choir sings the women's
+    int round = -1;
+    CHECK (voicePrintFor (Soprano, 9, false, &round) == voicePrintFor (Soprano, 0, false) && round == 1);
+    // Every singer of a section is a different person until the prints run out.
+    for (int sec = 0; sec < NumSections; ++sec)
+    {
+        std::vector<int> seen;
+        for (int i = 0; i < (sec < Tenor ? 9 : 10); ++i) seen.push_back (voicePrintFor (sec, i, false));
+        std::sort (seen.begin(), seen.end());
+        CHECK (std::unique (seen.begin(), seen.end()) == seen.end());
+    }
+}
+
+TEST (wordsSingersTakeRealVoices)
+{
+    // Words mode: with Voices up each tenor takes a real singer's vocal tract and colour. The
+    // section's tone changes, its level and its pitch do not.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 57.0f, 1.0f, 0.1f }, { 60.0f, 1.0f, 0.1f }, { 62.0f, 1.0f, 0.1f }, { 60.0f, 1.0f, 0.0f } }, sr, Tenor, 0.0f);
+    auto sing = [&] (float voices)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Words, HarmonyMode::Unison);
+        p.choirSize = 40.0f;
+        p.realVoices = voices;
+        eng.setParams (p);
+        return runStems (eng, x)[Tenor * 2];
+    };
+    const auto plain = sing (0.0f), real = sing (100.0f);
+    float most = 0.0f;
+    for (float f = 315.0f; f < 5000.0f; f *= 1.26f)
+        most = std::max (most, std::abs (bandDb (real, sr, 0.3, 3.8, f, f * 1.26f) - bandDb (plain, sr, 0.3, 3.8, f, f * 1.26f)));
+    const float level = bandDb (real, sr, 0.3, 3.8, 100.0f, 8000.0f) - bandDb (plain, sr, 0.3, 3.8, 100.0f, 8000.0f);
+    const float pitch = medianPitch (real, sr, 1.3, 1.9);
+    std::printf ("  tenors with real voices: up to %.1f dB different in a third-octave band, level %+.1f dB, pitch %.2f\n", most, level, pitch);
+    CHECK (most > 1.0f);
+    CHECK (std::abs (level) < 1.5f);
+    CHECK_NEAR (pitch, 60.0, 0.3);
+}
+
 TEST (performanceBudget)
 {
     const double sr = 48000.0;

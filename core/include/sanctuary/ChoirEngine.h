@@ -13,6 +13,7 @@
 #include "Lyrics.h"
 #include "Psola.h"
 #include "SampleSet.h"
+#include "VoicePrints.h"
 #include "VowelSynth.h"
 
 #include <atomic>
@@ -91,6 +92,7 @@ struct EngineParams
     float formant = 0.0f;        // -100..100 (% darker .. brighter)
     float pitchCorrection = 60.0f; // % how strictly harmony voices sit on pitch
     float breath = 100.0f;       // % breath noise in vowel modes
+    float realVoices = 100.0f;   // % Words mode: how far each singer takes on a real singer's voice (0 = all your own)
     float harmonySpeed = 50.0f;  // % how readily the choir changes chord (0 holds chords, 100 follows every note)
 
     // FX page
@@ -236,6 +238,9 @@ private:
     void refreshVowelFormants();
     void setSingerVowel (Singer& s, VocalType vt);
     void articulate (Singer& s, const Articulation& a0, const Articulation& a1, float* x, int n);
+    /** Words mode: the singer's voice print, at the Voices amount. */
+    void applyVoicePrint (Singer& s);
+    float lastRealVoices = -1.0f;
     void restartLyrics() noexcept;
     void applyRhythm (int c, int offset);
     float singerFormant (const Singer& s) const noexcept;
