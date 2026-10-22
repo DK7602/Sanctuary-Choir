@@ -568,10 +568,12 @@
   // Browser preview only: a panel under the plugin window to hear audio rendered by the engine.
   function buildDemoPlayer() {
     if (SC.isPlugin || $("previewPanel")) return;
-    const demos = [["demo-input.mp3", "Solo voice"], ["demo-ah.mp3", "Recorded choir \u00b7 Ah"], ["demo-gospel.mp3", "Gospel choir \u00b7 Words"]];
+    // [file, label, beats per second, Choir Size while it plays]
+    const demos = [["demo-input.mp3", "Solo voice", 2], ["demo-ah.mp3", "Recorded choir \u00b7 Ah", 2, 70], ["demo-gospel.mp3", "Gospel choir \u00b7 Words", 2, 45],
+                   ["demo-kyrie.mp3", "Sung words \u00b7 Kyrie", 1.25, 80]];
     const panel = document.createElement("div");
     panel.id = "previewPanel";
-    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
+    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
     const row = panel.querySelector(".pp-demos");
     const audio = new Audio();
     audio.preload = "none";
@@ -587,7 +589,8 @@
       return urls[file];
     };
     let ctx = null, analyser = null, data = null, current = null;
-    const buttons = demos.map(([file, label]) => {
+    let beatRate = 2;
+    const buttons = demos.map(([file, label, bps, size]) => {
       const b = document.createElement("button");
       b.className = "demo-btn";
       b.textContent = "\u25B6 " + label;
@@ -609,9 +612,10 @@
         }
         if (ctx && ctx.state === "suspended") ctx.resume();
         current = file;
+        beatRate = bps;
         audio.src = urlFor(file);
         audio.play().catch(() => toast("Tap again to play"));
-        if (file !== "demo-input.mp3") Params.set("choirSize", file === "demo-ah.mp3" ? 70 : 45);
+        if (size) Params.set("choirSize", size);
       });
       row.appendChild(b);
       return [b, file, label];
@@ -634,7 +638,7 @@
         } else {
           window.SC_DEMO_LEVEL = 0.15;
         }
-        window.SC_DEMO_BEAT = (audio.currentTime - 0.15) * 2;   // the demo song is at 120 BPM
+        window.SC_DEMO_BEAT = (audio.currentTime - 0.15) * beatRate;
       } else {
         window.SC_DEMO_LEVEL = undefined;
         window.SC_DEMO_BEAT = undefined;
