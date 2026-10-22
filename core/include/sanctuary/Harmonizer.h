@@ -64,8 +64,11 @@ public:
 private:
     void choose (const HarmonyContext& ctx, bool newPhrase);
     void ensureVocabulary (const HarmonyContext& ctx);
+    /** Keep the chord through a short stepwise non-chord note (only the melody voice moves). */
+    bool holdThroughPassingNote (const HarmonyContext& ctx, int previousLead);
 
     int leadNote = -1, candidate = -1;
+    float melodyCentre = -1.0f;      // where the melody has been sitting (MIDI), for octave placement
     float candidateTime = 0.0f, silence = 10.0f, outOfChordTime = 0.0f;
     int sopShift = 0;
     Chord chord;
@@ -87,6 +90,8 @@ class KeyTracker
 {
 public:
     void reset();
+    /** Start from a known key (e.g. the one detected last time this project played). */
+    void seed (int tonic, bool minor, float weight);
     void addNote (int midiNote, float seconds, float weight);
     /** Re-estimates occasionally; returns the current tonic for the requested scale family. */
     int update (float seconds, bool minorFamily);

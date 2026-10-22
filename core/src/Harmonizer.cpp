@@ -22,6 +22,7 @@ StyleProfile getStyleProfile (Style s)
 void LiveHarmonizer::reset()
 {
     leadNote = candidate = -1;
+    melodyCentre = -1.0f;
     candidateTime = outOfChordTime = 0.0f;
     silence = 10.0f;
     sopShift = 0;
@@ -49,6 +50,7 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
         return;
 
     bool changed = false, newPhrase = false;
+    const int previousLead = leadNote;
 
     if (f.voiced)
     {
@@ -64,9 +66,22 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
         else if (q != leadNote)
         {
             const float distance = std::abs (f.midi - (float) leadNote);
+            const float newDistance = std::abs (f.midi - (float) q);
             if (q == candidate) candidateTime += dt;
             else { candidate = q; candidateTime = dt; }
-            if ((distance > 0.7f && candidateTime >= 0.03f) || distance > 1.6f || candidateTime >= 0.09f)
+
+            // A pitch between two scale notes (an out-of-key note, or a wobble) must not
+            // flip the melody back and forth: the new note has to be clearly closer.
+            const bool clearlyCloser = newDistance + 0.3f < distance;
+            // Sung pitch near no scale note at all: hold on longer before moving.
+            const bool between = newDistance > 0.6f;
+            // Jumps of an octave or so that last only a few frames are tracking errors.
+            const bool bigJump = std::abs (q - leadNote) >= 8;
+            const bool accept = bigJump ? candidateTime >= 0.06f
+                              : distance > 1.6f ? candidateTime >= 0.01f
+                              : between ? clearlyCloser && candidateTime >= 0.15f
+                              : clearlyCloser && ((distance > 0.7f && candidateTime >= 0.03f) || candidateTime >= 0.09f);
+            if (accept)
             {
                 leadNote = q;
                 candidate = -1;
@@ -79,6 +94,10 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
             candidate = -1;
             candidateTime = 0.0f;
         }
+
+        if (leadNote >= 0)
+            melodyCentre = melodyCentre < 0.0f ? (float) leadNote
+                                               : melodyCentre + ((float) leadNote - melodyCentre) * (1.0f - std::exp (-dt / 4.0f));
     }
     else
     {
@@ -108,11 +127,30 @@ void LiveHarmonizer::process (const PitchFrame& f, const HarmonyContext& ctx, fl
         outOfChordTime += dt;
     else
         outOfChordTime = 0.0f;
-    if (outOfChordTime > 0.25f)
+    if (outOfChordTime > 0.2f)
         changed = true;
 
     if (changed && (leadNote >= 0 || midiOn || ctx.mode == HarmonyMode::Drone))
+    {
+        // A quick stepwise note outside the chord is a passing note: keep the chord.
+        if (! newPhrase && ! midiOn && outOfChordTime <= 0.2f && holdThroughPassingNote (ctx, previousLead))
+            return;
         choose (ctx, newPhrase);
+    }
+}
+
+bool LiveHarmonizer::holdThroughPassingNote (const HarmonyContext& ctx, int previousLead)
+{
+    if (! haveChord || ! voicing.valid || leadNote < 0 || previousLead < 0 || chord.contains (leadNote))
+        return false;
+    if (ctx.mode != HarmonyMode::FullChoir && ctx.mode != HarmonyMode::OpenVoicing)
+        return false;
+    if (std::abs (leadNote - previousLead) > 2 || ctx.scale.type == ScaleType::Chromatic)
+        return false;
+    if (ctx.active[Soprano] && voicing.count[Soprano] > 0)
+        voicing.set (Soprano, leadNote + sopShift);
+    ++voicingId;
+    return true;
 }
 
 void LiveHarmonizer::choose (const HarmonyContext& ctx, bool newPhrase)
@@ -122,10 +160,21 @@ void LiveHarmonizer::choose (const HarmonyContext& ctx, bool newPhrase)
 
     if (leadNote >= 0)
     {
+        // Place the doubled melody by where the tune sits overall (not by a pickup note), in the
+        // comfortable part of the soprano range, and avoid two-octave shifts: in Words mode they
+        // turn your voice into a cartoon.
         const auto& sr = ctx.ranges[Soprano];
-        const int placed = leadNote + sopShift;
-        if (newPhrase || placed < sr.low - 3 || placed > sr.high + 3)
-            sopShift = chooseOctaveShift (leadNote, sr);
+        const SectionRange melodyRange { sr.low, std::max (sr.low + 7, sr.high - 6) };
+        const float extraOctave = ctx.wordsMode ? 6.0f : 2.0f;
+        const int centre = melodyCentre >= 0.0f ? (int) std::lround (melodyCentre) : leadNote;
+        const int preferred = chooseOctaveShift (centre, melodyRange, extraOctave);
+        // Scoops from below and short low notes are fine; only a melody that really leaves the
+        // range moves the octave, and it comes back as soon as the melody does.
+        auto fits = [&] (int shift) { const int n = leadNote + shift; return n >= sr.low - 7 && n <= sr.high + 3; };
+        if (fits (preferred))
+            sopShift = preferred;
+        else if (newPhrase || ! fits (sopShift))
+            sopShift = chooseOctaveShift (leadNote, melodyRange, extraOctave);
     }
 
     Chord next = chord;
@@ -211,6 +260,22 @@ void KeyTracker::reset()
     pendingCount = 0;
 }
 
+void KeyTracker::seed (int tonicIn, bool minor, float weight)
+{
+    static const int majorSteps[] = { 0, 2, 4, 5, 7, 9, 11 };
+    static const int minorSteps[] = { 0, 2, 3, 5, 7, 8, 10 };
+    static const float stepWeight[] = { 1.6f, 0.8f, 1.2f, 0.9f, 1.4f, 0.8f, 0.6f };
+    hist.fill (0.0f);
+    for (int i = 0; i < 7; ++i)
+        hist[(size_t) wrapPc (tonicIn + (minor ? minorSteps[i] : majorSteps[i]))] = stepWeight[i] * weight / 7.3f;
+    totalWeight = weight;
+    tonic = wrapPc (tonicIn);
+    lastFamilyMinor = minor;
+    pending = -1;
+    pendingCount = 0;
+    sinceEstimate = 0.0f;
+}
+
 void KeyTracker::addNote (int midiNote, float seconds, float weight)
 {
     const float w = seconds * weight;
@@ -249,7 +314,18 @@ int KeyTracker::update (float seconds, bool minorFamily)
     }
     if (est.tonic == pending) ++pendingCount;
     else { pending = est.tonic; pendingCount = 1; }
-    if (pendingCount >= 4)
+
+    // Switch sooner when the current key leaves out notes the singer keeps using.
+    float outside = 0.0f, total = 0.0f;
+    const Scale current { tonic, minorFamily ? ScaleType::HarmonicMinor : ScaleType::Major };
+    for (int pc = 0; pc < 12; ++pc)
+    {
+        total += hist[(size_t) pc];
+        if (! current.contains (pc) && ! (minorFamily && pc == wrapPc (tonic + 10)))
+            outside += hist[(size_t) pc];
+    }
+    const int needed = (total > 0.0f && outside / total > 0.15f) ? 2 : 4;
+    if (pendingCount >= needed)
     {
         tonic = est.tonic;
         pending = -1;

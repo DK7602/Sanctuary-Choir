@@ -37,7 +37,7 @@ private:
     void sendMeters();
     void sendStatus();
     void addLatencyInfo (juce::DynamicObject& o);
-    void toast (const juce::String& text);
+    void toast (const juce::String& text, int milliseconds = 0);
     juce::var describeParameter (juce::RangedAudioParameter& p) const;
 
     SanctuaryProcessor& processor;

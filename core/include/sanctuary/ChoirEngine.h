@@ -149,6 +149,11 @@ public:
     /** Thread-safe copy of the latest UI snapshot; peak levels reset once read. */
     EngineSnapshot takeSnapshot();
 
+    /** Start auto key detection from a known key (thread-safe; applied on the next process call). */
+    void seedKey (int tonic, bool minor) { pendingKeySeed.store (wrapPc (tonic) + (minor ? 12 : 0)); }
+    /** The key auto-detection has settled on: tonic + 12 if minor, or -1 while unsure (thread-safe). */
+    int getDetectedKey() const noexcept { return detectedKey.load (std::memory_order_relaxed); }
+
 private:
     struct Singer;
     struct ControlFrame;
@@ -215,6 +220,7 @@ private:
 
     // Analysis state
     int keyTonic = 0;
+    std::atomic<int> pendingKeySeed { -1 }, detectedKey { -1 };
     float lastInputMidi = 0.0f;
     uint64_t chunkCounter = 0;
 

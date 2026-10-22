@@ -128,6 +128,123 @@ TEST (keyEstimation)
     CHECK (k.tonic == 9 && k.minor);
 }
 
+TEST (keyNeverLeavesOutSungNotes)
+{
+    // A melody that sits on G and F with some Eb and D (it was heard in a real session):
+    // G major or C major would snap the F or the Eb to a neighbour. The key must contain all three.
+    std::array<float, 12> h {};
+    h[7] = 0.37f; h[5] = 0.28f; h[3] = 0.12f; h[2] = 0.10f; h[6] = 0.05f; h[8] = 0.04f;
+    const auto k = estimateKey (h, false, true);
+    const Scale s { k.tonic, ScaleType::Major };
+    std::printf ("  estimated %s major\n", getPitchClassName (k.tonic, true));
+    CHECK (s.contains (7) && s.contains (5) && s.contains (3));
+}
+
+static PitchFrame sung (float midi)
+{
+    PitchFrame f;
+    f.voiced = true;
+    f.midi = midi;
+    f.hz = midiToHz (midi);
+    f.clarity = 0.95f;
+    f.rmsDb = -20.0f;
+    return f;
+}
+
+TEST (harmonyHoldsThroughPassingNotes)
+{
+    // Eb major, Full Choir: G (long) - F (quick) - G should stay on the Eb chord with only the
+    // melody moving; a held F changes the chord.
+    HarmonyContext ctx;
+    ctx.scale = { 3, ScaleType::Major };
+    LiveHarmonizer h;
+    h.reset();
+    const float dt = 0.005f;
+    auto sing = [&] (float midi, float seconds) { for (float t = 0; t < seconds; t += dt) h.process (sung (midi), ctx, dt); };
+    sing (55.0f, 0.5f);
+    const std::string first = h.getChord().name;
+    CHECK (first == "Eb");
+    int changes = 0;
+    std::string last = first;
+    for (int rep = 0; rep < 4; ++rep)
+    {
+        for (float t = 0; t < 0.12f; t += dt) { h.process (sung (53.0f), ctx, dt); if (h.getChord().name != last) { ++changes; last = h.getChord().name; } }
+        CHECK (h.getVoicing().primary (Soprano) % 12 == 5);   // the melody voice moves to F
+        for (float t = 0; t < 0.4f; t += dt) { h.process (sung (55.0f), ctx, dt); if (h.getChord().name != last) { ++changes; last = h.getChord().name; } }
+    }
+    std::printf ("  chord changes over four quick passing notes: %d\n", changes);
+    CHECK (changes == 0);
+    sing (53.0f, 0.6f);
+    CHECK (h.getChord().contains (5));
+    CHECK (h.getChord().name != "Eb");
+}
+
+TEST (harmonyIgnoresWobblesBetweenScaleNotes)
+{
+    // An out-of-key F sung with vibrato in G major sits between E and F#: the melody must not
+    // flip between them every few frames.
+    HarmonyContext ctx;
+    ctx.scale = { 7, ScaleType::Major };
+    LiveHarmonizer h;
+    h.reset();
+    const float dt = 0.005f;
+    int flips = 0, lastLead = -1;
+    for (float t = 0; t < 2.0f; t += dt)
+    {
+        h.process (sung (53.0f + 0.25f * std::sin (kTwoPi * 5.5f * t)), ctx, dt);
+        if (h.getLeadNote() != lastLead) { ++flips; lastLead = h.getLeadNote(); }
+    }
+    std::printf ("  lead note changes over 2 s of a wobbling in-between pitch: %d\n", flips);
+    CHECK (flips <= 2);
+
+    // A few frames an octave off (a tracking slip) must not move the melody.
+    h.reset();
+    for (float t = 0; t < 0.3f; t += dt) h.process (sung (55.0f), ctx, dt);
+    for (int i = 0; i < 4; ++i) h.process (sung (43.0f), ctx, dt);
+    CHECK (h.getLeadNote() == 55);
+}
+
+TEST (sopranoDoublesAMaleMelodyOneOctaveUp)
+{
+    // A baritone melody around F3 that starts on a low pickup: in Words mode the sopranos must
+    // double it one octave up, not two (a 4x pitch shift sounds like a cartoon).
+    for (bool words : { true, false })
+    {
+        HarmonyContext ctx;
+        ctx.scale = { 3, ScaleType::Major };
+        ctx.wordsMode = words;
+        LiveHarmonizer h;
+        h.reset();
+        const float dt = 0.005f;
+        const float melody[] = { 50, 55, 53, 55, 53, 51, 53, 55 };
+        int maxShift = 0;
+        for (int phrase = 0; phrase < 3; ++phrase)
+        {
+            for (float m : melody)
+                for (float t = 0; t < 0.3f; t += dt)
+                {
+                    h.process (sung (m), ctx, dt);
+                    maxShift = std::max (maxShift, h.getSopranoShift());
+                }
+            for (float t = 0; t < 0.5f; t += dt) h.process (PitchFrame{}, ctx, dt);
+        }
+        std::printf ("  %s: largest soprano shift %d semitones\n", words ? "words" : "vowels", maxShift);
+        CHECK (maxShift == 12);
+    }
+}
+
+TEST (learnFoldsOctaveSlips)
+{
+    // A short blip an octave below the surrounding notes is a tracking slip, not a leap.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 51.0f, 0.6f, 0.0f }, { 39.0f, 0.13f, 0.0f }, { 52.0f, 0.6f, 0.0f } }, sr, Bass, 0.0f);
+    const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+    float lowest = 1000.0f;
+    for (const auto& n : take.notes) lowest = std::min (lowest, n.pitch);
+    std::printf ("  notes %zu, lowest %.1f\n", take.notes.size(), lowest);
+    CHECK (lowest > 45.0f);
+}
+
 TEST (psolaShift)
 {
     const double sr = 48000.0;

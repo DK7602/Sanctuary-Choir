@@ -15,15 +15,17 @@
 | Logic Pro / GarageBand | Audio FX slot on the vocal track → *Audio Units → Sanctuary Audio → Sanctuary Choir* | Logic only: to steer it with MIDI chords, insert it on a software-instrument track as an *AU MIDI-controlled Effect* and pick the vocal track as its side-chain input. |
 | Ableton Live | Audio Effects → Plug-Ins → *Sanctuary Choir* (VST3) | For MIDI chords, set a MIDI track's *MIDI To* to the vocal track → Sanctuary Choir. |
 | FL Studio | Mixer insert → *Sanctuary Choir* (VST3) | Route a MIDI Out channel to the plug-in's MIDI input port for chords. |
-| Cubase / Studio One / Reaper | Insert effect on the vocal track (VST3) | Reaper: add a MIDI send from a MIDI track to the vocal track. |
+| Cubase / Studio One / Reaper | Insert effect on the vocal track (VST3) | Cubase records vocals on *mono* tracks, and a mono track can't carry a stereo choir. Use a stereo audio track, or put Sanctuary Choir on an FX channel fed by a send. Reaper: add a MIDI send from a MIDI track to the vocal track. |
 | No DAW | Run the standalone app, pick your mic in *Options → Audio/MIDI Settings* | Use headphones to avoid feedback. |
 
 Pro Tools (AAX) isn't supported yet.
 
+**Use a stereo track.** The choir is spread across a stereo stage. On a mono track it gets folded to mono, and Sanctuary shows a reminder when that happens.
+
 ## 3. Sing
 
 - **Turn up Choir Size** to add singers. You'll see each one walk into the loft.
-- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key. If you already know the key, set it yourself for instant, perfect harmony from the first note.
+- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note.
 - **Harmony Mode** chooses the arrangement. *Full Choir* is the classic four-part hymn sound.
 - **Style** changes how the choir performs. *Gospel* adds 7th chords, scoops and more vibrato; *Gregorian* gives pure, still voices.
 - **Vocal Type**:

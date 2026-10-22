@@ -158,6 +158,9 @@ void SanctuaryEditor::sendInit()
     processor.takeChangedParameters();
     lastStatusVersion = -1;
     sendStatus();
+    if (processor.getTotalNumOutputChannels() < 2)
+        toast ("This track is mono, so the choir is folded to mono. Put Sanctuary Choir on a stereo track "
+               "(or an FX channel) to hear the full stage.", 9000);
 }
 
 void SanctuaryEditor::sendParams (const StringArray& ids)
@@ -211,6 +214,7 @@ void SanctuaryEditor::sendStatus()
     o->setProperty ("presets", presets.toVar());
     o->setProperty ("presetIndex", presets.getCurrentIndex());
     o->setProperty ("presetName", presets.getCurrentName());
+    o->setProperty ("monoOutput", processor.getTotalNumOutputChannels() < 2);
     addLatencyInfo (*o);
     web->emitEventIfBrowserIsVisible ("status", var (o.release()));
 }
@@ -224,10 +228,12 @@ void SanctuaryEditor::addLatencyInfo (DynamicObject& o)
     sentRate = processor.getSampleRate();
 }
 
-void SanctuaryEditor::toast (const String& text)
+void SanctuaryEditor::toast (const String& text, int milliseconds)
 {
     auto o = std::make_unique<DynamicObject>();
     o->setProperty ("text", text);
+    if (milliseconds > 0)
+        o->setProperty ("ms", milliseconds);
     web->emitEventIfBrowserIsVisible ("toast", var (o.release()));
 }
 

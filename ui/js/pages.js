@@ -175,7 +175,8 @@
           + (info.standalone ? " The standalone app always runs live." : " Switch to Studio for mixing.")
         : "<b>Studio</b>: voice and choir line up perfectly; your DAW compensates the " + ms(info.latencyMs) + " delay. Use Live while you record.";
       foot.textContent = "Sanctuary Choir " + (info.version || "") + "  \u00b7  " + (live ? "live monitoring" : "latency " + (info.latencyMs ? info.latencyMs.toFixed(1) : "?") + " ms")
-        + "  \u00b7  " + (SC.isPlugin ? (info.standalone ? "standalone" : "plugin") : "browser preview");
+        + "  \u00b7  " + (SC.isPlugin ? (info.standalone ? "standalone" : "plugin") : "browser preview")
+        + (info.monoOutput ? "  \u00b7  mono track (use a stereo track for the full stage)" : "");
     };
 
     const take = el("div", "group", left);
@@ -190,9 +191,10 @@
     presetFolder.addEventListener("click", () => SC.send({ type: "cmd", name: "presetFolder" }));
     const takeInfo = el("p", "", take, "");
     info.onStatus = (st) => {
-      if (st.latencyMs !== undefined && (st.latencyMs !== info.latencyMs || st.liveChoirMs !== info.liveChoirMs)) {
+      if (st.latencyMs !== undefined && (st.latencyMs !== info.latencyMs || st.liveChoirMs !== info.liveChoirMs || !!st.monoOutput !== !!info.monoOutput)) {
         info.latencyMs = st.latencyMs;
         info.liveChoirMs = st.liveChoirMs;
+        info.monoOutput = !!st.monoOutput;
         describe(Params.get("latencyMode"));
       }
       const l = st.learn || {};

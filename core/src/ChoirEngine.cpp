@@ -436,7 +436,10 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     {
         if (g.voiced)
             keyTracker.addNote ((int) std::lround (g.midi), hop, g.clarity);
-        keyTonic = keyTracker.update (hop, Scale { 0, params.scale }.isMinorFamily());
+        const bool minorFamily = Scale { 0, params.scale }.isMinorFamily();
+        keyTonic = keyTracker.update (hop, minorFamily);
+        if (keyTracker.getConfidence() >= 0.35f)
+            detectedKey.store (keyTonic + (minorFamily ? 12 : 0), std::memory_order_relaxed);
     }
 
     const Scale scale = currentScale();
@@ -676,6 +679,12 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         std::memset (outL, 0, sizeof (float) * (size_t) n);
         if (outR != nullptr) std::memset (outR, 0, sizeof (float) * (size_t) n);
         return;
+    }
+
+    if (const int seed = pendingKeySeed.exchange (-1); seed >= 0)
+    {
+        keyTracker.seed (seed % 12, seed >= 12, 3.0f);
+        keyTonic = seed % 12;
     }
 
     // Reconfigure on parameter changes that affect the singers.

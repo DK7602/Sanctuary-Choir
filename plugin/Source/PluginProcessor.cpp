@@ -50,6 +50,11 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock);
     setLatencySamples (reportedLatency());
+    if (const int key = rememberedKey.load(); key >= 0)
+        engine.seedKey (key % 12, key >= 12);
+    bypassDelay.setSize (2, engine.getLatencySamples() + 1);
+    bypassDelay.clear();
+    bypassPos = 0;
     learn.prepare (sampleRate);
     engineWritten = 0;
     heldVelocity.fill (0.0f);
@@ -154,6 +159,40 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         buffer.clear (ch, 0, n);
 }
 
+void SanctuaryProcessor::processBlockBypassed (AudioBuffer<float>& buffer, MidiBuffer&)
+{
+    const int n = buffer.getNumSamples();
+    const int numIn = getTotalNumInputChannels();
+    const int numOut = getTotalNumOutputChannels();
+    if (numIn == 0)
+        buffer.clear();
+    else if (numIn == 1 && numOut > 1)
+        buffer.copyFrom (1, 0, buffer, 0, 0, n);
+
+    const int size = bypassDelay.getNumSamples();
+    const int lat = std::min (getLatencySamples(), size - 1);
+    const int channels = std::min (numOut, 2);
+    if (lat > 0)
+    {
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            float* x = buffer.getWritePointer (ch);
+            float* ring = bypassDelay.getWritePointer (ch);
+            int pos = bypassPos;
+            for (int i = 0; i < n; ++i)
+            {
+                const float in = x[i];
+                x[i] = ring[(pos - lat + size) % size];
+                ring[pos] = in;
+                pos = (pos + 1) % size;
+            }
+        }
+        bypassPos = (bypassPos + n) % size;
+    }
+    for (int ch = 2; ch < numOut; ++ch)
+        buffer.clear (ch, 0, n);
+}
+
 //==============================================================================
 sc::EngineParams SanctuaryProcessor::currentParams() const
 {
@@ -202,6 +241,9 @@ void SanctuaryProcessor::timerCallback()
     if (renderDirty.exchange (false))
         learn.renderSettingsChanged();
 
+    if (const int key = engine.getDetectedKey(); key >= 0)
+        rememberedKey = key;
+
     // Studio <-> Live monitoring changes the latency the host has to compensate.
     if (const int lat = reportedLatency(); lat != getLatencySamples())
         setLatencySamples (lat);
@@ -229,6 +271,7 @@ void SanctuaryProcessor::getStateInformation (MemoryBlock& destData)
     tree.setProperty ("uiTab", uiTab, nullptr);
     tree.setProperty ("editorWidth", editorWidth, nullptr);
     tree.setProperty ("editorHeight", editorHeight, nullptr);
+    tree.setProperty ("detectedKey", rememberedKey.load(), nullptr);   // Auto key starts right next time
     std::unique_ptr<XmlElement> xml (tree.createXml());
 
     MemoryOutputStream out (destData, false);
@@ -284,6 +327,12 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
         uiTab = tree.getProperty ("uiTab", "perform").toString();
         editorWidth = tree.getProperty ("editorWidth", 0);
         editorHeight = tree.getProperty ("editorHeight", 0);
+        const int key = tree.getProperty ("detectedKey", -1);
+        if (key >= 0 && key < 24)
+        {
+            rememberedKey = key;
+            engine.seedKey (key % 12, key >= 12);
+        }
     }
     if (hasLearn)
         learn.readState (in);

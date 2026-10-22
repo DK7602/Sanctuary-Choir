@@ -375,7 +375,7 @@ std::array<SectionRange, NumSections> defaultSectionRanges()
     return { SectionRange { 60, 81 }, SectionRange { 53, 74 }, SectionRange { 48, 69 }, SectionRange { 40, 64 } };
 }
 
-int chooseOctaveShift (int melody, const SectionRange& range)
+int chooseOctaveShift (int melody, const SectionRange& range, float extraOctavePenalty)
 {
     int best = 0;
     float bestDist = 1.0e9f;
@@ -385,6 +385,7 @@ int chooseOctaveShift (int melody, const SectionRange& range)
         float d = std::abs ((float) n - range.centre());
         if (n < range.low) d += (float) (range.low - n) * 3.0f;
         if (n > range.high) d += (float) (n - range.high) * 3.0f;
+        d += extraOctavePenalty * (float) std::max (0, std::abs (k) - 1);
         if (d < bestDist) { bestDist = d; best = 12 * k; }
     }
     return best;
@@ -771,19 +772,41 @@ KeyEstimate estimateKey (const std::array<float, 12>& h, bool restrictToMinor, b
         return dh > 0 && dp > 0 ? num / std::sqrt (dh * dp) : 0.0f;
     };
 
+    // A harmoniser must never pick a key that leaves out notes the singer keeps singing:
+    // those notes would be snapped to a neighbour and harmonised with clashing chords.
+    float total = 0.0f;
+    for (float v : h) total += v;
+    auto coveragePenalty = [&h, total] (int tonic, bool minor)
+    {
+        if (total <= 0.0f)
+            return 0.0f;
+        static const int majorSteps[] = { 0, 2, 4, 5, 7, 9, 11 };
+        static const int minorSteps[] = { 0, 2, 3, 5, 7, 8, 10, 11 };   // natural + raised 7th
+        const int* steps = minor ? minorSteps : majorSteps;
+        const int numSteps = minor ? 8 : 7;
+        float inside = 0.0f;
+        for (int i = 0; i < numSteps; ++i)
+            inside += h[(size_t) wrapPc (tonic + steps[i])];
+        const float outside = 1.0f - inside / total;
+        return 2.0f * std::max (0.0f, outside - 0.06f);
+    };
+
     KeyEstimate best;
     best.score = -2.0f;
+    float bestRank = -1.0e9f;
     for (int tonic = 0; tonic < 12; ++tonic)
     {
         if (! restrictToMinor)
         {
             const float s = correlate (majorProfile, tonic);
-            if (s > best.score) best = { tonic, false, s };
+            const float rank = s - coveragePenalty (tonic, false);
+            if (rank > bestRank) { bestRank = rank; best = { tonic, false, s }; }
         }
         if (! restrictToMajor)
         {
             const float s = correlate (minorProfile, tonic);
-            if (s > best.score) best = { tonic, true, s };
+            const float rank = s - coveragePenalty (tonic, true);
+            if (rank > bestRank) { bestRank = rank; best = { tonic, true, s }; }
         }
     }
     return best;

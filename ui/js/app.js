@@ -285,12 +285,12 @@
   function lighten(h) { return mix(h, "#ffffff", 0.45); }
 
   let toastTimer = null;
-  function toast(text) {
+  function toast(text, ms) {
     const t = $("toast");
     t.textContent = text;
     t.classList.remove("hidden");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.add("hidden"), 3800);
+    toastTimer = setTimeout(() => t.classList.add("hidden"), ms || 3800);
   }
 
   //==========================================================================
@@ -532,7 +532,7 @@
   SC.on("params", (obj) => Object.keys(obj).forEach((id) => { if (!Params.gestures.has(id)) Params.update(id, obj[id]); }));
   SC.on("meters", onMeters);
   SC.on("status", onStatus);
-  SC.on("toast", (t) => toast(t.text));
+  SC.on("toast", (t) => toast(t.text, t.ms));
 
   // Tell the backend we're ready (fonts first, so the canvases measure correctly).
   const ready = () => SC.send({ type: "ready" });

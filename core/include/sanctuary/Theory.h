@@ -117,7 +117,9 @@ struct VoicingRequest
 Voicing voiceChord (const VoicingRequest& req);
 
 /** Pick the octave shift (multiple of 12) that places a melody note comfortably in a section. */
-int chooseOctaveShift (int melody, const SectionRange& range);
+/** Octave shift that brings a melody note into a range. extraOctavePenalty (in semitones) is
+    added for every octave beyond the first, to prefer the smallest musical shift. */
+int chooseOctaveShift (int melody, const SectionRange& range, float extraOctavePenalty = 0.0f);
 
 //==============================================================================
 /** Krumhansl-Kessler key estimation from a pitch-class duration histogram. */

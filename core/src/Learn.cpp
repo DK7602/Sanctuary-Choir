@@ -125,6 +125,39 @@ TakeAnalysis analyseTake (const float* x, int64_t n, double sampleRate, float a4
         t.notes.push_back (note);
     }
 
+    // Octave slips: a blip far from both neighbours is the tracker locking onto the wrong
+    // octave (or vocal fry), not a sung leap. Fold it back if it fits, otherwise drop it.
+    {
+        std::vector<LearnedNote> kept;
+        const double shortNote = 0.13 * sampleRate;
+        for (size_t k = 0; k < t.notes.size(); ++k)
+        {
+            LearnedNote note = t.notes[k];
+            const bool isShort = (double) (note.end - note.start) < shortNote;
+            const LearnedNote* prev = kept.empty() ? nullptr : &kept.back();
+            const LearnedNote* next = k + 1 < t.notes.size() ? &t.notes[k + 1] : nullptr;
+            const int64_t near = (int64_t) (0.4 * sampleRate);
+            if (prev != nullptr && note.start - prev->end > near) prev = nullptr;
+            if (next != nullptr && next->start - note.end > near) next = nullptr;
+            if (isShort && (prev != nullptr || next != nullptr))
+            {
+                const float ref = prev != nullptr && next != nullptr ? 0.5f * (prev->pitch + next->pitch)
+                                                                     : (prev != nullptr ? prev->pitch : next->pitch);
+                const bool farFromPrev = prev == nullptr || std::abs (note.pitch - prev->pitch) >= 7.0f;
+                const bool farFromNext = next == nullptr || std::abs (note.pitch - next->pitch) >= 7.0f;
+                if (farFromPrev && farFromNext)
+                {
+                    const float folded = note.pitch + 12.0f * std::round ((ref - note.pitch) / 12.0f);
+                    if (std::abs (folded - ref) > 3.5f)
+                        continue;
+                    note.pitch = folded;
+                }
+            }
+            kept.push_back (note);
+        }
+        t.notes = std::move (kept);
+    }
+
     // Phrases: separated by gaps of more than 300 ms.
     const int64_t phraseGap = (int64_t) (0.3 * sampleRate);
     for (size_t k = 0; k < t.notes.size(); ++k)
@@ -285,23 +318,35 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
             chordOf[(size_t) i - 1] = back[(size_t) i * (size_t) numChords + (size_t) chordOf[(size_t) i]];
     }
 
-    // Soprano octave per phrase: keep the doubled melody in one octave for the whole phrase.
+    // Soprano octave per phrase: keep the doubled melody in one octave for the whole phrase,
+    // in the comfortable part of the range, weighted by how long each note is held. Two-octave
+    // shifts are avoided (in Words mode they turn the singer's voice into a cartoon).
     std::vector<int> phraseShift (take.phrases.size(), 0);
-    for (size_t p = 0; p < take.phrases.size(); ++p)
     {
-        float bestCost = 1.0e9f;
-        for (int k = -3; k <= 3; ++k)
+        const auto& r = hs.ranges[Soprano];
+        const float comfortable = 0.5f * (float) (r.low + std::max (r.low + 7, r.high - 6));
+        const float extraOctave = hs.wordsMode ? 1.5f : 0.5f;
+        for (size_t p = 0; p < take.phrases.size(); ++p)
         {
-            float c = 0.0f;
-            for (int i = take.phrases[p].firstNote; i <= take.phrases[p].lastNote; ++i)
+            float bestCost = 1.0e9f;
+            for (int k = -3; k <= 3; ++k)
             {
-                const int nn = q[(size_t) i] + 12 * k;
-                const auto& r = hs.ranges[Soprano];
-                if (nn < r.low) c += (float) (r.low - nn) * 2.0f;
-                if (nn > r.high) c += (float) (nn - r.high) * 2.0f;
-                c += 0.05f * std::abs ((float) nn - r.centre());
+                float c = 0.0f, wsum = 0.0f;
+                for (int i = take.phrases[p].firstNote; i <= take.phrases[p].lastNote; ++i)
+                {
+                    const auto& note = take.notes[(size_t) i];
+                    const float w = clampv ((float) ((double) (note.end - note.start) / sr) / 0.25f, 0.2f, 2.0f);
+                    const int nn = q[(size_t) i] + 12 * k;
+                    float e = 0.0f;
+                    if (nn < r.low) e += (float) (r.low - nn) * 0.5f;
+                    if (nn > r.high) e += (float) (nn - r.high) * 0.5f;
+                    e = std::min (e, 4.0f) + 0.08f * std::abs ((float) nn - comfortable);
+                    c += w * e;
+                    wsum += w;
+                }
+                c = c / std::max (wsum, 1.0e-3f) + extraOctave * (float) std::max (0, std::abs (k) - 1);
+                if (c < bestCost) { bestCost = c; phraseShift[p] = 12 * k; }
             }
-            if (c < bestCost) { bestCost = c; phraseShift[p] = 12 * k; }
         }
     }
 

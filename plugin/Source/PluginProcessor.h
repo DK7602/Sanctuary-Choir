@@ -22,7 +22,10 @@ public:
     void releaseResources() override {}
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    /** Bypass keeps the reported latency, so the DAW's delay compensation stays correct. */
+    void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using AudioProcessor::processBlock;
+    using AudioProcessor::processBlockBypassed;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -85,6 +88,12 @@ private:
     juce::uint32 lastHarmonyChange = 0;
     int64_t engineWritten = 0;
     bool standaloneApp = false;
+
+    std::atomic<int> rememberedKey { -1 };   // last auto-detected key, saved with the project
+
+    // Dry delay used while bypassed
+    juce::AudioBuffer<float> bypassDelay;
+    int bypassPos = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SanctuaryProcessor)
 };
