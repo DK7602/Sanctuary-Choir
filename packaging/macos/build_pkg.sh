@@ -14,8 +14,14 @@ stage() { # name, bundle, install location
     # Bundles are "relocatable" by default: Installer would update a copy it finds anywhere on
     # the disk (e.g. the unzipped download) instead of installing where we say.
     pkgbuild --analyze --root "$WORK/$1/root" "$WORK/$1.plist"
-    /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/$1.plist"
-    plist=(--component-plist "$WORK/$1.plist")
+    local i=0
+    while /usr/libexec/PlistBuddy -c "Print :$i" "$WORK/$1.plist" >/dev/null 2>&1; do
+      /usr/libexec/PlistBuddy -c "Delete :$i:BundleIsRelocatable" "$WORK/$1.plist" >/dev/null 2>&1 || true
+      /usr/libexec/PlistBuddy -c "Add :$i:BundleIsRelocatable bool false" "$WORK/$1.plist"
+      i=$((i + 1))
+    done
+    plutil -p "$WORK/$1.plist"
+    if [ "$i" -gt 0 ]; then plist=(--component-plist "$WORK/$1.plist"); fi
   fi
   pkgbuild --root "$WORK/$1/root" ${plist[@]+"${plist[@]}"} --identifier "$ID.$1" --version "$VERSION" \
            --install-location "$3" "$WORK/$1.pkg"
