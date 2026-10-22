@@ -1,1 +1,76 @@
-<!doctype html><html><body>Sanctuary Choir</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sanctuary Choir</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="viewport">
+  <div id="stage">
+    <img id="skin" src="assets/skin/skin.jpg" alt="" draggable="false">
+
+    <!-- Church scene: singers appear here as the choir grows -->
+    <div id="scene">
+      <canvas id="choirCanvas" width="1448" height="1086"></canvas>
+      <div id="sceneGlow"></div>
+      <div id="singerBadge"><span id="singerCount">0</span> SINGERS</div>
+      <div id="harmonyBadge"><span id="keyReadout">KEY C MAJOR</span><span id="chordReadout"></span></div>
+      <div id="statusPlaque" class="hidden"><span id="statusText"></span><div id="statusProgress"><div></div></div></div>
+    </div>
+
+    <!-- MIX / FX / SETTINGS pages float over the church -->
+    <section id="page-mix" class="page hidden" aria-label="Mix"></section>
+    <section id="page-fx" class="page hidden" aria-label="Effects"></section>
+    <section id="page-settings" class="page hidden" aria-label="Settings"></section>
+
+    <!-- Top bar -->
+    <button id="gearBtn" class="hit" title="Settings" aria-label="Settings"></button>
+    <div id="presetBox" class="hit dropdown-hit" title="Choose a preset"><span id="presetName">Heavenly Praise</span></div>
+    <button id="presetPrev" class="hit" title="Previous preset" aria-label="Previous preset"></button>
+    <button id="presetNext" class="hit" title="Next preset" aria-label="Next preset"></button>
+    <nav id="tabs">
+      <button data-tab="perform" class="tab active">PERFORM</button>
+      <button data-tab="mix" class="tab">MIX</button>
+      <button data-tab="fx" class="tab">FX</button>
+      <button data-tab="settings" class="tab">SETTINGS</button>
+    </nav>
+
+    <!-- Main knobs -->
+    <div class="knob big" data-param="volume" style="--cx:137px;--cy:650px"></div>
+    <div class="knob big" data-param="choirSize" style="--cx:328px;--cy:650px"></div>
+    <div class="knob big" data-param="space" style="--cx:520px;--cy:650px"></div>
+    <div class="knob big" data-param="reverb" style="--cx:925px;--cy:650px"></div>
+    <div class="knob big" data-param="tone" style="--cx:1119px;--cy:650px"></div>
+    <div class="knob big" data-param="presence" style="--cx:1312px;--cy:650px"></div>
+    <div id="medallion" class="hit" title="Sanctuary Choir"></div>
+
+    <!-- Dropdowns -->
+    <div class="dropdown" data-param="harmonyMode" style="left:124px;top:810px;width:176px"></div>
+    <div class="dropdown" data-param="key" style="left:405px;top:810px;width:150px"></div>
+    <div class="dropdown" data-param="scale" style="left:661px;top:810px;width:135px"></div>
+    <div class="dropdown" data-param="style" style="left:902px;top:810px;width:173px"></div>
+    <div class="dropdown" data-param="vocalType" style="left:1181px;top:810px;width:209px"></div>
+
+    <!-- Learn workflow -->
+    <button id="learnBtn" class="hit button-hit" style="left:34px;top:886px;width:160px;height:47px" title="Learn: sing (or play your track) and the choir learns your melody"><span class="rec-dot"></span></button>
+    <button id="loadBtn" class="hit button-hit" style="left:34px;top:943px;width:160px;height:41px" title="Load a vocal file"></button>
+    <button id="clearBtn" class="hit button-hit" style="left:34px;top:992px;width:160px;height:41px" title="Clear the learned take"></button>
+    <button id="freezeBtn" class="hit button-hit" style="left:1258px;top:885px;width:156px;height:51px" title="Freeze: hold the current chord forever"></button>
+    <button id="renderBtn" class="hit button-hit" style="left:1259px;top:956px;width:155px;height:70px" title="Render the learned take with every singer"><div class="render-progress"><div></div></div></button>
+
+    <!-- Sections -->
+    <div id="sections"></div>
+
+    <div id="menuLayer"></div>
+    <div id="toast" class="hidden"></div>
+  </div>
+</div>
+<script src="js/bridge.js"></script>
+<script src="js/widgets.js"></script>
+<script src="js/singers.js"></script>
+<script src="js/pages.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

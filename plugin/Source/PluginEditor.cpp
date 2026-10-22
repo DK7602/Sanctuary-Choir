@@ -8,10 +8,10 @@ using namespace juce;
 static const char* mimeFor (const String& path)
 {
     const auto ext = path.fromLastOccurrenceOf (".", false, false).toLowerCase();
-    if (ext == "html" || ext == "htm") return "text/html";
-    if (ext == "css") return "text/css";
-    if (ext == "js" || ext == "mjs") return "text/javascript";
-    if (ext == "json") return "application/json";
+    if (ext == "html" || ext == "htm") return "text/html; charset=utf-8";
+    if (ext == "css") return "text/css; charset=utf-8";
+    if (ext == "js" || ext == "mjs") return "text/javascript; charset=utf-8";
+    if (ext == "json") return "application/json; charset=utf-8";
     if (ext == "png") return "image/png";
     if (ext == "jpg" || ext == "jpeg") return "image/jpeg";
     if (ext == "webp") return "image/webp";
