@@ -89,7 +89,8 @@ private:
     std::array<Allpass, 4> diffL, diffR;
     std::array<Delay, numLines> lines;
     std::array<float, numLines> lineLen {}, lineGain {}, dampA {}, dampZ {};
-    std::array<float, numLines> lfoPhase {}, lfoRate {};
+    std::array<float, numLines> lfoPhase {}, lfoRate {}, lfoValue {};
+    uint32_t modCounter = 0;
     float lfoDepth = 8.0f;
     struct Tap { int delay; float gain; };
     std::vector<Tap> earlyL, earlyR;

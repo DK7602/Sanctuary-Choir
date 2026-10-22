@@ -149,16 +149,24 @@ void ChoirReverb::process (const float* inL, const float* inR, float* outL, floa
         for (auto& a : diffL) dl = a.process (dl);
         for (auto& a : diffR) dr = a.process (dr);
 
+        // Slow delay modulation, updated every 16 samples.
+        if ((modCounter++ & 15) == 0)
+        {
+            for (int k = 1; k < numLines; k += 2)
+            {
+                auto& ph = lfoPhase[(size_t) k];
+                ph += lfoRate[(size_t) k] * dt * 16.0f;
+                if (ph >= 1.0f) ph -= 1.0f;
+                lfoValue[(size_t) k] = lfoDepth * (0.5f + 0.5f * std::sin (kTwoPi * ph));
+            }
+        }
+
         // Read the delay lines (modulated).
         std::array<float, numLines> y {};
         float sum = 0.0f;
         for (int k = 0; k < numLines; ++k)
         {
-            auto& ph = lfoPhase[(size_t) k];
-            ph += lfoRate[(size_t) k] * dt;
-            if (ph >= 1.0f) ph -= 1.0f;
-            const float mod = (k & 1) ? lfoDepth * (0.5f + 0.5f * std::sin (kTwoPi * ph)) : 0.0f;
-            float v = lines[(size_t) k].tapFrac (lineLen[(size_t) k] - 1.0f - mod);
+            float v = lines[(size_t) k].tapFrac (lineLen[(size_t) k] - 1.0f - lfoValue[(size_t) k]);
             // Frequency dependent decay.
             auto& z = dampZ[(size_t) k];
             z = v * (1.0f - dampA[(size_t) k]) + z * dampA[(size_t) k];

@@ -122,9 +122,10 @@ void GlottalTables::prepare (double sampleRate)
                 x[(size_t) (N - k)] = std::conj (x[(size_t) k]);
             }
             fft.inverse (x.data());
-            std::vector<float> table ((size_t) N);
+            std::vector<float> table ((size_t) N + 1);
             for (int i = 0; i < N; ++i)
                 table[(size_t) i] = x[(size_t) i].real();
+            table[(size_t) N] = table[0];
             (variant == 0 ? band.bright : band.soft) = std::move (table);
         }
         bands.push_back (std::move (band));
@@ -149,8 +150,18 @@ void VowelSinger::prepare (double sampleRate)
 void VowelSinger::reset()
 {
     phase = 0.0f;
-    for (auto& r : res)
-        r.reset();
+    s1.fill (0.0f);
+    s2.fill (0.0f);
+}
+
+void VowelSinger::updateGains()
+{
+    for (size_t k = 0; k < 5; ++k)
+    {
+        a1[k] = res[k].a1;
+        a2[k] = res[k].a2;
+        g[k] = res[k].g * gains[k] * norm;
+    }
 }
 
 void VowelSinger::setFormants (const FormantSpec& spec, float formantScale)
@@ -159,11 +170,10 @@ void VowelSinger::setFormants (const FormantSpec& spec, float formantScale)
     {
         const float f = std::min (spec.freq[(size_t) i] * formantScale, (float) sr * 0.45f);
         const float bw = spec.bandwidth[(size_t) i] * std::sqrt (formantScale);
-        freqs[(size_t) i] = f;
-        bws[(size_t) i] = bw;
         gains[(size_t) i] = dbToGain (spec.gainDb[(size_t) i]);
         res[(size_t) i].set (sr, f, bw);
     }
+    updateGains();
 }
 
 void VowelSinger::normalise (const GlottalTables& tables, float f0, float softness)
@@ -183,5 +193,6 @@ void VowelSinger::normalise (const GlottalTables& tables, float f0, float softne
         power += 0.5 * a * a;
     }
     norm = power > 1.0e-12 ? (float) (0.12 / std::sqrt (power)) : 1.0f;
+    updateGains();
 }
 } // namespace sc

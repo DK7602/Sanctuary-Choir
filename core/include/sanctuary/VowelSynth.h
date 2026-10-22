@@ -27,18 +27,29 @@ public:
     void prepare (double sampleRate);
     bool isReady() const noexcept { return ! bands.empty(); }
 
+    int bandFor (float f0) const
+    {
+        const int b = (int) std::floor (std::log2 (std::max (f0, 20.0f) / baseHz));
+        return clampv (b, 0, (int) bands.size() - 1);
+    }
+    /** tableSize + 1 samples (the last repeats the first, for interpolation). */
+    const float* bright (int band) const { return bands[(size_t) band].bright.data(); }
+    const float* soft (int band) const { return bands[(size_t) band].soft.data(); }
+
     /** softness 0 = bright/pressed, 1 = soft/breathy tilt. */
     inline float read (float phase, float f0, float softness) const
     {
         const int b = bandFor (f0);
-        const auto& bright = bands[(size_t) b].bright;
-        const auto& soft = bands[(size_t) b].soft;
+        return readBand (bright (b), soft (b), phase, softness);
+    }
+
+    static inline float readBand (const float* br, const float* so, float phase, float softness)
+    {
         const float p = phase * (float) tableSize;
-        const int i0 = (int) p & (tableSize - 1);
-        const int i1 = (i0 + 1) & (tableSize - 1);
-        const float fr = p - std::floor (p);
-        const float a = bright[(size_t) i0] + (bright[(size_t) i1] - bright[(size_t) i0]) * fr;
-        const float s = soft[(size_t) i0] + (soft[(size_t) i1] - soft[(size_t) i0]) * fr;
+        const int i0 = std::min ((int) p, tableSize - 1);
+        const float fr = p - (float) i0;
+        const float a = br[i0] + (br[i0 + 1] - br[i0]) * fr;
+        const float s = so[i0] + (so[i0 + 1] - so[i0]) * fr;
         return a + (s - a) * softness;
     }
 
@@ -46,20 +57,13 @@ public:
     float harmonicAmplitude (int k, float softness) const;
 
 private:
-    int bandFor (float f0) const
-    {
-        const int b = (int) std::floor (std::log2 (std::max (f0, 20.0f) / baseHz));
-        return clampv (b, 0, (int) bands.size() - 1);
-    }
-
     struct Band { std::vector<float> bright, soft; };
     std::vector<Band> bands;
     double sr = 48000.0;
     float baseHz = 27.5f;
-    float brightScale = 1.0f, softScale = 1.0f;
 };
 
-/** One synthetic singer: glottal oscillator with breath noise through a formant bank. */
+/** One synthetic singer: glottal oscillator with breath noise through a parallel formant bank. */
 class VowelSinger
 {
 public:
@@ -69,30 +73,58 @@ public:
     /** Configure formants (call when vowel/section/formant scale changes). */
     void setFormants (const FormantSpec& spec, float formantScale);
 
-    inline float process (const GlottalTables& tables, float f0, float softness, float breath, Rng& rng)
+    /** Renders n samples into out, scaled per sample by amp. */
+    void render (const GlottalTables& tables, float f0, float softness, float breath, Rng& rng,
+                 const float* amp, float* out, int n)
     {
-        phase += f0 * invSr;
-        if (phase >= 1.0f)
-            phase -= std::floor (phase);
-        float src = tables.read (phase, f0, softness);
-        const float openPhase = phase < 0.55f ? 1.0f : 0.3f;
-        src += rng.bi() * breath * openPhase;
-        float y = 0.0f;
-        for (int i = 0; i < 5; ++i)
-            y += gains[(size_t) i] * res[(size_t) i].process (src);
-        return y * norm;
+        const int band = tables.bandFor (f0);
+        const float* br = tables.bright (band);
+        const float* so = tables.soft (band);
+        const float inc = f0 * invSr;
+        float ph = phase;
+        float y1[5], y2[5];
+        for (int k = 0; k < 5; ++k) { y1[k] = s1[(size_t) k]; y2[k] = s2[(size_t) k]; }
+        for (int i = 0; i < n; ++i)
+        {
+            ph += inc;
+            if (ph >= 1.0f) ph -= 1.0f;
+            float src = GlottalTables::readBand (br, so, ph, softness);
+            src += rng.bi() * breath * (ph < 0.55f ? 1.0f : 0.3f);
+            float y = 0.0f;
+            for (int k = 0; k < 5; ++k)
+            {
+                const float v = g[(size_t) k] * src + a1[(size_t) k] * y1[k] + a2[(size_t) k] * y2[k];
+                y2[k] = y1[k];
+                y1[k] = v;
+                y += v;
+            }
+            out[i] = y * amp[i];
+        }
+        phase = ph;
+        for (int k = 0; k < 5; ++k) { s1[(size_t) k] = y1[k]; s2[(size_t) k] = y2[k]; }
+    }
+
+    /** Single-sample convenience (used by the test signal generator). */
+    float process (const GlottalTables& tables, float f0, float softness, float breath, Rng& rng)
+    {
+        const float one = 1.0f;
+        float out = 0.0f;
+        render (tables, f0, softness, breath, rng, &one, &out, 1);
+        return out;
     }
 
     /** Recompute the loudness normalisation for a typical pitch. */
     void normalise (const GlottalTables& tables, float f0, float softness);
 
 private:
+    void updateGains();
+
     double sr = 48000.0;
     float invSr = 1.0f / 48000.0f;
     float phase = 0.0f;
-    std::array<Resonator, 5> res;
+    std::array<Resonator, 5> res;          // coefficient source
     std::array<float, 5> gains {};
-    std::array<float, 5> freqs {}, bws {};
+    std::array<float, 5> a1 {}, a2 {}, g {}, s1 {}, s2 {};
     float norm = 1.0f;
 };
 } // namespace sc

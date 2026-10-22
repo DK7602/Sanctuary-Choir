@@ -729,12 +729,16 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             else
             {
                 const float att = std::pow (attC, 1.0f / s.rAttack);
+                float ampBuf[kChunk];
+                float peakAmp = 0.0f;
                 for (int i = 0; i < c; ++i)
                 {
                     s.amp = s.ampTarget + (s.amp - s.ampTarget) * (s.ampTarget > s.amp ? att : relC);
-                    if (s.amp > 1.0e-4f)
-                        scratch[(size_t) i] = s.vowel.process (glottal, s.synthF0, style.softness, breath, s.rng) * s.amp;
+                    ampBuf[i] = s.amp;
+                    peakAmp = std::max (peakAmp, s.amp);
                 }
+                if (peakAmp > 1.0e-4f)
+                    s.vowel.render (glottal, s.synthF0, style.softness, breath, s.rng, ampBuf, scratch.data(), c);
                 s.gate = 0.0f;
             }
 

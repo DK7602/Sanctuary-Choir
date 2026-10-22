@@ -310,14 +310,27 @@ void PsolaVoice::addGrain (const PsolaAnalyzer& an, double centre, double src, f
 {
     const int64_t j0 = (int64_t) std::ceil (centre - halfLen);
     const int64_t j1 = (int64_t) std::floor (centre + halfLen);
-    const float inv = 1.0f / halfLen;
+    if (j1 < j0)
+        return;
+
+    // Hann window 0.5 + 0.5 cos(pi k / halfLen) via a cosine recurrence (no per-sample trig).
+    const double delta = kPiD / (double) halfLen;
+    const double k0 = (double) j0 - centre;
+    const double twoCos = 2.0 * std::cos (delta);
+    double cPrev = std::cos (delta * (k0 - 1.0));
+    double c = std::cos (delta * k0);
+    double pos = src + k0 * (double) formant;
+    const float g = 0.5f * gain;
+
     for (int64_t j = j0; j <= j1; ++j)
     {
-        const float k = (float) ((double) j - centre);
-        const float w = hann (k * inv);
-        const double sp = src + (double) (k * formant);
-        const float s = frozenSrc ? an.frozenSampleAt (sp) : an.sampleAt (sp);
-        accum[(size_t) (j & accumMask)] += gain * w * s;
+        const float w = (float) (1.0 + c);
+        const float smp = frozenSrc ? an.frozenSampleAt (pos) : an.sampleAt (pos);
+        accum[(size_t) (j & accumMask)] += g * w * smp;
+        const double cNext = twoCos * c - cPrev;
+        cPrev = c;
+        c = cNext;
+        pos += formant;
     }
 }
 
