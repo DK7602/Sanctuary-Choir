@@ -7,7 +7,7 @@
   const $ = (id) => document.getElementById(id);
 
   const KEY_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-  const MAX_ENGINE_SINGERS = 48;
+  const MAX_ENGINE_SINGERS = 40;
 
   // Layout of the four section panels (design-space pixels, measured from the mockup).
   const SECTION_LAYOUT = [
@@ -387,7 +387,7 @@
       state.lastSizeChange = performance.now();
     });
 
-    Choir.init($("choirCanvas")).then(() => Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || 48)), Choir.maxSingers() || 48), true));
+    Choir.init($("choirCanvas")).then(() => Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || MAX_ENGINE_SINGERS)), Choir.maxSingers() || MAX_ENGINE_SINGERS), true));
     setTab(info.tab && ["perform", "mix", "fx", "settings"].includes(info.tab) ? info.tab : "perform");
   }
 

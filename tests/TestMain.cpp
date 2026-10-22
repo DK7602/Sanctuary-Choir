@@ -416,7 +416,7 @@ TEST (performanceBudget)
         auto y = runEngine (eng, x, sr);
         const double secs = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
         const double audio = (double) x.size() / sr;
-        std::printf ("  48 singers (%s): %.1fx real time\n", vt == VocalType::Words ? "words" : "ah", audio / secs);
+        std::printf ("  %d singers (%s): %.1fx real time\n", kMaxSingers, vt == VocalType::Words ? "words" : "ah", audio / secs);
         CHECK (audio / secs > 3.0);
     }
 }

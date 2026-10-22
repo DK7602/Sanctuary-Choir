@@ -454,13 +454,23 @@ def held_objects(tier, name, people, lab):
             if cands:
                 owner = min(cands)[1]
                 rec["via"] = "face above"
+                if sd["kind"] == "pocket":
+                    # a dark pocket is a book part only if it sits within its holder
+                    # (a shadow between two bodies borders both about equally)
+                    ppl = rl[rl >= 0]
+                    dom = float((ppl == owner).mean()) if len(ppl) else 0.0
+                    rec["dominance"] = round(dom, 2)
+                    if dom < 0.6 and area < 1.5 * head_size ** 2:
+                        owner = -1
+                        rec["via"] = ""
+                        rec["why"] = "shadow between bodies"
         elif adjacent:
             # deep shadow between bodies: give it to the rear-most neighbour, which is
             # only revealed once the people in front of it are shown
             owner = max(adjacent, key=lambda j: (rows[j], -people[j]["head"][1]))
             rec["via"] = "shadow, rear-most"
         if owner < 0:
-            rec["why"] = "no holder"
+            rec.setdefault("why", "no holder")
             continue
         pb = people[owner]["box"]
         if ocy > pb[3] + 0.1 * heights[owner] or abs(ocx - (pb[0] + pb[2]) / 2) > 0.9 * (pb[2] - pb[0]):
@@ -476,9 +486,10 @@ def held_objects(tier, name, people, lab):
 
 def enclosed_gaps(tier, name, people, lab, rows):
     """Unassigned regions completely surrounded by singers (hairline SAM gaps
-    ignored): a missed body part, or a glimpse of the stalls between bodies. Left
-    alone they would become holes once everyone is revealed. Owner: the neighbour
-    whose wrist keypoint lies inside, else the rear-most neighbour."""
+    ignored). One containing a neighbour's wrist keypoint is a missed hand and goes
+    to that neighbour; tiny ones (mask slop) go to the rear-most neighbour; larger
+    ones are glimpses of the stalls between bodies and stay transparent, so the
+    base's own scenery shows there."""
     H, W = lab.shape
     objs, debug = [], []
     kps = pose_keypoints(tier, name, people)
@@ -513,7 +524,12 @@ def enclosed_gaps(tier, name, people, lab, rows):
                 if cf >= 0.5 and 0 <= int(y) < H and 0 <= int(x) < W and Rd[int(y), int(x)]:
                     owner, via = j, "wrist inside"
         if owner < 0:
-            owner, via = max(adjacent, key=lambda j: (rows[j], -people[j]["head"][1])), "enclosed, rear-most"
+            if R.sum() > 40:
+                # a glimpse of scenery between bodies: the base's own scenery shows there
+                debug.append(dict(kind="enclosed", box=[0.0, 0.0, 0.0, 0.0], ok=False, owner=-1,
+                                  area=int(R.sum()), why="scenery glimpse", score=1.0))
+                continue
+            owner, via = max(adjacent, key=lambda j: (rows[j], -people[j]["head"][1])), "slop, rear-most"
         ys, xs = np.nonzero(R)
         x0, y0 = xs.min(), ys.min()
         l2 = np.where(R[y0:ys.max() + 1, x0:xs.max() + 1], 8.0, -8.0).astype(np.float32)
@@ -1056,10 +1072,13 @@ def matte_person(tier, lab, i, front_of_i, logits_i, hidden):
     gap = (L == -1) & ~M
     ext = (dil(M, 5) & (FRONT | (gap & dil(FRONT, 3)))) | (dil(M, 3) & HID & gap)
     core = M | ext
-    # Unknown band: around the outline facing background / people behind i, plus
-    # SAM-uncertain pixels (|logit| small) near the outline (hair, fuzzy robes).
-    edge_zone = dil(M, 3) & ~ero(M, 2)
-    uncertain = (np.abs(lg) < 2.5) & dil(M, 4)
+    # Unknown band: a thin strip around the outline facing background / people
+    # behind i, a little wider (3px) where SAM was unsure (hair, fuzzy robe edges).
+    # Interior pixels are never unknown: with similar colours on both sides (dark
+    # robe against dark robe, blonde hair against a lit wall) closed-form matting
+    # would otherwise make whole sleeves or hair translucent.
+    edge_zone = dil(M, 2) & ~ero(M, 1)
+    uncertain = (np.abs(lg) < 2.5) & dil(M, 3) & ~ero(M, 3)
     unknown = (edge_zone | uncertain) & ~dil(FRONT | (HID & (L == -1)), 2) & ~ext
     # never let the band eat into other people's interiors in front of i
     tri = np.zeros(M.shape, np.float64)
@@ -1085,6 +1104,18 @@ def matte_person(tier, lab, i, front_of_i, logits_i, hidden):
         for k in range(1, n):
             if k != main and st[k, cv2.CC_STAT_AREA] < 30:
                 a[cc == k] = 0
+    # Pinholes: small transparent pockets fully enclosed by the body are mask slop
+    # (never a neighbour's pixels: only unassigned / own pixels are filled).
+    a[ero(M, 3)] = 1.0  # the body interior is always opaque, whatever the matting thought
+    inv = (a < 0.9).astype(np.uint8)
+    n, cc, st, _ = cv2.connectedComponentsWithStats(inv, 4)
+    for k in range(1, n):
+        x, y, w, h, area = st[k]
+        if area > 60 or x == 0 or y == 0 or x + w >= a.shape[1] or y + h >= a.shape[0]:
+            continue
+        hole = cc == k
+        if np.isin(L[hole], (-1, i)).all():
+            a[hole] = 1.0
     orig = img[..., ::-1].astype(np.float64) / 255
     use_orig = a >= 0.999
     rgb_out = np.where(use_orig[..., None], orig, fg)
@@ -1192,7 +1223,6 @@ def main():
     old = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
     tiers_out = {t["name"]: t for t in (old or {}).get("tiers", [])}
     report = {}
-    all_sprite_boxes = []
 
     for name in args.tiers:
         log(f"== {name}")
@@ -1286,8 +1316,6 @@ def main():
             people_out.append(dict(file=fn, x=int(x), y=int(y), w=int(rgba.shape[1]), h=int(rgba.shape[0]),
                                    row=int(rows[i]), order=k, z=z.index(i), cx=round(cx, 1), cy=round(cy, 1),
                                    head=[round(people[i]["head"][0] + dx, 1), round(people[i]["head"][1] + dy, 1)]))
-            all_sprite_boxes.append((x, y, x + rgba.shape[1], y + rgba.shape[0]))
-        people_out.sort(key=lambda p: p["z"])
         tiers_out[name] = dict(name=name, count=N, rows=int(rows.max()) + 1, offset=[dx, dy], people=people_out)
         report[name] = dict(count=N, rows=int(rows.max()) + 1, row_sizes=np.bincount(rows).tolist(), dx=dx, dy=dy,
                             registration=reg, occlusion_edges=len(front_edges),
@@ -1297,24 +1325,10 @@ def main():
         (WORK / f"occlusion_{name}.json").write_text(json.dumps(
             {f"{i}-{j}": r for (i, j), r in rel.items()}, indent=1))
 
-    # Foreground crop: union of where sprites can be, plus margin.
-    prev = json.loads(manifest_path.read_text()).get("_sprite_extent") if manifest_path.exists() else None
-    if prev:
-        all_sprite_boxes.append(tuple(prev))
-    sx0 = min(b[0] for b in all_sprite_boxes)
-    sx1 = max(b[2] for b in all_sprite_boxes)
-    sy1 = max(b[3] for b in all_sprite_boxes)
-    sy0 = min(b[1] for b in all_sprite_boxes)
-    ys = np.nonzero(fg_alpha[:, sx0:sx1].max(1) > 0)[0]
-    fy0 = int(max(sy0, ys.min()))
-    fy1 = int(min(H, sy1 + 8))
-    fx0, fx1 = int(max(0, sx0 - 4)), int(min(W, sx1 + 4))
+    # Foreground: the base image under its alpha, cropped to the alpha's bounding box.
+    ys, xs = np.nonzero(fg_alpha > 0)
+    fx0, fy0, fx1, fy1 = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
     fg_rgba = np.dstack([base_rgb[fy0:fy1, fx0:fx1], np.round(fg_alpha[fy0:fy1, fx0:fx1] * 255).astype(np.uint8)])
-    # trim fully transparent border
-    a = fg_rgba[..., 3]
-    ys, xs = np.nonzero(a)
-    fg_rgba = fg_rgba[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
-    fx0, fy0 = fx0 + int(xs.min()), fy0 + int(ys.min())
     save_webp(OUT_DIR / "foreground.webp", fg_rgba, lossless=True)
 
     tiers_sorted = sorted(tiers_out.values(), key=lambda t: t["count"])
@@ -1322,10 +1336,10 @@ def main():
         canvas=dict(w=W, h=H),
         foreground=dict(file="foreground.webp", x=fx0, y=fy0, w=int(fg_rgba.shape[1]), h=int(fg_rgba.shape[0])),
         tiers=tiers_sorted,
-        _notes=("people[] are listed in paint order (back to front, also given as z); reveal people with "
-                "order < k. Draw base, then visible sprites in z order, then foreground. x,y are top-left in "
-                "base-image pixels; cx,cy = alpha-weighted centroid; head = face centre."),
-        _sprite_extent=[int(sx0), int(sy0), int(sx1), int(sy1)],
+        _notes=("To show the first k singers of a tier: draw the base image, then the people with order < k "
+                "from the highest order down to 0 (= ascending z; a newly revealed singer goes behind the ones "
+                "already shown), then the foreground. x,y,w,h: sprite rect in base-image pixels. row 0 = front. "
+                "cx,cy: alpha-weighted centroid; head: face centre. offset: tier-image -> base translation."),
     )
     manifest_path.write_text(json.dumps(manifest, indent=1))
     (WORK / "report.json").write_text(json.dumps(report, indent=1))
@@ -1343,7 +1357,9 @@ def verify(base_rgb, manifest):
     X0, Y0, X1, Y1 = SCENE
     for t in manifest["tiers"]:
         name = t["name"]
-        ppl = t["people"]  # paint order
+        for old in vdir.glob(f"{name}_*.png"):
+            old.unlink()
+        ppl = t["people"]  # reveal order; z = paint order
         sp = {p["order"]: (np.array(Image.open(OUT_DIR / p["file"]).convert("RGBA")), p["x"], p["y"], p["z"])
               for p in ppl}
         n = len(ppl)

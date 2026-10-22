@@ -7,7 +7,7 @@
 ## Features
 
 **Perform page**
-- **Choir Size** adds singers one at a time (up to 48). You watch them walk into the choir loft as you turn the knob.
+- **Choir Size** adds singers one at a time (up to 40). You watch them walk into the choir loft as you turn the knob.
 - **Volume, Space, Reverb, Tone, Presence** shape the sound. Space spreads the singers across the stage and adds early reflections.
 - **Harmony Mode**:
   - Full Choir: classic four-part hymn voicing with voice leading.
@@ -92,7 +92,7 @@ There is also a command-line renderer, handy for testing the engine without a DA
 input ─► YIN pitch tracker ─► harmoniser ─────────► control timeline (notes per section, per 5 ms)
    │        (key detection)    (live, or the                     │
    │                            learned score)                   ▼
-   └────► PSOLA analyser ─► up to 48 singers ─► S/A/T/B buses ─► tone · glue ─► cathedral FDN reverb ─► + lead ─► limiter
+   └────► PSOLA analyser ─► up to 40 singers ─► S/A/T/B buses ─► tone · glue ─► cathedral FDN reverb ─► + lead ─► limiter
                             (Words: pitch-shifted grains of your voice;
                              vowels: glottal source + SATB formant filters;
                              each singer with its own timing, detune, drift and vibrato)

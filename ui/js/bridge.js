@@ -99,7 +99,7 @@
       const demoLevel = window.SC_DEMO_LEVEL;
       const singing = demoLevel !== undefined ? demoLevel > 0.02 : (phase < 0.9 && (t % 1.4) < 1.3);
       const env = demoLevel !== undefined ? Math.min(1, demoLevel * 2.2) : singing ? 0.55 + 0.25 * Math.sin(t * 2.1) + 0.12 * Math.random() : 0.02 * Math.random();
-      const total = Math.round(values.choirSize / 100 * 48);
+      const total = Math.round(values.choirSize / 100 * 40);
       const counts = [Math.round(total * 0.28), Math.round(total * 0.26), Math.round(total * 0.22)];
       counts.push(Math.max(0, total - counts[0] - counts[1] - counts[2]));
       const shift = demoLevel !== undefined ? -5 : 0;
@@ -145,7 +145,7 @@
         if (learn.progress >= 1) {
           clearInterval(learnTimer);
           learn.phase = "rendered"; learn.hasStems = true; learn.stale = false;
-          learn.text = "LEARNED 0:43 · C MAJOR · 4 PHRASES · 105 NOTES  ·  " + Math.round(values.choirSize / 100 * 48) + " SINGERS RENDERED IN 3.1 S";
+          learn.text = "LEARNED 0:43 · C MAJOR · 4 PHRASES · 105 NOTES  ·  " + Math.round(values.choirSize / 100 * 40) + " SINGERS RENDERED IN 3.1 S";
         }
         status();
       }, 120);
@@ -153,7 +153,7 @@
 
     function receive(msg) {
       if (msg.type === "ready") {
-        emit("init", { params: defs.map((d) => Object.assign({}, d, { value: values[d.id] })), tab: "perform", version: "1.0.0 (preview)", standalone: false, latencyMs: 38.7, maxSingers: 48 });
+        emit("init", { params: defs.map((d) => Object.assign({}, d, { value: values[d.id] })), tab: "perform", version: "1.0.0 (preview)", standalone: false, latencyMs: 38.7, maxSingers: 40 });
         status();
         setInterval(meters, 33);
       } else if (msg.type === "set") {

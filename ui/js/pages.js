@@ -169,7 +169,7 @@
     ol.style.cssText = "margin:4px 0 0;padding-left:22px";
     [
       "<b>Sing</b> into the plugin on your vocal track. The choir harmonises you live in the key you choose (or Auto).",
-      "<b>Choir Size</b> adds singers one by one. Up to 48 voices fill the loft.",
+      "<b>Choir Size</b> adds singers one by one. Up to 40 voices fill the loft.",
       "<b>Learn</b>: press it, play your track and press it again. Sanctuary studies the whole melody for smarter, phrase-aware harmony.",
       "<b>Render</b> sings every voice at the highest quality. It plays back in sync with your song, and you can export stems.",
       "<b>Freeze</b> holds the current chord forever, for pads and endings.",

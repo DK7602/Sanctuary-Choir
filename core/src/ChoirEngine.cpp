@@ -5,7 +5,7 @@
 
 namespace sc
 {
-static constexpr int kSingersPerSection = 24;
+static constexpr int kSingersPerSection = 20;
 static constexpr int kChunk = 64;
 static constexpr float kMinInputHz = 75.0f;
 static constexpr float kMaxInputHz = 1150.0f;

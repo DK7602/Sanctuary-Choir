@@ -115,7 +115,7 @@ const char* const* getResponseNames(); // 2 entries
 
 /** Number of singers for a Choir Size percentage. */
 int singersForChoirSize (float percent);
-constexpr int kMaxSingers = 48;
+constexpr int kMaxSingers = 40;   // matches the 40 singers drawn in the full choir loft
 
 class ChoirEngine
 {

@@ -125,7 +125,9 @@
       for (const i of order) {
         const t = this.tiers[i];
         if (t.alpha <= 0.001) continue;
-        const people = t.people.slice().sort((a, b) => (b.row || 0) - (a.row || 0) || a.order - b.order);
+        // Paint from the highest reveal order down to 0: a newly revealed singer stands
+        // behind the ones already shown (the art pipeline guarantees occluders come first).
+        const people = t.people.slice().sort((a, b) => b.order - a.order);
         for (const p of people) {
           const a = p.alpha * t.alpha;
           if (a <= 0.001 || !p.img) continue;
