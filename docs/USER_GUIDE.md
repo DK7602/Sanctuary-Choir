@@ -32,7 +32,7 @@ Pro Tools (AAX) isn't supported yet.
   - *Words* keeps your lyrics: every singer is your own voice, re-pitched. Sanctuary hears whether you have a low or a high voice. With a man singing lead, the sopranos and altos get a woman's vocal tract and lose the male "ring"; with a woman singing lead, the tenors and basses gain it.
   - *Ah, Oh, Oo, Ee, Eh* sing pure vowels.
   - *Mm* hums.
-  - The vowel modes can sing with **recordings of real singers**: see [Recording your own choir voices](RECORDING_YOUR_CHOIR.md).
+  - The vowel modes are sung by **real recorded singers** (Sanctuary Voices, installed with the plug-in). *Settings → Choir Voices* switches between **SANCTUARY** (recorded), **YOUR OWN…** (your singers; see [Recording your own choir voices](RECORDING_YOUR_CHOIR.md)) and **SYNTH** (the synthesised voices). *Mm* (humming) is always synthesised.
 
 ### Latency: Studio or Live
 

@@ -29,6 +29,9 @@ SanctuaryProcessor::SanctuaryProcessor()
     learn.getVoices = [this] { return voices.getCurrent(); };
     voices.onStatusChanged = [this] { ++statusVersion; };
     voices.onSetChanged = [this] { learn.renderSettingsChanged(); };   // rendered takes used the old voices
+    // The recorded Sanctuary Voices are the default when they are installed.
+    if (const auto bundled = ChoirVoices::findBundledVoices(); bundled.isDirectory())
+        voices.loadFolder (bundled);
     startTimerHz (10);
 }
 
@@ -277,6 +280,7 @@ void SanctuaryProcessor::getStateInformation (MemoryBlock& destData)
     tree.setProperty ("editorHeight", editorHeight, nullptr);
     tree.setProperty ("detectedKey", rememberedKey.load(), nullptr);   // Auto key starts right next time
     tree.setProperty ("voicesFolder", voices.getFolder().getFullPathName(), nullptr);
+    tree.setProperty ("voicesBuiltIn", voices.userChoseBuiltIn(), nullptr);
     std::unique_ptr<XmlElement> xml (tree.createXml());
 
     MemoryOutputStream out (destData, false);
@@ -332,15 +336,18 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
         uiTab = tree.getProperty ("uiTab", "perform").toString();
         editorWidth = tree.getProperty ("editorWidth", 0);
         editorHeight = tree.getProperty ("editorHeight", 0);
+        // Choir voices: the user's own folder, the built-in synth on purpose, or (default) the
+        // installed Sanctuary Voices that the constructor already started loading.
         const String voicesFolder = tree.getProperty ("voicesFolder", "").toString();
-        if (voicesFolder.isNotEmpty() && File::isAbsolutePath (voicesFolder) && File (voicesFolder).isDirectory())
+        if ((bool) tree.getProperty ("voicesBuiltIn", false))
+        {
+            if (! voices.userChoseBuiltIn())
+                voices.clear();
+        }
+        else if (voicesFolder.isNotEmpty() && File::isAbsolutePath (voicesFolder) && File (voicesFolder).isDirectory())
         {
             if (File (voicesFolder) != voices.getFolder())
                 voices.loadFolder (File (voicesFolder));
-        }
-        else if (voices.getLive() != nullptr)
-        {
-            voices.clear();
         }
         const int key = tree.getProperty ("detectedKey", -1);
         if (key >= 0 && key < 24)

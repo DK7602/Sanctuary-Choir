@@ -1,6 +1,6 @@
 # Recording your own choir voices
 
-Sanctuary Choir's vowel modes (Ah, Oh, Oo, Ee, Eh, Mm) can sing with recordings of real singers instead of the built-in synthesised voices. Record a few held notes per section, point Sanctuary at the folder, and the whole choir sings with those voices, in any key and with the harmony it writes for you.
+Sanctuary Choir's vowel modes (Ah, Oh, Oo, Ee, Eh, Mm) already sing with real recorded singers (Sanctuary Voices). You can also give them **your own** singers' voices: your church choir, your band, yourself. Record a few held notes per section, point Sanctuary at the folder, and the whole choir sings with those voices, in any key and with the harmony it writes for you.
 
 You don't need a studio or a big session. One singer per section already works. Two to four singers per section, each recorded on their own, gives a fuller and more natural choir.
 
@@ -51,10 +51,10 @@ My Choir/
 
 ## Loading them
 
-1. Open **Settings → Choir Voices → LOAD RECORDINGS** and choose the folder (`My Choir` above).
+1. Open **Settings → Choir Voices → YOUR OWN…** and choose the folder (`My Choir` above).
 2. Sanctuary cuts, tunes, loops and levels every note. The panel then shows something like *My Choir · 4 SECTIONS · 2 VOWELS · 64 NOTES*.
 3. Choose a vowel **Vocal Type** (Ah, Oo…). The choir now sings with your singers. **Words** mode still uses your own lead voice.
-4. **BUILT-IN** switches back to the synthesised voices.
+4. **SANCTUARY** switches back to the installed recorded voices, **SYNTH** to the synthesised ones.
 
 Your project remembers the folder, so keep it where it is (or load it again after moving it). If you rendered a take before loading the voices, press **RENDER** again to hear the take with them.
 

@@ -51,6 +51,7 @@
   - Low/high cut, Warmth and a Glue compressor on the choir bus.
 - **MIDI**: hold chords on a keyboard to dictate the harmony. With no voice coming in, the choir becomes a playable instrument.
 - **Live monitoring**: your voice comes through instantly while you record; the choir follows about 15 ms behind (Settings → Monitoring).
+- **Sanctuary Voices**: real recorded singers sing the vowel modes (Ah, Oh, Oo, Ee, Eh): 753 held notes from 19 professional singers, sorted into SATB sections. Installed with the plug-in; switch back to the synthesised voices any time (Settings → Choir Voices).
 - **Your own choir**: record a few held notes per section and the vowel modes sing with those real voices ([guide](docs/RECORDING_YOUR_CHOIR.md)).
 - **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
 - **Chord Speed** and a one-click **key lock** for the detected key.
@@ -116,4 +117,5 @@ The plugin reports its latency (about 39 ms) so your DAW keeps everything in tim
 
 - Sanctuary Choir is built on [JUCE](https://juce.com). JUCE is available under the AGPLv3 or a commercial JUCE licence (free "Personal" tier for small revenue). If you sell the plug-in closed-source, get the appropriate JUCE licence.
 - Fonts: Cinzel, Cormorant Garamond and Montserrat (SIL Open Font License, see `ui/assets/fonts`).
+- Sanctuary Voices (`voices/SanctuaryVoices`) are cut from [VocalSet](https://zenodo.org/records/1442513) by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (ISMIR 2018), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credit them wherever you distribute the plug-in; `voices/SanctuaryVoices/CREDITS.txt` says what was changed. `tools/voicepack` rebuilds the pack from the dataset.
 - Artwork: the UI is built from the Sanctuary Choir design mockups in `design/mockups/`.

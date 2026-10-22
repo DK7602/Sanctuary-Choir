@@ -29,7 +29,7 @@ namespace
 
     inline float at (const SampleZone& z, int64_t i) noexcept
     {
-        return i >= 0 && i < (int64_t) z.data.size() ? z.data[(size_t) i] : 0.0f;
+        return i >= 0 && i < (int64_t) z.pcm.size() ? (float) z.pcm[(size_t) i] * z.scale : 0.0f;
     }
 
     inline float interp (const SampleZone& z, double pos) noexcept
@@ -65,19 +65,19 @@ int SampleLayer::nearest (float midi, int variant) const noexcept
 {
     if (zones.empty())
         return -1;
-    // zones are sorted by root: find the closest, then gather takes of the same note.
-    int best = 0;
-    float bestDist = 1.0e9f;
-    for (int i = 0; i < (int) zones.size(); ++i)
-    {
-        const float d = std::abs (zones[(size_t) i].rootMidi - midi);
-        if (d < bestDist) { bestDist = d; best = i; }
-    }
-    int lo = best, hi = best;
-    while (lo > 0 && std::abs (zones[(size_t) lo - 1].rootMidi - zones[(size_t) best].rootMidi) < 0.5f) --lo;
-    while (hi + 1 < (int) zones.size() && std::abs (zones[(size_t) hi + 1].rootMidi - zones[(size_t) best].rootMidi) < 0.5f) ++hi;
-    const int count = hi - lo + 1;
-    return lo + (int) ((unsigned) variant % (unsigned) count);
+    // Cost: how far the recording must be re-pitched, plus a little for short notes (their
+    // loops are shorter). Every recording within a semitone of the best is a candidate, and
+    // each choir member takes a different one: real different singers, not copies.
+    auto cost = [midi] (const SampleZone& z) { return std::abs (z.rootMidi - midi) + (z.seconds() < 1.2f ? 0.6f : 0.0f); };
+    float best = 1.0e9f;
+    for (const auto& z : zones)
+        best = std::min (best, cost (z));
+    int candidates[64];
+    int count = 0;
+    for (int i = 0; i < (int) zones.size() && count < 64; ++i)
+        if (cost (zones[(size_t) i]) <= best + 1.0f)
+            candidates[count++] = i;
+    return candidates[(unsigned) variant % (unsigned) std::max (1, count)];
 }
 
 //==============================================================================
@@ -108,7 +108,12 @@ void SampleSet::addNote (int section, int vowel, const float* x, int64_t n, doub
     SampleZone z;
     z.sampleRate = sampleRate;
     z.rootMidi = rootMidi;
-    z.data.assign (x, x + n);
+    float peak = 1.0e-6f;
+    for (int64_t i = 0; i < n; ++i) peak = std::max (peak, std::abs (x[i]));
+    z.scale = peak / 32767.0f;
+    z.pcm.resize ((size_t) n);
+    for (int64_t i = 0; i < n; ++i)
+        z.pcm[(size_t) i] = (int16_t) std::lround (x[i] / peak * 32767.0f);
     layers[(size_t) section][(size_t) vowel].zones.push_back (std::move (z));
 }
 
@@ -121,14 +126,14 @@ void SampleSet::finalise()
             std::sort (layer.zones.begin(), layer.zones.end(), [] (const SampleZone& a, const SampleZone& b) { return a.rootMidi < b.rootMidi; });
             for (auto& z : layer.zones)
             {
-                const int64_t len = (int64_t) z.data.size();
+                const int64_t len = z.length();
                 const double sr = z.sampleRate;
 
                 // Short fades so the edges never click.
                 const int64_t fadeIn = std::min<int64_t> (len / 4, (int64_t) (0.004 * sr));
                 const int64_t fadeOut = std::min<int64_t> (len / 4, (int64_t) (0.03 * sr));
-                for (int64_t i = 0; i < fadeIn; ++i) z.data[(size_t) i] *= (float) i / (float) fadeIn;
-                for (int64_t i = 0; i < fadeOut; ++i) z.data[(size_t) (len - 1 - i)] *= (float) i / (float) fadeOut;
+                for (int64_t i = 0; i < fadeIn; ++i) z.pcm[(size_t) i] = (int16_t) (z.pcm[(size_t) i] * i / fadeIn);
+                for (int64_t i = 0; i < fadeOut; ++i) z.pcm[(size_t) (len - 1 - i)] = (int16_t) (z.pcm[(size_t) (len - 1 - i)] * i / fadeOut);
 
                 // Sustain loop: after the attack, ending before the release.
                 z.loopStart = std::max<int64_t> ((int64_t) (0.3 * sr), len * 35 / 100);
@@ -142,13 +147,10 @@ void SampleSet::finalise()
 
                 // Level: the sustain at a common loudness, so notes and singers blend evenly.
                 double e = 0.0;
-                for (int64_t i = z.loopStart; i < z.loopEnd; ++i) e += (double) z.data[(size_t) i] * z.data[(size_t) i];
-                const double rms = std::sqrt (e / (double) std::max<int64_t> (1, z.loopEnd - z.loopStart));
+                for (int64_t i = z.loopStart; i < z.loopEnd; ++i) e += (double) z.pcm[(size_t) i] * z.pcm[(size_t) i];
+                const double rms = std::sqrt (e / (double) std::max<int64_t> (1, z.loopEnd - z.loopStart)) * z.scale;
                 if (rms > 1.0e-6)
-                {
-                    const float g = (float) (kTargetRms / rms);
-                    for (auto& v : z.data) v *= g;
-                }
+                    z.scale *= (float) (kTargetRms / rms);
             }
         }
     }
@@ -162,6 +164,8 @@ const SampleLayer* SampleSet::layerFor (int section, VocalType vowel) const noex
     const int v = (int) vowel;
     if (v >= 0 && v < kVowels && ! s[(size_t) v].empty())
         return &s[(size_t) v];
+    if (vowel == VocalType::Mm)
+        return nullptr;   // no recorded humming: the synthesised hum is closer than an open vowel
     if (! s[0].empty())
         return &s[0];
     for (const auto& layer : s)
@@ -214,6 +218,15 @@ int SampleSet::sectionFromPath (const std::string& path)
         else if (t == "bass" || t == "basses" || t == "bas" || t == "b1" || t == "b2" || t == "baritone") found = Bass;
     }
     return found;   // the last match wins (file name over folder name)
+}
+
+float SampleSet::rootFromPath (const std::string& path)
+{
+    float root = -1.0f;
+    for (const auto& t : tokens (path))
+        if ((t.size() == 5 || t.size() == 6) && t[0] == 'm' && std::all_of (t.begin() + 1, t.end(), [] (char c) { return c >= '0' && c <= '9'; }))
+            root = (float) std::atoi (t.c_str() + 1) / 100.0f;
+    return root;
 }
 
 int SampleSet::vowelFromPath (const std::string& path)

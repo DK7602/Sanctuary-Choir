@@ -1,0 +1,18 @@
+Sanctuary Voices - recorded choir voices for Sanctuary Choir
+=============================================================
+
+These recordings come from VocalSet, a singing voice dataset by
+Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (2018):
+
+  VocalSet: A Singing Voice Dataset. Proceedings of the 19th International
+  Society for Music Information Retrieval Conference (ISMIR), 2018.
+  https://zenodo.org/records/1442513   DOI 10.5281/zenodo.1442513
+
+VocalSet is licensed under the Creative Commons Attribution 4.0 International
+licence (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+
+Changes made for Sanctuary Choir: held notes were cut from the singers'
+straight-tone long tones, scales and arpeggios, checked for steady pitch,
+trimmed, sorted into soprano, alto, tenor and bass sections by voice and pitch,
+and re-encoded as Ogg Vorbis. The pitch of each note is written in its file
+name (m6312 = MIDI note 63.12). Rebuild with tools/voicepack.

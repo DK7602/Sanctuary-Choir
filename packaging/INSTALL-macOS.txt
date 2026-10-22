@@ -12,6 +12,8 @@ Manual install instead:
      Sanctuary Choir.vst3       ->  /Library/Audio/Plug-Ins/VST3/        (or ~/Library/Audio/Plug-Ins/VST3/)
      Sanctuary Choir.component  ->  /Library/Audio/Plug-Ins/Components/  (or ~/Library/Audio/Plug-Ins/Components/)
    Sanctuary Choir.app is a standalone version you can open directly.
+   Recorded choir voices: copy the "SanctuaryVoices" folder to
+     /Library/Application Support/Sanctuary Choir/Voices/
 
 2. These builds are not notarised yet, so macOS may block them the first time.
    Open Terminal and run (adjust the paths if you used the user folders):

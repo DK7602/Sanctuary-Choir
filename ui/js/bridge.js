@@ -79,7 +79,7 @@
     const learn = { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", progress: 0, hasTake: false, hasStems: false, stale: false, previewing: false };
     let learnTimer = null;
 
-    const voices = { loading: false, name: "", text: "", error: "" };
+    const voices = { loading: false, name: "Sanctuary Voices", text: "4 SECTIONS \u00b7 5 VOWELS \u00b7 753 NOTES", error: "", bundled: true, usingBundled: true };
     function status() {
       emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices) });
     }
@@ -173,10 +173,11 @@
           case "load": emit("toast", { text: "In the plugin this opens a file browser for a vocal take" }); setTimeout(stopLearnSim, 300); break;
           case "export": emit("toast", { text: learn.hasStems ? "Stems saved to Documents/Sanctuary Choir/Exports" : "Render first, then export the stems" }); break;
           case "voicesLoad":
-            Object.assign(voices, { loading: true, name: "", text: "", error: "" }); status();
+            Object.assign(voices, { loading: true, name: "", text: "", error: "", usingBundled: false }); status();
             setTimeout(() => { Object.assign(voices, { loading: false, name: "St. Mark's Choir", text: "4 SECTIONS \u00b7 2 VOWELS \u00b7 96 NOTES" }); status(); }, 900);
             break;
-          case "voicesClear": Object.assign(voices, { loading: false, name: "", text: "", error: "" }); status(); break;
+          case "voicesBundled": Object.assign(voices, { loading: false, name: "Sanctuary Voices", text: "4 SECTIONS \u00b7 5 VOWELS \u00b7 753 NOTES", error: "", usingBundled: true }); status(); break;
+          case "voicesClear": Object.assign(voices, { loading: false, name: "", text: "", error: "", usingBundled: false }); status(); break;
           case "preview": learn.previewing = !learn.previewing; status(); break;
           case "presetLoad": presetIndex = msg.index; status(); break;
           case "presetNext": presetIndex = (presetIndex + 1) % presets.length; status(); break;

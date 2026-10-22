@@ -105,7 +105,11 @@ int main (int argc, char** argv)
             for (const auto& ch : rec.channels)
                 for (size_t i = 0; i < m.size(); ++i)
                     m[i] += ch[i] / (float) rec.channels.size();
-            recorded.addRecording (section, std::max (0, SampleSet::vowelFromPath (rel)), m.data(), (int64_t) m.size(), rec.sampleRate);
+            const int vowel = std::max (0, SampleSet::vowelFromPath (rel));
+            if (const float root = SampleSet::rootFromPath (rel); root > 0.0f)
+                recorded.addNote (section, vowel, m.data(), (int64_t) m.size(), rec.sampleRate, root);
+            else
+                recorded.addRecording (section, vowel, m.data(), (int64_t) m.size(), rec.sampleRate);
         }
         recorded.finalise();
         std::printf ("recorded voices: %s\n", recorded.describe().c_str());

@@ -218,25 +218,32 @@
     const voices = el("div", "group", rightCol);
     voices.style.cssText = "padding:10px 14px";
     const vHead = el("div", "", voices);
-    vHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
+    vHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
     el("h3", "", vHead, "CHOIR VOICES").style.margin = "0";
-    const vBtns = el("div", "", vHead);
-    vBtns.style.cssText = "display:flex;gap:8px";
-    const vLoad = el("button", "big-btn small", vBtns, "LOAD RECORDINGS");
-    vLoad.title = "Choose a folder of recordings: held notes per section and vowel (see the guide)";
-    vLoad.addEventListener("click", () => SC.send({ type: "cmd", name: "voicesLoad" }));
-    const vClear = el("button", "big-btn small", vBtns, "BUILT-IN");
-    vClear.title = "Go back to the built-in synthesised voices";
-    vClear.addEventListener("click", () => SC.send({ type: "cmd", name: "voicesClear" }));
+    const vBtns = el("div", "pill-row", vHead);
+    const vChoice = (label, tip, cmd) => {
+      const b = el("button", "pill", vBtns, label);
+      b.title = tip;
+      b.addEventListener("click", () => SC.send({ type: "cmd", name: cmd }));
+      return b;
+    };
+    const vSanctuary = vChoice("SANCTUARY", "Real recorded singers, installed with Sanctuary Choir", "voicesBundled");
+    const vOwn = vChoice("YOUR OWN\u2026", "Load a folder with recordings of your own singers (see the guide)", "voicesLoad");
+    const vBuiltIn = vChoice("SYNTH", "The built-in synthesised voices", "voicesClear");
     const vText = el("p", "", voices);
-    vText.style.cssText = "font-size:15.5px;line-height:1.3;margin-top:6px";
+    vText.style.cssText = "font-size:15px;line-height:1.3;margin-top:6px";
     const showVoices = (v) => {
       v = v || {};
-      vClear.disabled = !v.name && !v.loading;
-      if (v.loading) vText.innerHTML = "<b>Loading</b> the recordings\u2026";
+      const own = !!v.name && !v.usingBundled;
+      vSanctuary.classList.toggle("on", !!v.usingBundled);
+      vOwn.classList.toggle("on", own || !!v.loading && !v.usingBundled);
+      vBuiltIn.classList.toggle("on", !v.name && !v.loading);
+      vSanctuary.disabled = v.bundled === false;
+      if (v.loading) vText.innerHTML = "<b>Loading</b> the recorded voices\u2026";
       else if (v.error) vText.textContent = v.error;
-      else if (v.name) vText.innerHTML = "<b>" + v.name.replace(/[<>&]/g, "") + "</b> \u00b7 " + (v.text || "") + ". The vowel modes (Ah, Oh, Oo\u2026) sing with these voices.";
-      else vText.innerHTML = "Built-in voices. Load recordings of real singers (held notes per section and vowel) to sing the vowel modes with them.";
+      else if (v.usingBundled) vText.innerHTML = "<b>Sanctuary Voices</b>: real singers sing the vowel modes (Ah, Oh, Oo, Ee, Eh). Recordings from VocalSet by Wilkins, Seetharaman, Wahl & Pardo, CC BY 4.0.";
+      else if (own) vText.innerHTML = "<b>" + v.name.replace(/[<>&]/g, "") + "</b> \u00b7 " + (v.text || "") + ": your singers sing the vowel modes.";
+      else vText.innerHTML = "Synthesised voices sing the vowel modes." + (v.bundled === false ? " Install Sanctuary Voices for real recorded singers." : "");
     };
     showVoices(null);
 

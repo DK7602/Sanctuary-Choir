@@ -348,7 +348,15 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
     else if (name == "voicesClear")
     {
         processor.getVoices().clear();
-        toast ("Back to the built-in voices");
+        toast ("Built-in (synthesised) voices");
+    }
+    else if (name == "voicesBundled")
+    {
+        const auto bundled = ChoirVoices::findBundledVoices();
+        if (bundled.isDirectory())
+            processor.getVoices().loadFolder (bundled);
+        else
+            toast ("Sanctuary Voices are not installed. Run the installer again and keep \"Sanctuary Voices\" ticked.");
     }
     else if (name == "export")
     {

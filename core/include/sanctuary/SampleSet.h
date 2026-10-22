@@ -14,13 +14,17 @@
 
 namespace sc
 {
-/** One recorded sustained note. */
+/** One recorded sustained note (16-bit to keep big sets small in memory). */
 struct SampleZone
 {
-    std::vector<float> data;     // mono, at sampleRate, level-normalised
+    std::vector<int16_t> pcm;    // mono, at sampleRate
+    float scale = 1.0f / 32767.0f;   // pcm -> level-normalised float
     double sampleRate = 48000.0;
     float rootMidi = 60.0f;      // pitch it was sung at (fractional MIDI, A4 = 69)
     int64_t loopStart = 0, loopEnd = 0, crossfade = 0;
+
+    int64_t length() const noexcept { return (int64_t) pcm.size(); }
+    float seconds() const noexcept { return (float) ((double) pcm.size() / sampleRate); }
 };
 
 /** All the notes of one section singing one vowel, sorted by pitch. */
@@ -29,7 +33,8 @@ struct SampleLayer
     std::vector<SampleZone> zones;
 
     bool empty() const noexcept { return zones.empty(); }
-    /** Index of the zone to play for a pitch; variant picks between takes of the same note. */
+    /** Index of the zone to play for a pitch. variant (the choir member) picks between the
+        recordings close enough to it, so different members sing different singers' notes. */
     int nearest (float midi, int variant) const noexcept;
 };
 
@@ -46,7 +51,8 @@ public:
     /** Sorts the notes and sets their loops and levels. Call once after adding everything. */
     void finalise();
 
-    /** Notes for a section and vowel (falls back to Ah, then to any vowel), or nullptr. */
+    /** Notes for a section and vowel (falls back to Ah, then to any vowel; humming falls back
+        to nothing, i.e. the synthesised hum), or nullptr. */
     const SampleLayer* layerFor (int section, VocalType vowel) const noexcept;
     int numNotes() const noexcept;
     int numSections() const noexcept;
@@ -60,6 +66,9 @@ public:
     /** Section (0-3) or vowel (0-5) named in a file path, -1 if none. */
     static int sectionFromPath (const std::string& path);
     static int vowelFromPath (const std::string& path);
+    /** Pitch written in a file name as "m6312" (= MIDI 63.12), or -1 if none: such files are
+        already cut to one note and need no analysis. */
+    static float rootFromPath (const std::string& path);
 
 private:
     std::array<std::array<SampleLayer, kVowels>, NumSections> layers;

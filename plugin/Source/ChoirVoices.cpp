@@ -1,8 +1,53 @@
 #include "ChoirVoices.h"
 
+#include <map>
+
 namespace sanctuary
 {
 using namespace juce;
+
+namespace
+{
+    // One copy of each loaded set per process, shared by every instance of the plug-in.
+    // Deliberately never destroyed: a loading thread may still finish while the host shuts
+    // down, after ordinary statics are gone.
+    struct Cache
+    {
+        std::mutex lock;
+        std::map<String, std::weak_ptr<sc::SampleSet>> sets;
+    };
+    Cache& cache()
+    {
+        static Cache* c = new Cache();
+        return *c;
+    }
+
+    String displayName (const File& dir)
+    {
+        return dir == ChoirVoices::findBundledVoices() ? String ("Sanctuary Voices") : dir.getFileName();
+    }
+}
+
+File ChoirVoices::findBundledVoices()
+{
+    const String rel = "Sanctuary Choir/Voices/SanctuaryVoices";
+    Array<File> places;
+   #if JUCE_MAC
+    places.add (File ("/Library/Application Support").getChildFile (rel));
+    places.add (File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Application Support").getChildFile (rel));
+   #elif JUCE_WINDOWS
+    places.add (File::getSpecialLocation (File::commonApplicationDataDirectory).getChildFile (rel));
+    places.add (File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile (rel));
+   #else
+    places.add (File::getSpecialLocation (File::userHomeDirectory).getChildFile (".local/share").getChildFile (rel));
+    places.add (File ("/usr/share").getChildFile (rel));
+    places.add (File ("/usr/local/share").getChildFile (rel));
+   #endif
+    for (const auto& f : places)
+        if (f.isDirectory())
+            return f;
+    return {};
+}
 
 ChoirVoices::ChoirVoices()
 {
@@ -24,12 +69,24 @@ void ChoirVoices::loadFolder (const File& dir)
     if (worker != nullptr && worker->joinable())
         worker->join();
     cancel = false;
+    choseBuiltIn = false;
     {
         std::lock_guard<std::mutex> g (lock);
         folder = dir;
         error.clear();
         pending.reset();
     }
+
+    // Already loaded by another instance? Share it.
+    {
+        std::lock_guard<std::mutex> g (cache().lock);
+        if (auto shared = cache().sets[dir.getFullPathName()].lock())
+        {
+            publish (shared);
+            return;
+        }
+    }
+
     progress = 0.0f;
     loading = true;
     if (onStatusChanged)
@@ -43,7 +100,7 @@ void ChoirVoices::loadFolder (const File& dir)
         files.sort();
 
         auto set = std::make_shared<sc::SampleSet>();
-        set->name = dir.getFileName().toStdString();
+        set->name = displayName (dir).toStdString();
         for (int i = 0; i < files.size() && ! cancel; ++i)
         {
             const auto& f = files.getReference (i);
@@ -69,13 +126,22 @@ void ChoirVoices::loadFolder (const File& dir)
                 for (int64 k = 0; k < len; ++k)
                     mono[(size_t) k] += src[k] * scale;
             }
-            set->addRecording (section, vowel, mono.data(), (int64_t) len, reader->sampleRate);
+            // Files named with their pitch ("..._m6312.ogg") are single notes, already cut.
+            if (const float root = sc::SampleSet::rootFromPath (path); root > 0.0f)
+                set->addNote (section, vowel, mono.data(), (int64_t) len, reader->sampleRate, root);
+            else
+                set->addRecording (section, vowel, mono.data(), (int64_t) len, reader->sampleRate);
             progress = (float) (i + 1) / (float) files.size();
         }
 
         if (! cancel)
         {
             set->finalise();
+            if (! set->isEmpty())
+            {
+                std::lock_guard<std::mutex> g (cache().lock);
+                cache().sets[dir.getFullPathName()] = set;
+            }
             std::lock_guard<std::mutex> g (lock);
             if (set->isEmpty())
                 error = "No usable recordings found. Name files or folders by section (soprano, alto, tenor, bass) "
@@ -89,6 +155,7 @@ void ChoirVoices::loadFolder (const File& dir)
 
 void ChoirVoices::clear()
 {
+    choseBuiltIn = true;
     cancel = true;
     if (worker != nullptr && worker->joinable())
         worker->join();
@@ -154,6 +221,8 @@ var ChoirVoices::getStatus() const
 {
     auto o = std::make_unique<DynamicObject>();
     o->setProperty ("loading", loading.load());
+    o->setProperty ("bundled", findBundledVoices().isDirectory());
+    o->setProperty ("usingBundled", current != nullptr && usesBundledVoices());
     o->setProperty ("progress", progress.load());
     {
         std::lock_guard<std::mutex> g (lock);

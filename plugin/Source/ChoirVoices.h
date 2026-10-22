@@ -25,10 +25,17 @@ public:
     std::function<void()> onStatusChanged;   // message thread
     std::function<void()> onSetChanged;      // message thread: a different set is now live
 
-    /** Loads every recording under the folder (message thread; returns at once). */
+    /** Loads every recording under the folder (message thread; returns at once). Sets that are
+        already loaded by another instance of the plug-in are shared, not loaded twice. */
     void loadFolder (const juce::File& folder);
     /** Back to the built-in synthesised voices. */
     void clear();
+
+    /** The recorded voices installed with Sanctuary Choir (Sanctuary Voices), if present. */
+    static juce::File findBundledVoices();
+    bool usesBundledVoices() const { return getFolder() == findBundledVoices() && getFolder() != juce::File(); }
+    /** The user switched to the built-in voices on purpose (saved with the project). */
+    bool userChoseBuiltIn() const noexcept { return choseBuiltIn; }
 
     /** The set the audio thread should sing with, or nullptr (audio thread, lock-free). */
     const sc::SampleSet* getLive() const noexcept { return live.load (std::memory_order_acquire); }
@@ -51,7 +58,7 @@ private:
     juce::File folder;
     juce::String error;
     std::atomic<bool> loading { false }, cancel { false };
-    bool wasLoading = false;
+    bool wasLoading = false, choseBuiltIn = false;
     std::atomic<float> progress { 0.0f };
     std::unique_ptr<std::thread> worker;
     std::shared_ptr<sc::SampleSet> pending;   // finished on the worker, published on the timer

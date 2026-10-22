@@ -8,6 +8,8 @@ EASIEST: double-click "Sanctuary Choir Setup.exe" and follow the steps.
 Manual install instead:
 1. Copy "Sanctuary Choir.vst3" (the whole folder) to:
      C:\Program Files\Common Files\VST3\
+   Recorded choir voices: copy the "SanctuaryVoices" folder to:
+     C:\ProgramData\Sanctuary Choir\Voices\
 
 2. Restart your DAW and rescan plug-ins. Load Sanctuary Choir as an effect on a vocal track.
 
