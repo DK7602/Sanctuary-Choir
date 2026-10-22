@@ -48,6 +48,11 @@ public:
     LearnSession& getLearn() noexcept { return learn; }
     sc::EngineSnapshot takeSnapshot() { return engine.takeSnapshot(); }
     sc::EngineParams currentParams() const;
+    /** Latency reported to the host: the full alignment delay in Studio mode, 0 in Live mode. */
+    int reportedLatency() const;
+    int getAlignedLatency() const noexcept { return engine.getLatencySamples(); }
+    int getLiveChoirLatency() const noexcept { return engine.getLiveChoirLatency(); }
+    bool isStandaloneApp() const noexcept { return standaloneApp; }
 
     /** Parameter ids changed since the last call (message thread). */
     juce::StringArray takeChangedParameters();
@@ -79,6 +84,7 @@ private:
     std::atomic<bool> harmonyDirty { false }, renderDirty { false };
     juce::uint32 lastHarmonyChange = 0;
     int64_t engineWritten = 0;
+    bool standaloneApp = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SanctuaryProcessor)
 };

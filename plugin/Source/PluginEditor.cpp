@@ -151,8 +151,8 @@ void SanctuaryEditor::sendInit()
     o->setProperty ("params", params);
     o->setProperty ("tab", processor.uiTab);
     o->setProperty ("version", JucePlugin_VersionString);
-    o->setProperty ("standalone", processor.wrapperType == AudioProcessor::wrapperType_Standalone);
-    o->setProperty ("latencyMs", 1000.0 * processor.getLatencySamples() / std::max (1.0, processor.getSampleRate()));
+    o->setProperty ("standalone", processor.isStandaloneApp());
+    addLatencyInfo (*o);
     o->setProperty ("maxSingers", sc::kMaxSingers);
     web->emitEventIfBrowserIsVisible ("init", var (o.release()));
     processor.takeChangedParameters();
@@ -211,7 +211,17 @@ void SanctuaryEditor::sendStatus()
     o->setProperty ("presets", presets.toVar());
     o->setProperty ("presetIndex", presets.getCurrentIndex());
     o->setProperty ("presetName", presets.getCurrentName());
+    addLatencyInfo (*o);
     web->emitEventIfBrowserIsVisible ("status", var (o.release()));
+}
+
+void SanctuaryEditor::addLatencyInfo (DynamicObject& o)
+{
+    const double rate = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
+    o.setProperty ("latencyMs", 1000.0 * processor.getAlignedLatency() / rate);
+    o.setProperty ("liveChoirMs", 1000.0 * processor.getLiveChoirLatency() / rate);
+    sentLatency = processor.getAlignedLatency();
+    sentRate = processor.getSampleRate();
 }
 
 void SanctuaryEditor::toast (const String& text)
@@ -228,7 +238,8 @@ void SanctuaryEditor::timerCallback()
     sendParams (processor.takeChangedParameters());
     sendMeters();
     const int v = processor.statusVersion.load();
-    if (v != lastStatusVersion)
+    const bool latencyChanged = processor.getSampleRate() != sentRate || processor.getAlignedLatency() != sentLatency;
+    if (v != lastStatusVersion || latencyChanged)
     {
         lastStatusVersion = v;
         sendStatus();

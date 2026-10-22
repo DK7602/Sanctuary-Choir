@@ -318,7 +318,7 @@
         user.forEach(([p, i]) => {
           const it = Menu.item(m, p.name, i === st.presetIndex, () => SC.send({ type: "cmd", name: "presetLoad", index: i }));
           const del = document.createElement("span");
-          del.textContent = "✕";
+          del.textContent = "\u2715";
           del.title = "Delete preset";
           del.style.cssText = "margin-left:auto;color:#a8977c;font-size:13px;padding:0 4px";
           del.addEventListener("click", (e) => { e.stopPropagation(); SC.send({ type: "cmd", name: "presetDelete", index: i }); Menu.close(); });
@@ -353,7 +353,7 @@
         opts.label = () => {
           const v = Math.round(Params.get("key"));
           if (v > 0) return Params.format("key");
-          return { main: "Auto", extra: "· " + KEY_NAMES[state.detectedKey] + (state.detectedMinor ? "m" : "") };
+          return { main: "Auto", extra: "\u00b7 " + KEY_NAMES[state.detectedKey] + (state.detectedMinor ? "m" : "") };
         };
       }
       const dd = new Dropdown(el, opts);
@@ -363,7 +363,7 @@
 
     buildMix($("page-mix"));
     buildFx($("page-fx"));
-    const settingsInfo = { version: info.version, latencyMs: info.latencyMs };
+    const settingsInfo = { version: info.version, latencyMs: info.latencyMs, liveChoirMs: info.liveChoirMs, standalone: !!info.standalone };
     buildSettings($("page-settings"), settingsInfo);
     state.settingsInfo = settingsInfo;
 
@@ -377,7 +377,7 @@
     $("clearBtn").addEventListener("click", () => SC.send({ type: "cmd", name: "clear" }));
     $("renderBtn").addEventListener("click", () => SC.send({ type: "cmd", name: "render" }));
     $("freezeBtn").addEventListener("click", () => Params.set("freeze", Params.get("freeze") > 0.5 ? 0 : 1));
-    $("medallion").addEventListener("click", () => toast("Sanctuary Choir " + (info.version || "") + " · one voice, a whole choir"));
+    $("medallion").addEventListener("click", () => toast("Sanctuary Choir " + (info.version || "") + " \u00b7 one voice, a whole choir"));
     Params.on("freeze", (v) => $("freezeBtn").classList.toggle("active", v > 0.5));
 
     Params.on("choirSize", (v) => {
@@ -411,7 +411,7 @@
     }
     const scaleName = (Params.format("scale") || "").toUpperCase();
     $("keyReadout").textContent = "KEY " + KEY_NAMES[m.keyTonic] + " " + scaleName;
-    $("chordReadout").textContent = m.chord ? "·  " + m.chord : "";
+    $("chordReadout").textContent = m.chord ? "\u00b7  " + m.chord : "";
     const now = performance.now();
     if (m.leadVoiced || out > 0.05) state.lastActivity = now;
     $("harmonyBadge").style.opacity = now - state.lastActivity < 4000 ? "1" : "0";

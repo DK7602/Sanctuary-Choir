@@ -66,7 +66,8 @@
       { id: "highCut", name: "High Cut", type: "float", min: 3000, max: 20000, interval: 10, skew: 0.5, default: 18000, label: "Hz" },
       pct("warmth", "Warmth", 0), pct("glue", "Glue", 25),
       bool("midiEnabled", "MIDI Control", true),
-      { id: "tuning", name: "Tuning (A4)", type: "float", min: 415, max: 466, interval: 0.1, skew: 1, default: 440, label: "Hz" }
+      { id: "tuning", name: "Tuning (A4)", type: "float", min: 415, max: 466, interval: 0.1, skew: 1, default: 440, label: "Hz" },
+      choice("latencyMode", "Monitoring", ["Studio (aligned)", "Live (low latency)"])
     );
     const values = {};
     defs.forEach((d) => { values[d.id] = d.default; d.value = d.default; });
@@ -131,7 +132,7 @@
       learn.phase = "analysing"; learn.text = "LISTENING TO YOUR TAKE..."; status();
       setTimeout(() => {
         learn.phase = "learned"; learn.hasTake = true; learn.stale = learn.hasStems;
-        learn.text = "LEARNED 0:43 · C MAJOR · 4 PHRASES · 105 NOTES";
+        learn.text = "LEARNED 0:43 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 105 NOTES";
         status();
       }, 1400);
     }
@@ -145,7 +146,7 @@
         if (learn.progress >= 1) {
           clearInterval(learnTimer);
           learn.phase = "rendered"; learn.hasStems = true; learn.stale = false;
-          learn.text = "LEARNED 0:43 · C MAJOR · 4 PHRASES · 105 NOTES  ·  " + Math.round(values.choirSize / 100 * 40) + " SINGERS RENDERED IN 3.1 S";
+          learn.text = "LEARNED 0:43 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 105 NOTES  \u00b7  " + Math.round(values.choirSize / 100 * 40) + " SINGERS RENDERED IN 3.1 S";
         }
         status();
       }, 120);
@@ -153,14 +154,14 @@
 
     function receive(msg) {
       if (msg.type === "ready") {
-        emit("init", { params: defs.map((d) => Object.assign({}, d, { value: values[d.id] })), tab: "perform", version: "1.0.0 (preview)", standalone: false, latencyMs: 38.7, maxSingers: 40 });
+        emit("init", { params: defs.map((d) => Object.assign({}, d, { value: values[d.id] })), tab: "perform", version: "1.0.0 (preview)", standalone: false, latencyMs: 38.4, liveChoirMs: 14.8, maxSingers: 40 });
         status();
         setInterval(meters, 33);
       } else if (msg.type === "set") {
         setParam(msg.id, msg.value);
         if (learn.hasStems && ["harmonyMode", "key", "scale", "style", "vocalType", "choirSize"].includes(msg.id)) {
           learn.stale = true; if (learn.phase === "rendered") learn.phase = "learned";
-          learn.text = "LEARNED 0:43 · C MAJOR · 4 PHRASES · 105 NOTES  ·  RENDER TO UPDATE";
+          learn.text = "LEARNED 0:43 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 105 NOTES  \u00b7  RENDER TO UPDATE";
           status();
         }
       } else if (msg.type === "cmd") {

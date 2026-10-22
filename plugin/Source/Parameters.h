@@ -44,6 +44,7 @@ namespace ParamIDs
     // Settings
     inline constexpr const char* midiEnabled = "midiEnabled";
     inline constexpr const char* tuning = "tuning";
+    inline constexpr const char* latencyMode = "latencyMode";
 }
 
 /** Section parameter ids: prefix + "Level" / "Pan" / "Mute" / "Solo" / "Low" / "High". */

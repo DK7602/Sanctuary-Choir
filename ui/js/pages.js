@@ -21,9 +21,9 @@
   function noteStepper(parent, id, label) {
     const wrap = el("div", "stepper", parent);
     wrap.title = label === "LOW" ? "Lowest note this section sings" : "Highest note this section sings";
-    const down = el("button", "", wrap, "◂");
+    const down = el("button", "", wrap, "\u25c2");
     const val = el("span", "", wrap);
-    const up = el("button", "", wrap, "▸");
+    const up = el("button", "", wrap, "\u25b8");
     down.title = "Lower";
     up.title = "Higher";
     down.addEventListener("click", () => Params.set(id, Params.get(id) - 1));
@@ -74,7 +74,7 @@
 
     const bottom = el("div", "group", page);
     bottom.style.cssText = "margin-top:10px;padding:8px 14px 2px;position:relative";
-    el("h3", "", bottom, "PERFORMANCE · HOW THE CHOIR SINGS");
+    el("h3", "", bottom, "PERFORMANCE \u00b7 HOW THE CHOIR SINGS");
     const resp = el("div", "pill-row", bottom);
     resp.style.cssText = "position:absolute;right:14px;top:6px;align-items:center";
     el("span", "", resp, "RESPONSE").style.cssText = "font-family:Montserrat,sans-serif;font-weight:600;font-size:10.5px;letter-spacing:2px;color:#a8977c;margin-right:4px";
@@ -122,7 +122,7 @@
     [["lowCut", "LOW CUT"], ["highCut", "HIGH CUT"], ["warmth", "WARMTH"], ["glue", "GLUE"]].forEach(([id, l]) => new MiniKnob(bk, id, l));
     const hint = el("p", "", page);
     hint.style.cssText = "text-align:center;margin-top:14px;color:#a8977c";
-    hint.innerHTML = "SPACE spreads the singers across the stage and adds early reflections · REVERB sets how much of the room you hear";
+    hint.innerHTML = "SPACE spreads the singers across the stage and adds early reflections \u00b7 REVERB sets how much of the room you hear";
   }
 
   function buildSettings(page, info) {
@@ -131,23 +131,58 @@
     const row = el("div", "row", page);
     const left = el("div", "", row);
     left.style.cssText = "width:520px;display:flex;flex-direction:column;gap:12px";
+    let foot = null;
 
     const midi = el("div", "group", left);
     el("h3", "", midi, "MIDI");
     toggleSwitch(midi, "midiEnabled", "MIDI keyboard controls the harmony");
     el("p", "", midi, "Hold chords to choose the choir's harmony. With no voice coming in, the choir sings the notes you play like an instrument.");
 
-    const tune = el("div", "group", left);
-    tune.style.cssText = "display:flex;align-items:center;gap:16px";
+    const row2 = el("div", "", left);
+    row2.style.cssText = "display:flex;gap:12px";
+    const tune = el("div", "group", row2);
+    tune.style.cssText = "display:flex;align-items:center;justify-content:center;padding:8px 10px";
+    tune.title = "Reference pitch for the harmony. Leave at 440 Hz unless your song is tuned differently.";
     new MiniKnob(tune, "tuning", "TUNING A4");
-    const tt = el("p", "", tune, "Reference pitch for the harmony. Leave at 440 Hz unless your song is tuned differently.");
-    tt.style.flex = "1";
+
+    const ms = (v) => (v ? Math.round(v) : "?") + " ms";
+    const mon = el("div", "group", row2);
+    mon.style.cssText = "flex:1;padding:10px 14px";
+    const monHead = el("div", "", mon);
+    monHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:4px";
+    el("h3", "", monHead, "MONITORING").style.margin = "0";
+    const monPills = el("div", "pill-row", monHead);
+    const monText = el("p", "", mon);
+    monText.style.cssText = "font-size:16px;line-height:1.3;margin-top:6px";
+    const modes = [
+      ["STUDIO", 0, "Voice and choir perfectly aligned; your DAW compensates the delay"],
+      ["LIVE", 1, "Hear your own voice instantly while you sing"],
+    ];
+    modes.forEach(([label, v, tip]) => {
+      const b = el("button", "pill", monPills, label);
+      b.title = tip;
+      b.style.minWidth = "64px";
+      if (info.standalone) b.disabled = true;
+      else b.addEventListener("click", () => Params.set("latencyMode", v));
+      const sync = (x) => b.classList.toggle("on", info.standalone ? v === 1 : Math.round(x) === v);
+      Params.on("latencyMode", sync);
+      sync(Params.get("latencyMode"));
+    });
+    const describe = (x) => {
+      const live = info.standalone || Math.round(x) === 1;
+      monText.innerHTML = live
+        ? "<b>Live</b>: you hear your voice instantly. The choir follows about " + ms(info.liveChoirMs) + " behind (Words about " + ms(info.latencyMs) + ")."
+          + (info.standalone ? " The standalone app always runs live." : " Switch to Studio for mixing.")
+        : "<b>Studio</b>: voice and choir line up perfectly; your DAW compensates the " + ms(info.latencyMs) + " delay. Use Live while you record.";
+      foot.textContent = "Sanctuary Choir " + (info.version || "") + "  \u00b7  " + (live ? "live monitoring" : "latency " + (info.latencyMs ? info.latencyMs.toFixed(1) : "?") + " ms")
+        + "  \u00b7  " + (SC.isPlugin ? (info.standalone ? "standalone" : "plugin") : "browser preview");
+    };
 
     const take = el("div", "group", left);
     el("h3", "", take, "LEARNED TAKE");
     const btns = el("div", "", take);
     btns.style.cssText = "display:flex;gap:10px;flex-wrap:wrap";
-    const preview = el("button", "big-btn", btns, "▶  PREVIEW");
+    const preview = el("button", "big-btn", btns, "\u25b6  PREVIEW");
     preview.addEventListener("click", () => SC.send({ type: "cmd", name: "preview" }));
     const exp = el("button", "big-btn", btns, "EXPORT STEMS");
     exp.addEventListener("click", () => SC.send({ type: "cmd", name: "export" }));
@@ -155,9 +190,14 @@
     presetFolder.addEventListener("click", () => SC.send({ type: "cmd", name: "presetFolder" }));
     const takeInfo = el("p", "", take, "");
     info.onStatus = (st) => {
+      if (st.latencyMs !== undefined && (st.latencyMs !== info.latencyMs || st.liveChoirMs !== info.liveChoirMs)) {
+        info.latencyMs = st.latencyMs;
+        info.liveChoirMs = st.liveChoirMs;
+        describe(Params.get("latencyMode"));
+      }
       const l = st.learn || {};
       preview.disabled = !l.hasTake;
-      preview.textContent = l.previewing ? "■  STOP PREVIEW" : "▶  PREVIEW";
+      preview.textContent = l.previewing ? "\u25a0  STOP PREVIEW" : "\u25b6  PREVIEW";
       exp.disabled = !l.hasStems;
       takeInfo.textContent = l.hasTake ? (l.text || "") : "No take yet. Press LEARN and sing, or LOAD a vocal file.";
     };
@@ -176,9 +216,10 @@
       "<b>Response: Echo</b> (MIX page) makes the choir answer each phrase right after you sing it.",
       "<b>Vocal Type</b>: Words keeps your lyrics; Ah, Oh, Oo and Mm sing pure vowels.",
     ].forEach((html) => { const li = el("li", "", ol); li.innerHTML = html; });
-    const foot = el("p", "", right);
+    foot = el("p", "", right);
     foot.style.cssText = "margin-top:12px;color:#8f7f66;font-size:15px";
-    foot.textContent = "Sanctuary Choir " + (info.version || "") + "  ·  latency " + (info.latencyMs ? info.latencyMs.toFixed(1) : "?") + " ms  ·  " + (SC.isPlugin ? "plugin" : "browser preview");
+    Params.on("latencyMode", describe);
+    describe(Params.get("latencyMode"));
   }
 
   window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings };

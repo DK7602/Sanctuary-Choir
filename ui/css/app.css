@@ -277,6 +277,8 @@ html, body {
 }
 .pill:hover { border-color: rgba(232, 201, 138, 0.8); }
 .pill.on { color: #1b1209; background: linear-gradient(180deg, #ffe3a3, #c69a52); border-color: #ffe3a3; box-shadow: 0 0 10px rgba(255, 210, 140, 0.45); }
+.pill:disabled { cursor: default; opacity: 0.4; }
+.pill.on:disabled { opacity: 0.85; }
 .pill.mute.on { background: linear-gradient(180deg, #ff9c86, #c0463a); border-color: #ffb3a3; box-shadow: 0 0 10px rgba(255, 110, 90, 0.5); color: #1d0905; }
 .stepper { display: flex; align-items: center; gap: 4px; font-size: 16px; color: #efe5d3; }
 .stepper button { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(232,201,138,0.35); background: #17110e; color: var(--gold); cursor: pointer; font-size: 14px; line-height: 18px; padding: 0; }

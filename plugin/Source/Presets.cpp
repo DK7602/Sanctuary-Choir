@@ -41,7 +41,8 @@ namespace
     bool isPresetParam (const String& id)
     {
         // Settings are global preferences, not part of a sound.
-        return id != ParamIDs::midiEnabled && id != ParamIDs::tuning && id != ParamIDs::freeze;
+        return id != ParamIDs::midiEnabled && id != ParamIDs::tuning && id != ParamIDs::freeze
+            && id != ParamIDs::latencyMode;
     }
 }
 

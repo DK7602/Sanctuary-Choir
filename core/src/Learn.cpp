@@ -356,6 +356,7 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
     EngineParams params = paramsIn;
     params.freeze = false;
     params.midiEnabled = false;
+    params.lowLatency = false;   // offline: everything aligned, then the latency is removed below
 
     const int block = 512;
     // Probe the latency once.
@@ -454,6 +455,7 @@ std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, cons
     params.midiEnabled = false;
     params.wetOnly = roomOnly;
     params.leadDb = -60.0f;
+    params.lowLatency = false;
 
     const int block = 512;
     ChoirEngine engine;

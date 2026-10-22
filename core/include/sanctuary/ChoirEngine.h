@@ -73,6 +73,7 @@ struct EngineParams
     // Settings page
     bool midiEnabled = true;     // MIDI chords steer harmony; MIDI alone plays the choir
     float a4 = 440.0f;
+    bool lowLatency = false;     // Live monitoring: lead undelayed, vowel choir ~15 ms, Words keep full latency
 
     // Internal (offline export)
     bool wetOnly = false;        // output only the room (reverb) signal
@@ -125,7 +126,12 @@ public:
 
     void prepare (double sampleRate, int maxBlockSize);
     void reset();
+    /** Delay that lines the whole choir (Words included) up with the lead: the offline/aligned latency. */
     int getLatencySamples() const noexcept { return latency; }
+    /** Latency to report to the host: 0 in Live (low latency) mode, where the lead is not delayed. */
+    int getReportedLatency() const noexcept { return params.lowLatency ? 0 : latency; }
+    /** In Live mode, how far the vowel choir runs behind the voice. */
+    int getLiveChoirLatency() const noexcept { return liveLatency; }
     double getSampleRate() const noexcept { return sr; }
 
     void setParams (const EngineParams& p);
@@ -156,10 +162,13 @@ private:
     void refreshVowelFormants();
     Scale currentScale() const;
     void publishSnapshot();
+    /** How far the live singers run behind the input (shorter for vowels in Live mode). */
+    int choirLatency() const noexcept;
 
     double sr = 48000.0;
     int maxBlock = 512;
     int latency = 2048;
+    int liveLatency = 708;    // Live mode, vowel singers: pitch analysis only
     EngineParams params;
     StyleProfile style {};
     bool prepared = false;
@@ -191,7 +200,7 @@ private:
     NoteSet midiHeld;
     float midiVelocity = 0.0f;
 
-    // Lead (dry) delay so it lines up with the choir.
+    // Lead (dry) delay so it lines up with the choir (bypassed in Live mode).
     std::vector<float> leadDelayL, leadDelayR;
     int leadDelayPos = 0;
 

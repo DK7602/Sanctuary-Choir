@@ -31,7 +31,19 @@ Pro Tools (AAX) isn't supported yet.
   - *Ah, Oh, Oo, Ee, Eh* sing pure vowels.
   - *Mm* hums.
 
-The plug-in has about 39 ms of processing delay, which your DAW compensates automatically. When you monitor live while singing, the choir arrives a moment after you, like a real choir behind a soloist.
+### Latency: Studio or Live
+
+To re-pitch your voice, the choir has to hear a little of it first, so it runs about 39 ms behind you. Pick how that delay is handled under **Settings → Monitoring**:
+
+| Mode | What you hear | Use it for |
+| --- | --- | --- |
+| **Studio** (default) | Your voice and the choir line up exactly. The plug-in reports its 39 ms to your DAW, which compensates on playback. While recording, though, you hear yourself 39 ms late. | Mixing, and singing over a track you already recorded. |
+| **Live** | Your own voice comes through instantly. The vowel choir (Ah, Oh, Oo, Ee, Eh, Mm) follows about 15 ms behind, *Words* about 39 ms behind, like a choir following its soloist. | Recording, rehearsing and performing. |
+
+- Learned and rendered takes stay in sync with your song in both modes.
+- The standalone app always runs in **Live** mode.
+- Your audio interface adds its own delay on top. Use a buffer size of 128 or 256 samples while you record.
+- Switch back to **Studio** before you bounce or mix, so the live choir lines up with the beat.
 
 ## 4. Learn and Render (best quality)
 

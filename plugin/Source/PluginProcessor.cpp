@@ -22,8 +22,9 @@ SanctuaryProcessor::SanctuaryProcessor()
     for (const auto& id : paramIds)
         state.addParameterListener (id, this);
 
+    standaloneApp = wrapperType == wrapperType_Standalone || JUCEApplicationBase::isStandaloneApp();
     learn.getParams = [this] { return currentParams(); };
-    learn.standalone = wrapperType == wrapperType_Standalone;
+    learn.standalone = standaloneApp;
     learn.onStatusChanged = [this] { ++statusVersion; };
     startTimerHz (10);
 }
@@ -48,7 +49,7 @@ bool SanctuaryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
 void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock);
-    setLatencySamples (engine.getLatencySamples());
+    setLatencySamples (reportedLatency());
     learn.prepare (sampleRate);
     engineWritten = 0;
     heldVelocity.fill (0.0f);
@@ -99,8 +100,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         return;
 
     updateMidi (midi);
-    sc::EngineParams p;
-    cache.fill (p);
+    const sc::EngineParams p = currentParams();
     engine.setParams (p);
 
     sc::NoteSet held;
@@ -129,7 +129,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         }
     }
     info.engineWritten = engineWritten;
-    info.latency = engine.getLatencySamples();
+    info.latency = engine.getReportedLatency();   // what the host compensates (0 in Live mode)
 
     if (numIn == 0)
         buffer.clear();
@@ -159,7 +159,14 @@ sc::EngineParams SanctuaryProcessor::currentParams() const
 {
     sc::EngineParams p;
     cache.fill (p);
+    if (standaloneApp)
+        p.lowLatency = true;    // nothing to compensate against: always monitor live
     return p;
+}
+
+int SanctuaryProcessor::reportedLatency() const
+{
+    return currentParams().lowLatency ? 0 : engine.getLatencySamples();
 }
 
 void SanctuaryProcessor::parameterChanged (const String& id, float)
@@ -194,6 +201,10 @@ void SanctuaryProcessor::timerCallback()
     }
     if (renderDirty.exchange (false))
         learn.renderSettingsChanged();
+
+    // Studio <-> Live monitoring changes the latency the host has to compensate.
+    if (const int lat = reportedLatency(); lat != getLatencySamples())
+        setLatencySamples (lat);
 }
 
 //==============================================================================

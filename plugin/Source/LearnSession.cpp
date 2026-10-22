@@ -695,10 +695,11 @@ String LearnSession::describe() const
     if (d == nullptr)
         return {};
     String s (CharPointer_UTF8 (d->score.describe().c_str()));
+    const String dot (CharPointer_UTF8 ("  \xc2\xb7  "));
     if (p == Phase::Rendered && d->stems != nullptr && ! d->stale.load())
-        s << "  \xc2\xb7  " << renderedSingers << " SINGERS RENDERED IN " << String (lastRenderSeconds, 1) << " S";
+        s << dot << renderedSingers << " SINGERS RENDERED IN " << String (lastRenderSeconds, 1) << " S";
     else if (d->stems != nullptr)
-        s << "  \xc2\xb7  RENDER TO UPDATE";
+        s << dot << "RENDER TO UPDATE";
     return s;
 }
 

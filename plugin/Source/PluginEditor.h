@@ -36,6 +36,7 @@ private:
     void sendParams (const juce::StringArray& ids);
     void sendMeters();
     void sendStatus();
+    void addLatencyInfo (juce::DynamicObject& o);
     void toast (const juce::String& text);
     juce::var describeParameter (juce::RangedAudioParameter& p) const;
 
@@ -48,6 +49,8 @@ private:
     std::set<juce::String> activeGestures;
     bool pageReady = false;
     int lastStatusVersion = -1;
+    int sentLatency = -1;            // latency and sample rate last sent to the UI (the audio device may start later)
+    double sentRate = -1.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SanctuaryEditor)
 };

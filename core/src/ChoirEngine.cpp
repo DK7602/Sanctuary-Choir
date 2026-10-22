@@ -84,6 +84,8 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     const int maxPeriod = (int) std::ceil (sr / kMinInputHz) + 2;
     latency = maxPeriod + std::max (tracker.getAnalysisDelay(), (int) (1.25f * (float) maxPeriod))
               + maxPeriod / 2 + kChunk + 16;
+    // Vowel singers only need the pitch analysis (no input grains), so Live mode runs them much closer.
+    liveLatency = tracker.getAnalysisDelay() + kChunk;
 
     const int maxSingerDelay = (int) (sr * 0.075);
     const int echoHistory = (int) (sr * (kMaxEchoSeconds + 1.0));
@@ -201,6 +203,8 @@ void ChoirEngine::scheduleReplay (int64_t start, int64_t end)
         const Replay& prev = replays[(size_t) ((replayCount - 1) % (int) replays.size())];
         offset = std::max (offset, prev.srcEnd + prev.offset + (int64_t) (0.05 * sr) - start);
     }
+    // The phrase end is only known a moment later; start the answer from its beginning anyway.
+    offset = std::max (offset, analyzer.getWritten() - choirLatency() + kChunk - start);
     // Never echo further back than the history we keep.
     offset = std::min (offset, maxLen);
     replays[(size_t) (replayCount % (int) replays.size())] = { start, end, offset };
@@ -220,6 +224,11 @@ const ChoirEngine::Replay* ChoirEngine::findReplay (int64_t t) const
 }
 
 //==============================================================================
+int ChoirEngine::choirLatency() const noexcept
+{
+    return params.lowLatency && params.vocalType != VocalType::Words ? liveLatency : latency;
+}
+
 Scale ChoirEngine::currentScale() const
 {
     Scale s;
@@ -533,7 +542,7 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     // output runs behind the analysis), so leading consonants and breaths come through.
     if (g.voiced && ! lastVoiced && ! frozen)
     {
-        const int64_t lookahead = std::min<int64_t> ((int64_t) (0.03 * sr), (int64_t) (latency - tracker.getAnalysisDelay() - 2 * kChunk));
+        const int64_t lookahead = std::min<int64_t> ((int64_t) (0.03 * sr), (int64_t) (choirLatency() - tracker.getAnalysisDelay() - 2 * kChunk));
         for (int64_t i = controlCount - 1; i >= 0 && i > controlCount - 32; --i)
         {
             auto& prev = control[(size_t) (i & controlMask)];
@@ -727,17 +736,21 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 
     analyzer.pushInput (mono.data(), c);
     analyzer.updateMarks();
-    const int64_t tOut = analyzer.getWritten() - c - latency;
+    const int64_t chunkStart = analyzer.getWritten() - c;
+    const int64_t tOut = chunkStart - choirLatency();
+    const int64_t tWords = chunkStart - latency;     // PSOLA grains always need the full lookahead
 
-    // Lead voice, delayed to line up with the choir.
+    // Lead voice, delayed to line up with the choir (Live mode passes it straight through).
     float leadL[kChunk], leadR[kChunk];
     const int ld = (int) leadDelayL.size();
+    const bool live = params.lowLatency;
     for (int i = 0; i < c; ++i)
     {
-        leadL[i] = leadDelayL[(size_t) leadDelayPos];
-        leadR[i] = leadDelayR[(size_t) leadDelayPos];
-        leadDelayL[(size_t) leadDelayPos] = inL[i];
-        leadDelayR[(size_t) leadDelayPos] = inR != nullptr ? inR[i] : inL[i];
+        const float l = inL[i], r = inR != nullptr ? inR[i] : inL[i];
+        leadL[i] = live ? l : leadDelayL[(size_t) leadDelayPos];
+        leadR[i] = live ? r : leadDelayR[(size_t) leadDelayPos];
+        leadDelayL[(size_t) leadDelayPos] = l;
+        leadDelayR[(size_t) leadDelayPos] = r;
         leadDelayPos = (leadDelayPos + 1) % ld;
     }
 
@@ -774,7 +787,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             activeEchoOffset = echoOffset;
             for (auto& sp : singers)
             {
-                sp->psola.reset ((double) (tOut - echoOffset - sp->delay));
+                sp->psola.reset ((double) (tWords - echoOffset - sp->delay));
                 sp->amp = sp->gate = 0.0f;
             }
         }
@@ -914,7 +927,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 //==============================================================================
 void ChoirEngine::publishSnapshot()
 {
-    const int64_t tOut = analyzer.getWritten() - latency - activeEchoOffset;
+    const int64_t tOut = analyzer.getWritten() - choirLatency() - activeEchoOffset;
     const ControlFrame& cf = controlAt (tOut);
 
     snap.totalSingers = 0;

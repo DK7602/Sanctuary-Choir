@@ -120,6 +120,8 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     settings->addChild (std::make_unique<APF> (pid (ParamIDs::tuning), "Tuning (A4)", NormalisableRange<float> (415.0f, 466.0f, 0.1f), 440.0f,
                                                AudioParameterFloatAttributes().withAutomatable (false).withLabel ("Hz")
                                                    .withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " Hz"; })));
+    settings->addChild (std::make_unique<APC> (pid (ParamIDs::latencyMode), "Monitoring", StringArray { "Studio (aligned)", "Live (low latency)" }, 0,
+                                               AudioParameterChoiceAttributes().withAutomatable (false)));
     layout.add (std::move (settings));
 
     return layout;
@@ -131,7 +133,7 @@ struct ParameterCache::Ptrs
     std::atomic<float>* volume, *choirSize, *space, *reverb, *tone, *presence, *harmonyMode, *key, *scale, *style, *vocalType, *freeze, *response;
     std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath;
     std::atomic<float>* venue, *decay, *preDelay, *brightness, *leadReverb, *lowCut, *highCut, *warmth, *glue;
-    std::atomic<float>* midiEnabled, *tuning;
+    std::atomic<float>* midiEnabled, *tuning, *latencyMode;
     std::array<std::atomic<float>*, sc::NumSections> level, pan, mute, solo, low, high;
 };
 
@@ -156,6 +158,7 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.brightness = get (ParamIDs::brightness); p.leadReverb = get (ParamIDs::leadReverb); p.lowCut = get (ParamIDs::lowCut);
     p.highCut = get (ParamIDs::highCut); p.warmth = get (ParamIDs::warmth); p.glue = get (ParamIDs::glue);
     p.midiEnabled = get (ParamIDs::midiEnabled); p.tuning = get (ParamIDs::tuning);
+    p.latencyMode = get (ParamIDs::latencyMode);
     for (int s = 0; s < sc::NumSections; ++s)
     {
         p.level[(size_t) s] = get (sectionParamID (s, "Level"));
@@ -220,6 +223,7 @@ void ParameterCache::fill (sc::EngineParams& e) const
 
     e.midiEnabled = f (p.midiEnabled) > 0.5f;
     e.a4 = f (p.tuning);
+    e.lowLatency = i (p.latencyMode) == 1;
 }
 
 bool affectsHarmony (const String& id)

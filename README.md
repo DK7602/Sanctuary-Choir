@@ -50,6 +50,7 @@
   - Lead reverb send.
   - Low/high cut, Warmth and a Glue compressor on the choir bus.
 - **MIDI**: hold chords on a keyboard to dictate the harmony. With no voice coming in, the choir becomes a playable instrument.
+- **Live monitoring**: your voice comes through instantly while you record; the choir follows about 15 ms behind (Settings → Monitoring).
 - **Stem export**: Sopranos, Altos, Tenors, Basses, Room and Full Choir as 24-bit WAVs.
 - **15 factory presets** (Heavenly Praise, Cathedral Hymn, Sunday Gospel, Gregorian Chant, Angelic Voices, Epic Cinematic…) plus your own.
 
@@ -106,7 +107,7 @@ input ─► YIN pitch tracker ─► harmoniser ─────────► 
 | `tools/art/` | Scripts that turn the mockups into the UI skin and the singer sprites. |
 | `tests/` | DSP unit tests. These cover pitch accuracy, voicing rules, key detection, section pitches in every mode, latency alignment, learn and render, and a CPU budget check. |
 
-The plugin reports its latency (about 39 ms) so your DAW keeps everything in time.
+The plugin reports its latency (about 39 ms) so your DAW keeps everything in time. For recording and live use, **Settings → Monitoring → Live** passes your voice through with no delay at all and runs the vowel choir about 15 ms behind you (Words keep the full 39 ms); the plugin then reports zero latency. The standalone app always runs live.
 
 ## Licensing notes
 

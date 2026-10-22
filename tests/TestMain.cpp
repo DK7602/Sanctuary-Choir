@@ -168,7 +168,7 @@ static std::vector<float> runEngine (ChoirEngine& eng, const std::vector<float>&
                                      const std::function<void (int64_t)>& perBlock = {})
 {
     const int block = 256;
-    const int lat = eng.getLatencySamples();
+    const int lat = eng.getReportedLatency();   // what a host would compensate
     std::vector<float> in (x);
     in.resize (x.size() + (size_t) lat + block, 0.0f);
     std::vector<float> l (in.size(), 0.0f), r (in.size(), 0.0f);
@@ -303,12 +303,14 @@ TEST (echoAnswersAfterThePhrase)
     // Response = Echo: the choir stays quiet while you sing, then sings the phrase back.
     const double sr = 48000.0;
     auto x = test::singMelody ({ { 60.0f, 1.2f, 0.0f }, { 64.0f, 0.8f, 3.0f } }, sr, Tenor, 15.0f);
-    for (VocalType vt : { VocalType::Words, VocalType::Ah })
+    for (int run = 0; run < 3; ++run)
     {
+        const VocalType vt = run == 0 ? VocalType::Words : VocalType::Ah;
         ChoirEngine eng;
         eng.prepare (sr, 256);
         auto p = dryParams (vt, HarmonyMode::FullChoir);
         p.response = 1;
+        p.lowLatency = run == 2;
         eng.setParams (p);
         auto y = runEngine (eng, x, sr);
         auto rms = [&] (double t0, double t1)
@@ -318,7 +320,7 @@ TEST (echoAnswersAfterThePhrase)
             return n ? std::sqrt (e / (double) n) : 0.0;
         };
         const double during = rms (0.3, 2.0), after = rms (2.7, 4.2);
-        std::printf ("  echo (%s): during phrase %.4f, after %.4f\n", vt == VocalType::Words ? "words" : "ah", during, after);
+        std::printf ("  echo (%s%s): during phrase %.4f, after %.4f\n", vt == VocalType::Words ? "words" : "ah", p.lowLatency ? ", live" : "", during, after);
         CHECK (during < 0.01);
         CHECK (after > 0.03);
         // The echo carries the melody: its pitch follows the phrase (C then E in some octave).
@@ -342,6 +344,61 @@ TEST (leadLatencyAlignment)
     size_t peak = 0;
     for (size_t i = 0; i < y.size(); ++i) if (std::abs (y[i]) > std::abs (y[peak])) peak = i;
     CHECK (peak == 10000);
+}
+
+TEST (liveMonitoringLowLatency)
+{
+    // Live mode: the lead is not delayed at all, the vowel choir answers after the pitch analysis
+    // only, Words keep the full latency, and the plugin reports zero latency.
+    const double sr = 48000.0;
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.leadDb = 0.0f;
+        p.choirDb = -60.0f;
+        p.lowLatency = true;
+        eng.setParams (p);
+        CHECK (eng.getReportedLatency() == 0);
+        CHECK (eng.getLatencySamples() > 0);
+        std::vector<float> x (48000, 0.0f);
+        x[10000] = 0.5f;
+        auto y = runEngine (eng, x, sr);
+        size_t peak = 0;
+        for (size_t i = 0; i < y.size(); ++i) if (std::abs (y[i]) > std::abs (y[peak])) peak = i;
+        CHECK (peak == 10000);
+    }
+
+    // How quickly the choir follows a note change, measured on the raw (uncompensated) output.
+    const auto x = test::singMelody ({ { 60.0f, 1.0f, 0.0f }, { 64.0f, 1.0f, 0.3f } }, sr, Tenor, 0.0f);
+    const double stepMs = (0.15 + 1.0) * 1000.0;    // singMelody starts after 0.15 s of silence
+    auto follow = [&] (VocalType vt, bool live)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (vt, HarmonyMode::Unison);
+        p.lowLatency = live;
+        p.glide = 0.0f;
+        p.sections[Tenor].solo = true;
+        eng.setParams (p);
+        std::vector<float> in (x);
+        in.resize (x.size() + 4096, 0.0f);
+        std::vector<float> y (in.size(), 0.0f);
+        for (size_t pos = 0; pos + 256 <= in.size(); pos += 256)
+            eng.process (in.data() + pos, nullptr, y.data() + pos, nullptr, 256);
+        for (const auto& f : PitchTracker::analyse (y.data(), (int64_t) y.size(), sr))
+            if (f.voiced && f.midi > 62.0f && (double) f.centre / sr * 1000.0 > stepMs - 50.0)
+                return (double) f.centre / sr * 1000.0 - stepMs;
+        return 1.0e9;
+    };
+    const double studioAh = follow (VocalType::Ah, false), liveAh = follow (VocalType::Ah, true);
+    const double studioWords = follow (VocalType::Words, false), liveWords = follow (VocalType::Words, true);
+    std::printf ("  choir follows a note change after: vowels %.1f ms studio / %.1f ms live, words %.1f / %.1f ms\n",
+                 studioAh, liveAh, studioWords, liveWords);
+    // (the sung glide itself takes ~17 ms to cross the midpoint)
+    CHECK (studioAh - liveAh > 18.0 && studioAh - liveAh < 30.0);   // vowels run ~24 ms closer to the voice
+    CHECK (liveAh < 40.0);
+    CHECK_NEAR (liveWords, studioWords, 6.0); // Words always need the full lookahead
 }
 
 TEST (learnAndRender)
