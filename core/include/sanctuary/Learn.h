@@ -1,0 +1,101 @@
+// Sanctuary Choir - "Learn": offline analysis of a sung take, smarter harmonisation with
+// look-ahead (phrases, cadences, consistent octaves) and offline rendering to stems.
+#pragma once
+
+#include "ChoirEngine.h"
+
+#include <atomic>
+#include <functional>
+#include <string>
+
+namespace sc
+{
+struct LearnedNote
+{
+    int64_t start = 0, end = 0;  // samples
+    float pitch = 0.0f;          // median MIDI pitch (relative to the tuning reference)
+    int note = -1;               // quantised to the key
+    int phrase = 0;
+};
+
+struct LearnedPhrase
+{
+    int64_t start = 0, end = 0;
+    int firstNote = 0, lastNote = 0;
+};
+
+/** Stage 1: everything that depends only on the audio. */
+struct TakeAnalysis
+{
+    double sampleRate = 48000.0;
+    int64_t length = 0;
+    std::vector<PitchFrame> frames;
+    std::vector<LearnedNote> notes;
+    std::vector<LearnedPhrase> phrases;
+    std::array<float, 12> pcHistogram {};
+    float voicedSeconds = 0.0f;
+
+    bool isEmpty() const { return notes.empty(); }
+};
+
+TakeAnalysis analyseTake (const float* x, int64_t n, double sampleRate, float a4 = 440.0f,
+                          const std::atomic<bool>* cancel = nullptr);
+
+struct HarmonySettings
+{
+    int key = 0;                 // 0 = auto
+    ScaleType scale = ScaleType::Major;
+    HarmonyMode mode = HarmonyMode::FullChoir;
+    Style style = Style::Sacred;
+    std::array<SectionRange, NumSections> ranges = defaultSectionRanges();
+    std::array<bool, NumSections> active { true, true, true, true };
+    bool wordsMode = false;
+};
+
+struct LearnedEvent
+{
+    int64_t start = 0, end = 0;
+    Chord chord;
+    Voicing voicing;
+    int melody = -1;
+    int sopShift = 0;
+};
+
+/** Stage 2: the harmonised score (cheap to recompute when settings change). */
+class LearnedScore : public ScoreSource
+{
+public:
+    Scale scale;
+    bool keyWasDetected = false;
+    std::vector<LearnedEvent> events;
+    int numPhrases = 0, numNotes = 0;
+    float durationSeconds = 0.0f;
+
+    bool voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopShift) const override;
+    /** e.g. "Ab MAJOR · 4 PHRASES · 105 NOTES" */
+    std::string describe() const;
+    std::string keyName() const;
+};
+
+LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& settings);
+
+/** Section stems: 8 channels (S L/R, A L/R, T L/R, B L/R), aligned to the take timeline. */
+struct RenderedStems
+{
+    double sampleRate = 48000.0;
+    int64_t length = 0;
+    std::array<std::vector<float>, NumSections * 2> channels;
+    bool isEmpty() const { return length == 0; }
+};
+
+using ProgressFn = std::function<void (float)>;
+
+/** Render the learned take with the given settings. Runs one engine per section in parallel. */
+bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParams& params,
+                 const LearnedScore& score, RenderedStems& out, const ProgressFn& progress = {},
+                 const std::atomic<bool>* cancel = nullptr);
+
+/** Mix rendered stems through the choir bus and room (reverb). Returns stereo (2 channels). */
+std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& params,
+                                                bool roomOnly, float tailSeconds = 4.0f);
+} // namespace sc

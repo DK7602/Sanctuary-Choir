@@ -1,0 +1,877 @@
+#include "sanctuary/ChoirEngine.h"
+
+#include <cstring>
+
+namespace sc
+{
+static constexpr int kSingersPerSection = 24;
+static constexpr int kChunk = 64;
+static constexpr float kMinInputHz = 75.0f;
+static constexpr float kMaxInputHz = 1150.0f;
+
+int singersForChoirSize (float percent)
+{
+    return clampv ((int) std::lround (clampv (percent, 0.0f, 100.0f) / 100.0f * (float) kMaxSingers), 0, kMaxSingers);
+}
+
+//==============================================================================
+struct ChoirEngine::ControlFrame
+{
+    int64_t time = 0;
+    bool voiced = false;
+    bool sounding = false;
+    float inputMidi = 0.0f, inputHz = 0.0f;
+    int leadNote = -1;
+    int sopShift = 0;
+    float level = 0.0f;
+    Voicing voicing;
+};
+
+struct ChoirEngine::Singer
+{
+    int section = 0, index = 0;
+    bool active = false;
+    float fade = 0.0f;
+
+    // placement
+    float panL = 0.7071f, panR = 0.7071f, depthGain = 1.0f;
+    int delay = 0, pendingDelay = 0;
+
+    // fixed random character
+    float rDetune = 0, rVibDepth = 1, rVibRate = 0, rDelay = 0, rGain = 1, rFormant = 1, rGlide = 1, rScoop = 1, rAttack = 1;
+    Wander drift, shimmer;
+    Rng rng;
+
+    // pitch state
+    float currentMidi = -1.0f, targetMidi = -1.0f, noteAge = 0.0f, scoop = 0.0f, expr = 0.0f, vibPhase = 0.0f;
+    bool doublesMelody = false;
+    float octaveShift = 0.0f;
+    float lastFollow = 1.0f;
+
+    // amplitude
+    float amp = 0.0f, ampTarget = 0.0f, gate = 0.0f;
+
+    PsolaVoice psola;
+    PsolaControl pctl;
+    VowelSinger vowel;
+    float synthF0 = 220.0f;
+};
+
+ChoirEngine::ChoirEngine() = default;
+ChoirEngine::~ChoirEngine() = default;
+
+//==============================================================================
+void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
+{
+    sr = sampleRate;
+    maxBlock = std::max (1, maxBlockSize);
+
+    PitchTracker::Settings ts;
+    ts.minHz = kMinInputHz;
+    ts.maxHz = kMaxInputHz;
+    tracker.prepare (sr, ts);
+
+    const int maxPeriod = (int) std::ceil (sr / kMinInputHz) + 2;
+    latency = maxPeriod + std::max (tracker.getAnalysisDelay(), (int) (1.25f * (float) maxPeriod))
+              + maxPeriod / 2 + kChunk + 16;
+
+    const int maxSingerDelay = (int) (sr * 0.075);
+    analyzer.prepare (sr, maxPeriod, latency + maxSingerDelay + kChunk * 2);
+
+    glottal.prepare (sr);
+
+    singers.clear();
+    for (int s = 0; s < NumSections; ++s)
+    {
+        for (int i = 0; i < kSingersPerSection; ++i)
+        {
+            auto singer = std::make_unique<Singer>();
+            singer->section = s;
+            singer->index = i;
+            singer->psola.prepare (sr, kChunk, maxPeriod);
+            singer->vowel.prepare (sr);
+            singers.push_back (std::move (singer));
+        }
+    }
+
+    control.assign (1024, ControlFrame{});
+    controlMask = 1023;
+
+    leadDelayL.assign ((size_t) latency, 0.0f);
+    leadDelayR.assign ((size_t) latency, 0.0f);
+
+    mono.assign (kChunk, 0.0f);
+    sectionBuf.assign ((size_t) NumSections * 2 * kChunk, 0.0f);
+    choirL.assign (kChunk, 0.0f);
+    choirR.assign (kChunk, 0.0f);
+    revInL.assign (kChunk, 0.0f);
+    revInR.assign (kChunk, 0.0f);
+    revOutL.assign (kChunk, 0.0f);
+    revOutR.assign (kChunk, 0.0f);
+    scratch.assign (kChunk, 0.0f);
+
+    tone.prepare (sr);
+    glue.prepare (sr);
+    reverb.prepare (sr);
+    limiter.prepare (sr);
+
+    const float smoothS = 0.03f;
+    volume.prepare (sr / kChunk, smoothS, 1.0f);
+    leadGain.prepare (sr / kChunk, smoothS, 1.0f);
+    choirGain.prepare (sr / kChunk, smoothS, 1.0f);
+    wetGain.prepare (sr / kChunk, smoothS, 0.6f);
+    dryChoirGain.prepare (sr / kChunk, smoothS, 0.7f);
+    leadSend.prepare (sr / kChunk, smoothS, 0.1f);
+    warmthAmt.prepare (sr / kChunk, smoothS, 0.0f);
+    for (int s = 0; s < NumSections; ++s)
+    {
+        sectionGain[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
+        sectionPanL[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
+        sectionPanR[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
+        sectionWidth[(size_t) s].prepare (sr / kChunk, smoothS, 1.0f);
+    }
+
+    prepared = true;
+    lastSingerTarget = -1;
+    lastVocal = VocalType::Count;
+    lastStyle = Style::Count;
+    lastFormantParam = 1.0e9f;
+    lastHumanize = -1.0f;
+    reset();
+    setParams (params);
+}
+
+void ChoirEngine::reset()
+{
+    tracker.reset();
+    analyzer.reset();
+    harmonizer.reset();
+    keyTracker.reset();
+    controlCount = 0;
+    std::fill (leadDelayL.begin(), leadDelayL.end(), 0.0f);
+    std::fill (leadDelayR.begin(), leadDelayR.end(), 0.0f);
+    leadDelayPos = 0;
+    for (auto& s : singers)
+    {
+        s->active = false;
+        s->fade = 0.0f;
+        s->amp = s->ampTarget = s->gate = 0.0f;
+        s->currentMidi = s->targetMidi = -1.0f;
+        s->psola.reset (0.0);
+        s->vowel.reset();
+    }
+    sectionCount.fill (0);
+    lastSingerTarget = -1;
+    tone.reset();
+    glue.reset();
+    reverb.reset();
+    limiter.reset();
+    lastLevel = 0.0f;
+    unvoicedTime = 10.0f;
+    lastVoiced = false;
+    wasFrozen = false;
+    stemTapOffset = 0;
+    chunkCounter = 0;
+}
+
+//==============================================================================
+Scale ChoirEngine::currentScale() const
+{
+    Scale s;
+    s.type = params.scale;
+    s.tonic = params.key > 0 ? (params.key - 1) % 12 : keyTonic;
+    return s;
+}
+
+void ChoirEngine::setParams (const EngineParams& p)
+{
+    params = p;
+    style = getStyleProfile (p.style);
+
+    volume.setTarget (dbToGain (p.volumeDb));
+    leadGain.setTarget (p.leadDb <= -59.5f ? 0.0f : dbToGain (p.leadDb));
+    choirGain.setTarget (p.choirDb <= -59.5f ? 0.0f : dbToGain (p.choirDb));
+    const float r = clampv (p.reverb / 100.0f, 0.0f, 1.0f);
+    wetGain.setTarget (1.15f * std::pow (r, 1.2f));
+    dryChoirGain.setTarget (p.wetOnly ? 0.0f : 1.0f - 0.45f * r);
+    if (p.wetOnly)
+        leadGain.setTarget (0.0f);
+    leadSend.setTarget (clampv (p.leadReverb / 100.0f, 0.0f, 1.0f) * 0.8f);
+    warmthAmt.setTarget (clampv (p.warmth / 100.0f, 0.0f, 1.0f));
+
+    bool anySolo = false;
+    for (const auto& s : p.sections) anySolo = anySolo || s.solo;
+    const float width = 0.25f + 0.75f * clampv (p.space / 100.0f, 0.0f, 1.0f);
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const auto& sp = p.sections[(size_t) s];
+        const bool audible = ! sp.mute && (! anySolo || sp.solo);
+        const float f = clampv (sp.level, 0.0f, 1.0f) / 0.75f;
+        sectionGain[(size_t) s].setTarget (audible ? f * f : 0.0f);
+        const float pan = clampv (sp.pan, -1.0f, 1.0f);
+        sectionPanL[(size_t) s].setTarget (pan > 0.0f ? 1.0f - pan : 1.0f);
+        sectionPanR[(size_t) s].setTarget (pan < 0.0f ? 1.0f + pan : 1.0f);
+        sectionWidth[(size_t) s].setTarget (width);
+    }
+
+    ChoirReverb::Settings rs;
+    rs.venue = p.venue;
+    rs.decayScale = clampv (p.decay / 100.0f, 0.3f, 2.5f);
+    rs.preDelayMs = p.preDelayMs;
+    rs.brightness = clampv (p.brightness / 100.0f, 0.0f, 1.0f);
+    rs.early = 0.25f + 0.75f * clampv (p.space / 100.0f, 0.0f, 1.0f);
+    rs.width = 0.5f + 0.5f * clampv (p.space / 100.0f, 0.0f, 1.0f);
+    if (prepared)
+    {
+        reverb.setSettings (rs);
+        tone.set (p.lowCutHz, p.highCutHz, p.toneDb, clampv (p.presence / 100.0f, 0.0f, 1.0f));
+    }
+}
+
+void ChoirEngine::setMidi (const NoteSet& held, float velocity)
+{
+    midiHeld = held;
+    midiVelocity = velocity;
+}
+
+//==============================================================================
+void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
+{
+    s.rng.reseed ((uint32_t) (section * 1000 + index * 7 + 17));
+    s.rDetune = s.rng.gauss();
+    s.rVibDepth = 0.6f + 0.8f * s.rng.uni();
+    s.rVibRate = s.rng.bi() * 0.45f;
+    s.rDelay = s.rng.uni();
+    s.rGain = dbToGain (s.rng.gauss() * 1.2f);
+    s.rFormant = 1.0f + 0.03f * s.rng.gauss();
+    s.rGlide = 0.7f + 0.6f * s.rng.uni();
+    s.rScoop = 0.5f + s.rng.uni();
+    s.rAttack = 0.75f + 0.5f * s.rng.uni();
+    s.vibPhase = s.rng.uni();
+    s.drift = Wander{};
+    s.drift.timeConstant = 0.9f + 0.8f * s.rng.uni();
+    s.shimmer = Wander{};
+    s.shimmer.timeConstant = 0.35f;
+
+    // Stage placement (audience view): sopranos front-left, altos front-right,
+    // tenors back-left, basses back-right. New singers join at alternating edges.
+    static const float centre[] = { -0.55f, 0.55f, -0.42f, 0.42f };
+    static const float halfWidth[] = { 0.42f, 0.42f, 0.4f, 0.4f };
+    const int k = (index + 1) / 2;
+    const float side = (index % 2 == 0) ? 1.0f : -1.0f;
+    float x = centre[section] + side * halfWidth[section] * clampv ((float) k / 12.0f, 0.0f, 1.0f) + 0.04f * s.rng.bi();
+    x = clampv (x, -1.0f, 1.0f);
+    const float theta = (x + 1.0f) * 0.25f * kPi;
+    s.panL = std::cos (theta);
+    s.panR = std::sin (theta);
+    const bool backRow = section == Tenor || section == Bass;
+    s.depthGain = backRow ? 0.88f : 1.0f;
+
+    s.currentMidi = s.targetMidi = -1.0f;
+    s.amp = s.ampTarget = 0.0f;
+    s.gate = 0.0f;
+    s.noteAge = 0.0f;
+    s.scoop = 0.0f;
+    s.expr = 0.0f;
+    s.lastFollow = 1.0f;
+    s.vowel.reset();
+}
+
+void ChoirEngine::allocateSingers()
+{
+    const int target = singersForChoirSize (params.choirSize);
+    if (target == lastSingerTarget && params.harmonyMode == lastAllocMode)
+        return;
+    lastSingerTarget = target;
+    lastAllocMode = params.harmonyMode;
+
+    std::array<bool, NumSections> activeSec { true, true, true, true };
+    if (params.harmonyMode == HarmonyMode::UpperVoices) activeSec = { true, true, false, false };
+    if (params.harmonyMode == HarmonyMode::LowerVoices) activeSec = { false, false, true, true };
+
+    std::array<int, NumSections> counts {};
+    int remaining = target;
+    // First singers go to the parts that matter most for harmony.
+    static const int priority[] = { Alto, Bass, Tenor, Soprano };
+    for (int s : priority)
+        if (activeSec[(size_t) s] && remaining > 0) { counts[(size_t) s] = 1; --remaining; }
+
+    static const float weights[] = { 0.28f, 0.26f, 0.22f, 0.24f };
+    float wsum = 0.0f;
+    for (int s = 0; s < NumSections; ++s) if (activeSec[(size_t) s]) wsum += weights[s];
+    if (remaining > 0 && wsum > 0.0f)
+    {
+        std::array<float, NumSections> frac {};
+        int given = 0;
+        for (int s = 0; s < NumSections; ++s)
+        {
+            if (! activeSec[(size_t) s]) continue;
+            const float share = (float) remaining * weights[s] / wsum;
+            const int whole = (int) std::floor (share);
+            counts[(size_t) s] += whole;
+            given += whole;
+            frac[(size_t) s] = share - (float) whole;
+        }
+        for (int left = remaining - given; left > 0; --left)
+        {
+            int best = -1;
+            for (int s = 0; s < NumSections; ++s)
+                if (activeSec[(size_t) s] && (best < 0 || frac[(size_t) s] > frac[(size_t) best])) best = s;
+            if (best < 0) break;
+            counts[(size_t) best] += 1;
+            frac[(size_t) best] = -1.0f;
+        }
+    }
+
+    for (int s = 0; s < NumSections; ++s)
+    {
+        counts[(size_t) s] = std::min (counts[(size_t) s], kSingersPerSection);
+        sectionCount[(size_t) s] = counts[(size_t) s];
+        for (int i = 0; i < kSingersPerSection; ++i)
+        {
+            Singer& singer = *singers[(size_t) (s * kSingersPerSection + i)];
+            const bool should = i < counts[(size_t) s];
+            if (should && ! singer.active)
+            {
+                if (singer.fade <= 0.0f)
+                {
+                    configureSinger (singer, s, i, counts[(size_t) s]);
+                    singer.vowel.setFormants (getFormants (vowelForVocalType (params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType), s),
+                                              singer.rFormant * std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f));
+                    singer.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s].range.centre(), params.a4), style.softness);
+                    const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f
+                                        + ((s == Tenor || s == Bass) ? 2.5f : 0.0f) * params.space / 100.0f;
+                    singer.delay = singer.pendingDelay = (int) (delayMs * 0.001f * (float) sr);
+                    singer.psola.reset ((double) (analyzer.getWritten() - latency - singer.delay));
+                }
+                singer.active = true;
+            }
+            else if (! should)
+            {
+                singer.active = false;
+            }
+        }
+    }
+}
+
+void ChoirEngine::refreshVowelFormants()
+{
+    const VocalType vt = params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType;
+    const Vowel v = vowelForVocalType (vt);
+    const float shift = std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f);
+    for (auto& sp : singers)
+    {
+        Singer& s = *sp;
+        s.vowel.setFormants (getFormants (v, s.section), s.rFormant * shift);
+        s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre(), params.a4), style.softness);
+    }
+}
+
+//==============================================================================
+void ChoirEngine::handlePitchFrame (const PitchFrame& f)
+{
+    analyzer.addPitchFrame (f);
+    const float hop = (float) tracker.getHop() / (float) sr;
+
+    PitchFrame g = f;
+    if (g.voiced)
+        g.midi = hzToMidi (g.hz, params.a4);
+
+    if (params.key == 0)
+    {
+        if (g.voiced)
+            keyTracker.addNote ((int) std::lround (g.midi), hop, g.clarity);
+        keyTonic = keyTracker.update (hop, Scale { 0, params.scale }.isMinorFamily());
+    }
+
+    const Scale scale = currentScale();
+    ControlFrame cf;
+    cf.time = f.centre;
+    cf.voiced = g.voiced;
+    cf.inputMidi = g.voiced ? g.midi : lastInputMidi;
+    cf.inputHz = g.voiced ? g.hz : midiToHz (lastInputMidi, params.a4);
+    if (g.voiced)
+        lastInputMidi = g.midi;
+
+    const bool frozen = params.freeze;
+    if (scoreSource != nullptr)
+    {
+        Voicing v;
+        int lead = -1, sop = 0;
+        if (scoreSource->voicingAt (f.centre, v, lead, sop))
+        {
+            cf.voicing = v;
+            cf.leadNote = lead;
+            cf.sopShift = sop;
+        }
+        else if (controlCount > 0)
+        {
+            cf.voicing = control[(size_t) ((controlCount - 1) & controlMask)].voicing;
+        }
+    }
+    else
+    {
+        HarmonyContext ctx;
+        ctx.scale = scale;
+        ctx.mode = params.harmonyMode;
+        ctx.style = params.style;
+        for (int s = 0; s < NumSections; ++s)
+        {
+            ctx.ranges[(size_t) s] = params.sections[(size_t) s].range;
+            ctx.active[(size_t) s] = sectionCount[(size_t) s] > 0;
+        }
+        ctx.wordsMode = params.vocalType == VocalType::Words;
+        ctx.freeze = frozen;
+        ctx.midi = params.midiEnabled ? midiHeld : NoteSet{};
+        ctx.midiControlsHarmony = params.midiEnabled;
+        harmonizer.process (g, ctx, hop);
+        cf.voicing = harmonizer.getVoicing();
+        cf.leadNote = harmonizer.getLeadNote();
+        cf.sopShift = harmonizer.getSopranoShift();
+    }
+
+    // Envelope and gate: sing while the lead sings, hold briefly through consonants.
+    const float level = std::pow (clampv ((f.rmsDb + 48.0f) / 33.0f, 0.0f, 1.0f), 0.8f);
+    if (g.voiced)
+    {
+        unvoicedTime = 0.0f;
+        lastLevel = std::max (level, 0.05f);
+    }
+    else
+    {
+        unvoicedTime += hop;
+    }
+    cf.sounding = unvoicedTime < 0.15f;
+    cf.level = cf.sounding ? (g.voiced ? lastLevel : std::max (level, lastLevel * 0.8f)) : 0.0f;
+
+    // MIDI on its own plays the choir like an instrument.
+    if (params.midiEnabled && ! midiHeld.empty() && unvoicedTime > 0.15f)
+    {
+        cf.sounding = true;
+        cf.level = 0.3f + 0.55f * midiVelocity;
+    }
+
+    if (frozen)
+    {
+        if (! wasFrozen)
+            frozenLevel = std::max (lastLevel, 0.55f);
+        cf.sounding = true;
+        cf.level = frozenLevel;
+        if (controlCount > 0)
+        {
+            const auto& prev = control[(size_t) ((controlCount - 1) & controlMask)];
+            cf.voicing = prev.voicing;
+            cf.leadNote = prev.leadNote;
+            cf.sopShift = prev.sopShift;
+            cf.inputHz = prev.inputHz;
+            cf.inputMidi = prev.inputMidi;
+        }
+    }
+
+    // On a voice onset, open the gate slightly early on frames not yet played (the
+    // output runs behind the analysis), so leading consonants and breaths come through.
+    if (g.voiced && ! lastVoiced && ! frozen)
+    {
+        const int64_t lookahead = std::min<int64_t> ((int64_t) (0.03 * sr), (int64_t) (latency - tracker.getAnalysisDelay() - 2 * kChunk));
+        for (int64_t i = controlCount - 1; i >= 0 && i > controlCount - 32; --i)
+        {
+            auto& prev = control[(size_t) (i & controlMask)];
+            if (prev.time < f.centre - lookahead)
+                break;
+            prev.sounding = true;
+            prev.level = std::max (prev.level, lastLevel * 0.6f);
+            prev.voicing = cf.voicing;
+            prev.leadNote = cf.leadNote;
+            prev.sopShift = cf.sopShift;
+        }
+    }
+    lastVoiced = g.voiced;
+
+    control[(size_t) (controlCount & controlMask)] = cf;
+    ++controlCount;
+}
+
+const ChoirEngine::ControlFrame& ChoirEngine::controlAt (int64_t t) const
+{
+    static const ControlFrame empty;
+    if (controlCount == 0)
+        return empty;
+    const int64_t newest = controlCount - 1;
+    const int64_t oldest = std::max<int64_t> (0, controlCount - (controlMask + 1));
+    if (control[(size_t) (oldest & controlMask)].time > t)
+        return control[(size_t) (oldest & controlMask)];
+    int64_t lo = oldest, hi = newest;
+    while (lo < hi)
+    {
+        const int64_t mid = (lo + hi + 1) / 2;
+        if (control[(size_t) (mid & controlMask)].time <= t) lo = mid;
+        else hi = mid - 1;
+    }
+    return control[(size_t) (lo & controlMask)];
+}
+
+//==============================================================================
+void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float dt)
+{
+    // Apply a pending timing change only while silent, to avoid glitches.
+    if (s.pendingDelay != s.delay && s.gate < 0.001f && s.amp < 0.001f)
+    {
+        s.delay = s.pendingDelay;
+        s.psola.reset ((double) (analyzer.getWritten() - latency - s.delay));
+    }
+
+    const int sec = s.section;
+    const int cnt = cf.voicing.count[(size_t) sec];
+    const int note = cnt > 0 ? cf.voicing.notes[(size_t) sec][(size_t) (s.index % cnt)] : -1;
+    const bool singing = cf.sounding && note >= 0;
+
+    if (note >= 0 && (float) note != s.targetMidi)
+    {
+        const bool fresh = s.currentMidi < 0.0f || (s.amp < 0.02f && s.gate < 0.02f);
+        if (fresh || std::abs ((float) note - s.currentMidi) >= 2.0f)
+            s.scoop = -style.scoopCents * s.rScoop / 100.0f;
+        s.targetMidi = (float) note;
+        if (fresh)
+            s.currentMidi = (float) note;
+        s.noteAge = 0.0f;
+    }
+
+    // Is this singer doubling the lead melody (possibly in another octave)?
+    s.doublesMelody = cf.leadNote >= 0 && note >= 0 && wrapPc (note - cf.leadNote) == 0
+                      && (sec == Soprano || params.harmonyMode == HarmonyMode::Unison);
+    s.octaveShift = s.doublesMelody ? (float) (note - cf.leadNote) : 0.0f;
+
+    const float humanize = clampv (params.humanize / 100.0f, 0.0f, 2.0f);
+    const float glideT = std::max (0.005f, style.glideMs * 0.001f * clampv (params.glide / 100.0f, 0.0f, 3.0f) * s.rGlide);
+    const float gc = std::exp (-dt / (glideT / 3.0f));
+    if (s.targetMidi >= 0.0f)
+        s.currentMidi = s.targetMidi + (s.currentMidi - s.targetMidi) * gc;
+    s.noteAge += dt;
+    s.scoop *= std::exp (-dt / 0.06f);
+
+    // Vibrato fades in after the onset delay.
+    const float onset = clampv ((s.noteAge - style.vibratoOnsetS) / 0.35f, 0.0f, 1.0f);
+    const float vibCents = style.vibratoCents * clampv (params.vibrato / 100.0f, 0.0f, 2.0f) * s.rVibDepth * onset * onset;
+    s.vibPhase += (style.vibratoRateHz + s.rVibRate) * dt;
+    s.vibPhase -= std::floor (s.vibPhase);
+    const float vib = vibCents * std::sin (kTwoPi * s.vibPhase) / 100.0f;
+    const float drift = s.drift.tick (s.rng, dt) * style.driftCents * humanize / 100.0f;
+    const float detune = s.rDetune * style.detuneCents * humanize / 100.0f;
+
+    const float correction = clampv (params.pitchCorrection / 100.0f, 0.0f, 1.0f);
+    const float exprTarget = (cf.voiced && cf.leadNote >= 0) ? clampv (cf.inputMidi - (float) cf.leadNote, -0.4f, 0.4f) * (1.0f - correction) : 0.0f;
+    s.expr += (exprTarget - s.expr) * (1.0f - std::exp (-dt / 0.04f));
+
+    const float midi = s.currentMidi + detune + drift + vib + s.scoop + s.expr;
+    const float hz = midiToHz (midi, params.a4);
+    const float melodyMicro = detune + drift + vib * 0.35f + s.scoop;
+
+    // Words: PSOLA controls.
+    static const float sectionFormant[] = { 1.05f, 1.02f, 0.98f, 0.94f };
+    const float formantParam = std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f);
+    if (cf.voiced && cf.inputHz > 30.0f)
+        s.lastFollow = clampv (std::pow (hz / cf.inputHz, 0.2f), 0.82f, 1.22f);
+    if (s.doublesMelody && correction < 0.999f)
+    {
+        s.pctl.fixedRatio = std::exp2 ((s.octaveShift + melodyMicro) / 12.0f);
+    }
+    else
+    {
+        s.pctl.fixedRatio = 0.0f;
+        s.pctl.targetHz = hz;
+    }
+    s.pctl.formant = sectionFormant[sec] * s.rFormant * formantParam * s.lastFollow;
+    s.pctl.gain = s.rGain * s.depthGain;
+    s.pctl.unvoicedGain = 0.6f;
+
+    // Vowels: synth pitch and amplitude.
+    if (s.doublesMelody && cf.voiced && correction < 0.999f)
+        s.synthF0 = cf.inputHz * std::exp2 ((s.octaveShift + melodyMicro) / 12.0f);
+    else
+        s.synthF0 = hz;
+    const float shimmer = 1.0f + 0.06f * s.shimmer.tick (s.rng, dt) * humanize;
+    s.ampTarget = singing ? cf.level * s.rGain * s.depthGain * shimmer : 0.0f;
+    s.ampTarget = clampv (s.ampTarget, 0.0f, 1.5f);
+
+    // Fade for joining/leaving the choir.
+    const float fadeStep = dt / 0.08f;
+    s.fade = clampv (s.fade + (s.active ? fadeStep : -fadeStep), 0.0f, 1.0f);
+}
+
+//==============================================================================
+void ChoirEngine::process (const float* inL, const float* inR, float* outL, float* outR, int n, const StemPlayback* stems)
+{
+    if (! prepared)
+    {
+        std::memset (outL, 0, sizeof (float) * (size_t) n);
+        if (outR != nullptr) std::memset (outR, 0, sizeof (float) * (size_t) n);
+        return;
+    }
+
+    // Reconfigure on parameter changes that affect the singers.
+    allocateSingers();
+    const bool styleChanged = params.style != lastStyle;
+    if (params.vocalType != lastVocal || params.formant != lastFormantParam || styleChanged)
+    {
+        lastVocal = params.vocalType;
+        lastFormantParam = params.formant;
+        refreshVowelFormants();
+    }
+    if (params.humanize != lastHumanize || styleChanged)
+    {
+        lastHumanize = params.humanize;
+        lastStyle = params.style;
+        for (auto& sp : singers)
+        {
+            const bool back = sp->section == Tenor || sp->section == Bass;
+            const float delayMs = sp->rDelay * style.timingMs * params.humanize / 100.0f + (back ? 2.5f : 0.0f) * params.space / 100.0f;
+            sp->pendingDelay = (int) (delayMs * 0.001f * (float) sr);
+        }
+    }
+
+    // Freeze engages on the PSOLA analyser too (Words mode sustains your own voice).
+    if (params.freeze != wasFrozen)
+    {
+        if (params.freeze)
+            analyzer.captureFreeze (analyzer.getWritten() - latency, (int) (0.25 * sr));
+        else
+            analyzer.releaseFreeze();
+    }
+
+    for (int offset = 0; offset < n; offset += kChunk)
+    {
+        const int c = std::min (kChunk, n - offset);
+        processChunk (inL + offset, inR != nullptr ? inR + offset : nullptr,
+                      outL + offset, outR != nullptr ? outR + offset : nullptr, c, stems, offset);
+    }
+    wasFrozen = params.freeze;
+    publishSnapshot();
+}
+
+void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL, float* outR, int c,
+                                const StemPlayback* stems, int offset)
+{
+    const float dt = (float) c / (float) sr;
+    ++chunkCounter;
+
+    for (int i = 0; i < c; ++i)
+    {
+        mono[(size_t) i] = inR != nullptr ? 0.5f * (inL[i] + inR[i]) : inL[i];
+        inPeakAccum = std::max (inPeakAccum, std::abs (mono[(size_t) i]));
+    }
+
+    tracker.push (mono.data(), c);
+    for (int k = 0; k < tracker.getNumNewFrames(); ++k)
+        handlePitchFrame (tracker.getNewFrame (k));
+
+    analyzer.pushInput (mono.data(), c);
+    analyzer.updateMarks();
+    const int64_t tOut = analyzer.getWritten() - c - latency;
+
+    // Lead voice, delayed to line up with the choir.
+    float leadL[kChunk], leadR[kChunk];
+    const int ld = (int) leadDelayL.size();
+    for (int i = 0; i < c; ++i)
+    {
+        leadL[i] = leadDelayL[(size_t) leadDelayPos];
+        leadR[i] = leadDelayR[(size_t) leadDelayPos];
+        leadDelayL[(size_t) leadDelayPos] = inL[i];
+        leadDelayR[(size_t) leadDelayPos] = inR != nullptr ? inR[i] : inL[i];
+        leadDelayPos = (leadDelayPos + 1) % ld;
+    }
+
+    std::fill (sectionBuf.begin(), sectionBuf.end(), 0.0f);
+    auto sec = [this] (int s, int ch) { return sectionBuf.data() + (size_t) (s * 2 + ch) * kChunk; };
+
+    if (stems != nullptr)
+    {
+        for (int s = 0; s < NumSections; ++s)
+            for (int ch = 0; ch < 2; ++ch)
+                if (const float* src = stems->sections[(size_t) (s * 2 + ch)])
+                    std::memcpy (sec (s, ch), src + offset, sizeof (float) * (size_t) c);
+    }
+    else
+    {
+        const bool words = params.vocalType == VocalType::Words;
+        const float breath = style.breath * clampv (params.breath / 100.0f, 0.0f, 2.0f) * 0.35f;
+        const float attC = onePoleCoeff (style.attackS, sr);
+        const float relC = onePoleCoeff (style.releaseS, sr);
+        const float gateAtt = onePoleCoeff (0.01f, sr), gateRel = onePoleCoeff (0.12f, sr);
+
+        std::array<float, NumSections> norm {};
+        for (int s = 0; s < NumSections; ++s)
+            norm[(size_t) s] = sectionCount[(size_t) s] > 0 ? 0.8f / std::sqrt ((float) sectionCount[(size_t) s]) : 0.5f;
+
+        for (auto& sp : singers)
+        {
+            Singer& s = *sp;
+            if ((! s.active && s.fade <= 0.0f) || ((renderMask >> s.section) & 1) == 0)
+                continue;
+
+            const ControlFrame& cf = controlAt (tOut - s.delay);
+            const float fadeStart = s.fade;
+            updateSingerControl (s, cf, dt);
+            const float fadeEnd = s.fade;
+
+            std::fill (scratch.begin(), scratch.begin() + c, 0.0f);
+            if (words)
+            {
+                s.psola.render (analyzer, tOut - s.delay, c, scratch.data(), s.pctl, s.rng);
+                const float gateTarget = cf.sounding ? 1.0f : 0.0f;
+                for (int i = 0; i < c; ++i)
+                {
+                    s.gate = gateTarget + (s.gate - gateTarget) * (gateTarget > s.gate ? gateAtt : gateRel);
+                    scratch[(size_t) i] *= s.gate;
+                }
+                s.amp = 0.0f;
+            }
+            else
+            {
+                const float att = std::pow (attC, 1.0f / s.rAttack);
+                for (int i = 0; i < c; ++i)
+                {
+                    s.amp = s.ampTarget + (s.amp - s.ampTarget) * (s.ampTarget > s.amp ? att : relC);
+                    if (s.amp > 1.0e-4f)
+                        scratch[(size_t) i] = s.vowel.process (glottal, s.synthF0, style.softness, breath, s.rng) * s.amp;
+                }
+                s.gate = 0.0f;
+            }
+
+            const float g = norm[(size_t) s.section];
+            float* L = sec (s.section, 0);
+            float* R = sec (s.section, 1);
+            const float fadeInc = (fadeEnd - fadeStart) / (float) c;
+            float fade = fadeStart;
+            for (int i = 0; i < c; ++i)
+            {
+                fade += fadeInc;
+                const float v = scratch[(size_t) i] * g * fade;
+                L[i] += v * s.panL;
+                R[i] += v * s.panR;
+            }
+        }
+    }
+
+    // Dry stems for offline rendering.
+    if (stemTap != nullptr)
+    {
+        for (int ch = 0; ch < NumSections * 2; ++ch)
+            if (stemTap[ch] != nullptr)
+                std::memcpy (stemTap[ch] + stemTapOffset, sectionBuf.data() + (size_t) ch * kChunk, sizeof (float) * (size_t) c);
+        stemTapOffset += c;
+    }
+
+    // Section mix: width, level, balance.
+    std::fill (choirL.begin(), choirL.end(), 0.0f);
+    std::fill (choirR.begin(), choirR.end(), 0.0f);
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const float g = sectionGain[(size_t) s].next();
+        const float pl = sectionPanL[(size_t) s].next(), pr = sectionPanR[(size_t) s].next();
+        const float w = sectionWidth[(size_t) s].next();
+        const float* L = sec (s, 0);
+        const float* R = sec (s, 1);
+        float peak = 0.0f;
+        for (int i = 0; i < c; ++i)
+        {
+            const float m = 0.5f * (L[i] + R[i]), d = 0.5f * (L[i] - R[i]) * w;
+            const float l = (m + d) * g * pl, r = (m - d) * g * pr;
+            choirL[(size_t) i] += l;
+            choirR[(size_t) i] += r;
+            peak = std::max (peak, std::max (std::abs (l), std::abs (r)));
+        }
+        peakAccum[(size_t) s] = std::max (peakAccum[(size_t) s], peak);
+    }
+
+    // Choir bus processing.
+    tone.process (choirL.data(), choirR.data(), c);
+    const float warmth = warmthAmt.next();
+    if (warmth > 0.001f)
+    {
+        for (int i = 0; i < c; ++i)
+        {
+            choirL[(size_t) i] = choirL[(size_t) i] * (1.0f - warmth) + softSaturate (choirL[(size_t) i], warmth) * warmth;
+            choirR[(size_t) i] = choirR[(size_t) i] * (1.0f - warmth) + softSaturate (choirR[(size_t) i], warmth) * warmth;
+        }
+    }
+    glue.process (choirL.data(), choirR.data(), c, clampv (params.glue / 100.0f, 0.0f, 1.0f));
+
+    const float cg = choirGain.next(), lg = leadGain.next(), ls = leadSend.next();
+    const float wet = wetGain.next(), dry = dryChoirGain.next(), vol = volume.next();
+    for (int i = 0; i < c; ++i)
+    {
+        choirL[(size_t) i] *= cg;
+        choirR[(size_t) i] *= cg;
+        revInL[(size_t) i] = choirL[(size_t) i] + leadL[i] * ls;
+        revInR[(size_t) i] = choirR[(size_t) i] + leadR[i] * ls;
+    }
+    reverb.process (revInL.data(), revInR.data(), revOutL.data(), revOutR.data(), c);
+
+    for (int i = 0; i < c; ++i)
+    {
+        float l = (leadL[i] * lg + choirL[(size_t) i] * dry + revOutL[(size_t) i] * wet) * vol;
+        float r = (leadR[i] * lg + choirR[(size_t) i] * dry + revOutR[(size_t) i] * wet) * vol;
+        outL[i] = l;
+        if (outR != nullptr) outR[i] = r;
+        else outL[i] = 0.5f * (l + r);
+    }
+    if (outR != nullptr)
+        limiter.process (outL, outR, c);
+    else
+        limiter.process (outL, outL, c);
+
+    for (int i = 0; i < c; ++i)
+        outPeakAccum = std::max (outPeakAccum, std::max (std::abs (outL[i]), outR != nullptr ? std::abs (outR[i]) : 0.0f));
+}
+
+//==============================================================================
+void ChoirEngine::publishSnapshot()
+{
+    const int64_t tOut = analyzer.getWritten() - latency;
+    const ControlFrame& cf = controlAt (tOut);
+
+    snap.totalSingers = 0;
+    for (int s = 0; s < NumSections; ++s)
+    {
+        snap.sectionSingers[(size_t) s] = sectionCount[(size_t) s];
+        snap.totalSingers += sectionCount[(size_t) s];
+        const bool on = cf.sounding;
+        snap.sectionNotes[(size_t) s] = { on && cf.voicing.count[(size_t) s] > 0 ? cf.voicing.notes[(size_t) s][0] : -1,
+                                          on && cf.voicing.count[(size_t) s] > 1 ? cf.voicing.notes[(size_t) s][1] : -1 };
+    }
+    snap.leadVoiced = cf.voiced;
+    snap.leadMidi = cf.inputMidi;
+    snap.leadNote = cf.leadNote;
+    const Scale scale = currentScale();
+    snap.keyTonic = scale.tonic;
+    snap.keyMinor = scale.isMinorFamily();
+    snap.keyConfidence = params.key == 0 ? keyTracker.getConfidence() : 1.0f;
+    const std::string& name = harmonizer.getChord().name;
+    std::snprintf (snap.chordName, sizeof (snap.chordName), "%s", scoreSource != nullptr ? "" : name.c_str());
+    snap.frozen = params.freeze;
+
+    if (! snapLock.test_and_set (std::memory_order_acquire))
+    {
+        auto peaks = snapShared.sectionPeak;
+        const float inPk = snapShared.inputPeak, outPk = snapShared.outputPeak;
+        snapShared = snap;
+        for (int s = 0; s < NumSections; ++s)
+            snapShared.sectionPeak[(size_t) s] = std::max (peaks[(size_t) s], peakAccum[(size_t) s]);
+        snapShared.inputPeak = std::max (inPk, inPeakAccum);
+        snapShared.outputPeak = std::max (outPk, outPeakAccum);
+        snapLock.clear (std::memory_order_release);
+        peakAccum.fill (0.0f);
+        inPeakAccum = outPeakAccum = 0.0f;
+    }
+}
+
+EngineSnapshot ChoirEngine::takeSnapshot()
+{
+    while (snapLock.test_and_set (std::memory_order_acquire)) {}
+    EngineSnapshot copy = snapShared;
+    snapShared.sectionPeak.fill (0.0f);
+    snapShared.inputPeak = snapShared.outputPeak = 0.0f;
+    snapLock.clear (std::memory_order_release);
+    return copy;
+}
+} // namespace sc
