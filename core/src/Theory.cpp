@@ -189,6 +189,7 @@ static std::string qualitySuffix (int third, int fifth, int seventh)
 
     if (seventh < 0)
         return q;
+    if (seventh == 9) return q + "6";
     if (q == "" && seventh == 11) return "maj7";
     if (q == "" && seventh == 10) return "7";
     if (q == "m" && seventh == 10) return "m7";
@@ -246,7 +247,9 @@ std::vector<Chord> buildChordVocabulary (const Scale& scale, Style style)
         if (fifth == 6) prior *= 0.5f;   // diminished
         if (fifth == 8) prior *= 0.2f;   // augmented
 
-        if (sevenths)
+        if (sevenths && (d == 0 || d == 3) && third == 4)
+            v.push_back (makeChord (root, { 0, third, fifth, 9 }, d, prior, flats));   // gospel I6 / IV6
+        else if (sevenths)
             v.push_back (makeChord (root, { 0, third, fifth, seventh }, d, prior, flats));
         else
             v.push_back (makeChord (root, { 0, third, fifth }, d, prior, flats));
@@ -646,26 +649,35 @@ Voicing voiceChord (const VoicingRequest& req)
         }
 
         // Chord coverage (the lead melody counts as present).
-        std::array<int, 4> roleCount {};
+        // Coverage counts the lead melody; doubling counts only the choir's own voices
+        // (a soprano doubling the melody is not an extra third).
+        std::array<int, 4> roleCount {}, choirCount {};
         int sounding = 0;
-        auto countPc = [&] (int note)
-        {
-            const int role = chord.roleOf (note);
-            if (role >= 0) ++roleCount[(size_t) role];
-        };
-        if (leadPc >= 0) countPc (leadPc);
+        if (leadPc >= 0)
+            if (const int role = chord.roleOf (leadPc); role >= 0) ++roleCount[(size_t) role];
         for (int s = 0; s < NumSections; ++s)
-            if (cur[(size_t) s] >= 0) { countPc (cur[(size_t) s]); ++sounding; }
+        {
+            const int n = cur[(size_t) s];
+            if (n < 0) continue;
+            ++sounding;
+            const int role = chord.roleOf (n);
+            if (role < 0) continue;
+            ++roleCount[(size_t) role];
+            if (! (s == Soprano && fixed[Soprano]))
+                ++choirCount[(size_t) role];
+        }
         const int voicesAvailable = sounding + (leadPc >= 0 ? 1 : 0);
         if (voicesAvailable >= 2)
         {
             if (roleCount[0] == 0) cost += 4.0f;
             if (roleCount[1] == 0 && chord.numTones > 1) cost += 3.5f;
-            if (voicesAvailable >= 3 && roleCount[2] == 0 && chord.numTones > 2) cost += 0.4f;
+            if (voicesAvailable >= 3 && roleCount[2] == 0 && chord.numTones > 2) cost += sounding >= 4 ? 0.9f : 0.4f;
             if (chord.numTones > 3 && roleCount[3] == 0) cost += voicesAvailable >= 4 ? 1.5f : 0.6f;
         }
-        if (strict && roleCount[1] > 1) cost += 0.8f;
-        if (roleCount[3] > 1) cost += 3.0f;
+        const int leadRole = leadPc >= 0 ? chord.roleOf (leadPc) : -1;
+        const int thirds = choirCount[1] + (leadRole == 1 ? 1 : 0);
+        if (strict && thirds > 1) cost += 0.8f;
+        if (choirCount[3] + (leadRole == 3 ? 1 : 0) > 1) cost += 3.0f;
         {
             int lt = 0;
             for (int s = 0; s < NumSections; ++s)
@@ -689,7 +701,7 @@ Voicing voiceChord (const VoicingRequest& req)
                 if (p >= 0)
                 {
                     const int m = std::abs (n - p);
-                    cost += (float) m * (s == Bass ? 0.18f : 0.32f);
+                    cost += (float) m * (s == Bass ? 0.16f : 0.24f);
                     if (m > 7 && s != Bass) cost += 1.0f;
                     if (m > 12) cost += 2.0f;
                 }
