@@ -870,10 +870,11 @@ StringArray LearnSession::getExportFiles (ExportItem item)
     }
 
     if (owned->stems == nullptr || owned->stale.load() || exportWorker != nullptr
-        || exported.takeId != owned->takeId || exported.stemsId != owned->stems->id)
+        || exported.takeId != owned->takeId)
         return files;
     const String signature = String (owned->stems->id) + "|" + (getMixSignature ? getMixSignature() : String());
     const bool fullReady = exported.fullSignature == signature && exported.full.existsAsFile();
+    const bool sectionsReady = exported.sectionsSignature == signature;
     switch (item)
     {
         case ExportItem::FullChoir:
@@ -885,12 +886,12 @@ StringArray LearnSession::getExportFiles (ExportItem item)
         case ExportItem::Basses:
         {
             const int s = (int) item - (int) ExportItem::Sopranos;
-            if (s < exported.sections.size() && File (exported.sections[s]).existsAsFile())
+            if (sectionsReady && s < exported.sections.size() && File (exported.sections[s]).existsAsFile())
                 files.add (exported.sections[s]);
             break;
         }
         case ExportItem::AllStems:
-            if (! fullReady)
+            if (! fullReady || ! sectionsReady)
                 break;
             for (const auto& f : exported.sections)
                 if (File (f).existsAsFile())
@@ -932,7 +933,8 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
     if (automatic && signature == exportFailedSignature)
         return;
     const auto folder = exportFolder();
-    bool needSections = exported.stemsId != stems->id || exported.sections.size() != sc::NumSections;
+    // The sections stand on the stage and go through the mics: they follow the mix too.
+    bool needSections = exported.sectionsSignature != signature || exported.sections.size() != sc::NumSections;
     for (const auto& f : exported.sections)
         needSections = needSections || ! File (f).existsAsFile();
     const bool needFull = exported.fullSignature != signature || ! exported.full.existsAsFile();
@@ -945,9 +947,9 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
 
     // New names for new sound: a DAW that plays the earlier files from here keeps them as they were.
     auto plan = std::make_shared<ExportFiles> (exported);
-    plan->stemsId = stems->id;
     if (needSections)
     {
+        plan->sectionsSignature = signature;
         plan->sections.clear();
         for (auto* name : sectionFileNames)
             plan->sections.add (folder.getNonexistentChildFile (String ("Sanctuary Choir - ") + name, ".wav", true).getFullPathName());
@@ -980,41 +982,30 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
                 for (int i = 0; i < len; ++i)
                     channels[ch][i] = pos + i < (int64_t) st.data[ch].size() ? (float) st.data[ch][(size_t) (pos + i)] * st.scale[ch] : 0.0f;
         };
-        if (needSections)
-        {
-            std::vector<float> l (8192), r (8192);
-            for (int s = 0; s < sc::NumSections && *ok; ++s)
-            {
-                StereoWavWriter w;
-                *ok = w.open (File (plan->sections[s]), rate) && w.writeSilence (offset);
-                const auto& srcL = st.data[(size_t) s * 2];
-                const auto& srcR = st.data[(size_t) s * 2 + 1];
-                for (int64_t pos = 0; pos < st.length && *ok && ! exportCancel.load(); pos += (int64_t) l.size())
-                {
-                    const int len = (int) std::min<int64_t> ((int64_t) l.size(), st.length - pos);
-                    for (int i = 0; i < len; ++i)
-                    {
-                        const auto k = (size_t) (pos + i);
-                        l[(size_t) i] = k < srcL.size() ? (float) srcL[k] * st.scale[(size_t) s * 2] : 0.0f;
-                        r[(size_t) i] = k < srcR.size() ? (float) srcR[k] * st.scale[(size_t) s * 2 + 1] : 0.0f;
-                    }
-                    *ok = w.write (l.data(), r.data(), len);
-                }
-                *ok = *ok && ! exportCancel.load() && w.close();
-            }
-        }
-        auto mix = [&] (const File& file, bool roomOnly)
+        auto mix = [&] (const File& file, const sc::EngineParams& p, bool roomOnly, float tail)
         {
             StereoWavWriter w;
             *ok = w.open (file, rate) && w.writeSilence (offset)
-                  && sc::mixdownStemsStreaming (rate, st.length, params, roomOnly, 4.0f, readStems,
+                  && sc::mixdownStemsStreaming (rate, st.length, p, roomOnly, tail, readStems,
                                                 [&] (const float* l, const float* r, int len) { return ! exportCancel.load() && w.write (l, r, len); })
                   && w.close();
         };
+        // Each section where it stands on the stage, through the mics, without the hall.
+        for (int s = 0; s < sc::NumSections && needSections && *ok; ++s)
+        {
+            sc::EngineParams one = params;
+            one.reverb = 0.0f;
+            for (int o = 0; o < sc::NumSections; ++o)
+            {
+                one.sections[(size_t) o].mute = o != s;
+                one.sections[(size_t) o].solo = false;
+            }
+            mix (File (plan->sections[s]), one, false, 0.3f);
+        }
         if (needFull && *ok)
-            mix (plan->full, false);
+            mix (plan->full, params, false, 4.0f);
         if (needRoom && *ok)
-            mix (plan->room, true);
+            mix (plan->room, params, true, 4.0f);
         exportDone = true;
     });
 
@@ -1183,7 +1174,7 @@ String LearnSession::exportStateName() const
     const String signature = String (owned->stems->id) + "|" + (getMixSignature ? getMixSignature() : String());
     if (signature == exportFailedSignature)
         return "failed";
-    bool ready = exported.takeId == owned->takeId && exported.stemsId == owned->stems->id
+    bool ready = exported.takeId == owned->takeId && exported.sectionsSignature == signature
                  && exported.fullSignature == signature && exported.full.existsAsFile() && exported.sections.size() == sc::NumSections;
     for (const auto& f : exported.sections)
         ready = ready && File (f).existsAsFile();

@@ -60,7 +60,7 @@
       if (d.type === "bool") return v > 0.5 ? "On" : "Off";
       if (d.type === "int") return noteName(Math.round(v));
       switch (id) {
-        case "volume": case "tone": case "leadLevel": case "choirLevel":
+        case "volume": case "tone": case "leadLevel": case "choirLevel": case "micClose": case "micTree": case "micRoom":
           return v <= -59.9 ? "-inf dB" : (Math.abs(v) < 0.05 ? "0.0" : v.toFixed(1)) + " dB";
         case "preDelay": return Math.round(v) + " ms";
         case "lowCut": case "highCut": return v >= 1000 ? (v / 1000).toFixed(1) + " kHz" : Math.round(v) + " Hz";
@@ -68,6 +68,7 @@
         case "formant": return Math.abs(v) < 0.5 ? "Natural" : (v > 0 ? "+" : "") + Math.round(v);
         default: break;
       }
+      if (id.endsWith("Depth")) return v < 33 ? "Front" : v < 67 ? "Middle" : "Back";
       if (id.endsWith("Pan")) return Math.abs(v) < 0.01 ? "C" : (v < 0 ? "L" : "R") + Math.round(Math.abs(v) * 100);
       if (id.endsWith("Level")) { const g = Math.pow(v / 0.75, 2); return g < 0.0001 ? "-inf" : (20 * Math.log10(g)).toFixed(1) + " dB"; }
       return Math.round(v) + " %";

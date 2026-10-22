@@ -663,8 +663,10 @@ TEST (liveMonitoringLowLatency)
         std::vector<float> y (in.size(), 0.0f);
         for (size_t pos = 0; pos + 256 <= in.size(); pos += 256)
             eng.process (in.data() + pos, nullptr, y.data() + pos, nullptr, 256);
+        // When the choir starts to move off the old note (a level the tracker can't fake with an
+        // octave slip in the middle of the glide, as a midpoint can).
         for (const auto& f : PitchTracker::analyse (y.data(), (int64_t) y.size(), sr))
-            if (f.voiced && f.midi > 62.0f && (double) f.centre / sr * 1000.0 > stepMs - 50.0)
+            if (f.voiced && f.midi > 60.25f && (double) f.centre / sr * 1000.0 > stepMs - 50.0)
                 return (double) f.centre / sr * 1000.0 - stepMs;
         return 1.0e9;
     };
@@ -672,7 +674,6 @@ TEST (liveMonitoringLowLatency)
     const double studioWords = follow (VocalType::Words, false), liveWords = follow (VocalType::Words, true);
     std::printf ("  choir follows a note change after: vowels %.1f ms studio / %.1f ms live, words %.1f / %.1f ms\n",
                  studioAh, liveAh, studioWords, liveWords);
-    // (the sung glide itself takes ~17 ms to cross the midpoint)
     CHECK (studioAh - liveAh > 18.0 && studioAh - liveAh < 30.0);   // vowels run ~24 ms closer to the voice
     CHECK (liveAh < 40.0);
     CHECK_NEAR (liveWords, studioWords, 6.0); // Words always need the full lookahead
@@ -1350,6 +1351,231 @@ TEST (bandHelpsFindTheKey)
     const auto snap = eng.takeSnapshot();
     std::printf ("  key with the band: %d (F = 5)\n", snap.keyTonic);
     CHECK (snap.keyTonic == 5);
+}
+
+//==============================================================================
+// The stage and its microphones.
+
+/** A section of independent "singers": noise on each edge of the bus, plus a shared middle. */
+static std::array<std::vector<float>, 2> sectionNoise (int n, uint32_t seed)
+{
+    Rng rng;
+    rng.reseed (seed);
+    std::array<std::vector<float>, 2> bus { std::vector<float> ((size_t) n), std::vector<float> ((size_t) n) };
+    for (int i = 0; i < n; ++i)
+    {
+        const float mid = 0.1f * rng.bi();
+        bus[0][(size_t) i] = 0.1f * rng.bi() + mid;
+        bus[1][(size_t) i] = 0.1f * rng.bi() + mid;
+    }
+    return bus;
+}
+
+struct StageResult { std::vector<float> l, r; };
+
+/** One section through the stage (the others silent). */
+static StageResult runStage (const ChoirStage::Settings& settings, int section, const std::array<std::vector<float>, 2>& bus, double sr = 48000.0)
+{
+    ChoirStage stage;
+    stage.setSettings (settings);
+    stage.prepare (sr, 64);
+    StageResult out { std::vector<float> (bus[0].size()), std::vector<float> (bus[0].size()) };
+    std::vector<float> silence (64, 0.0f);
+    for (size_t pos = 0; pos < bus[0].size(); pos += 64)
+    {
+        const int n = (int) std::min<size_t> (64, bus[0].size() - pos);
+        stage.begin (n);
+        for (int s = 0; s < NumSections; ++s)
+            stage.addSection (s, s == section ? bus[0].data() + pos : silence.data(), s == section ? bus[1].data() + pos : silence.data(), n);
+        stage.mix (out.l.data() + pos, out.r.data() + pos, n);
+    }
+    return out;
+}
+
+static double energy (const std::vector<float>& x, size_t from = 0)
+{
+    double e = 0.0;
+    for (size_t i = from; i < x.size(); ++i) e += (double) x[i] * x[i];
+    return e;
+}
+
+/** Where a sound sits between the speakers: -1 left .. 1 right (from the energy balance). */
+static double stereoPosition (const StageResult& r)
+{
+    const double el = energy (r.l, 4800), er = energy (r.r, 4800);
+    return std::atan2 (std::sqrt (er), std::sqrt (el)) / (0.25 * kPiD) - 1.0;
+}
+
+/** How alike the two channels are (1 = one point in the middle, 0 = spread wide). */
+static double correlation (const StageResult& r)
+{
+    double lr = 0, ll = 0, rr = 0;
+    for (size_t i = 4800; i < r.l.size(); ++i) { lr += r.l[i] * r.r[i]; ll += r.l[i] * r.l[i]; rr += r.r[i] * r.r[i]; }
+    return lr / std::sqrt (ll * rr + 1.0e-20);
+}
+
+TEST (stagePlacesTheSections)
+{
+    const auto bus = sectionNoise (48000, 7);
+    ChoirStage::Settings st;
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const auto d = defaultSectionPlacement (s);
+        st.sections[(size_t) s] = { d.pan, d.width, d.depth };
+    }
+    st.spread = 0.7f;
+    const double sop = stereoPosition (runStage (st, Soprano, bus)), alt = stereoPosition (runStage (st, Alto, bus));
+    std::printf ("  default stage: sopranos at %.2f, altos at %.2f\n", sop, alt);
+    CHECK (sop < -0.2 && sop > -0.6);
+    CHECK_NEAR (alt, -sop, 0.02);
+
+    // Sopranos moved to the right of the stage.
+    auto moved = st;
+    moved.sections[Soprano].x = 0.8f;
+    const double right = stereoPosition (runStage (moved, Soprano, bus));
+    std::printf ("  sopranos moved right: %.2f\n", right);
+    CHECK (right > 0.4);
+
+    // A narrow block sounds like one place; a wide one spreads out. Narrowing keeps the level.
+    auto narrow = st, wide = st;
+    narrow.sections[Soprano] = { 0.0f, 0.03f, 0.25f };
+    wide.sections[Soprano] = { 0.0f, 1.0f, 0.25f };
+    wide.spread = narrow.spread = 1.0f;
+    const auto n = runStage (narrow, Soprano, bus), w = runStage (wide, Soprano, bus);
+    std::printf ("  correlation narrow %.2f, wide %.2f; level narrow/wide %.2f dB\n", correlation (n), correlation (w),
+                 10.0 * std::log10 ((energy (n.l) + energy (n.r)) / (energy (w.l) + energy (w.r))));
+    CHECK (correlation (n) > 0.95);
+    CHECK (correlation (w) < 0.6);
+    CHECK_NEAR (10.0 * std::log10 ((energy (n.l) + energy (n.r)) / (energy (w.l) + energy (w.r))), 0.0, 1.0);
+
+    // Space shrinks the whole stage.
+    auto small = st;
+    small.spread = 0.25f;
+    CHECK (std::abs (stereoPosition (runStage (small, Soprano, bus))) < std::abs (sop) * 0.6);
+}
+
+/** Delay of y against x in samples (cross-correlation peak up to maxLag). */
+static int lagOf (const std::vector<float>& x, const std::vector<float>& y, int maxLag)
+{
+    int best = 0;
+    double bestV = -1.0e30;
+    for (int lag = 0; lag <= maxLag; ++lag)
+    {
+        double v = 0.0;
+        for (size_t i = 4800; i + (size_t) lag < y.size(); ++i) v += (double) x[i] * y[i + (size_t) lag];
+        if (v > bestV) { bestV = v; best = lag; }
+    }
+    return best;
+}
+
+/** Share of the energy above 6 kHz (one-pole split, enough to compare). */
+static double brightness (const std::vector<float>& x, double sr)
+{
+    OnePoleLP lp;
+    lp.setCutoff (sr, 6000.0);
+    double hi = 0.0, all = 0.0;
+    for (size_t i = 4800; i < x.size(); ++i) { const float low = lp.process (x[i]); hi += (double) (x[i] - low) * (x[i] - low); all += (double) x[i] * x[i]; }
+    return hi / (all + 1.0e-20);
+}
+
+TEST (backRowsSoundFurtherAway)
+{
+    const double sr = 48000.0;
+    const auto bus = sectionNoise (48000, 11);
+    ChoirStage::Settings st;
+    st.spread = 1.0f;
+    for (auto& p : st.sections) p = { 0.0f, 0.4f, 0.0f };
+    auto back = st;
+    back.sections[Tenor].depth = 1.0f;   // the tenors at the back wall, everyone else at the front
+    const auto front = runStage (st, Tenor, bus), far = runStage (back, Tenor, bus);
+    const double levelDb = 10.0 * std::log10 ((energy (far.l) + energy (far.r)) / (energy (front.l) + energy (front.r)));
+    const int lag = lagOf (front.l, far.l, 400);
+    std::printf ("  back wall against front: %.1f dB, %.2f ms later, brightness %.3f vs %.3f\n", levelDb, lag / sr * 1000.0,
+                 brightness (far.l, sr), brightness (front.l, sr));
+    CHECK (levelDb < -2.0 && levelDb > -6.5);   // further away, and (on this white noise) the lost highs
+    CHECK_NEAR (lag / sr * 1000.0, 4.5, 0.2);
+    CHECK (brightness (far.l, sr) < brightness (front.l, sr) * 0.85);
+    ChoirStage probe;
+    probe.setSettings (back);
+    probe.prepare (sr, 64);
+    CHECK_NEAR (probe.sectionDelaySeconds (Tenor) * 1000.0, 4.5, 0.01);
+    CHECK (probe.sectionDelaySeconds (Soprano) == 0.0f);
+
+    // The spot mics stand close to every row: the back row is as loud and bright as the front.
+    auto closeOnly = [] (ChoirStage::Settings s) { s.close = 1.0f; s.tree = 0.0f; return s; };
+    const auto cf = runStage (closeOnly (st), Tenor, bus), cb = runStage (closeOnly (back), Tenor, bus);
+    const double closeDb = 10.0 * std::log10 ((energy (cb.l) + energy (cb.r)) / (energy (cf.l) + energy (cf.r)));
+    std::printf ("  close mics, back wall against front: %.1f dB\n", closeDb);
+    CHECK (std::abs (closeDb) < 0.3);
+}
+
+TEST (micsPickUpTheChoirDifferently)
+{
+    const double sr = 48000.0;
+    const auto bus = sectionNoise (48000, 3);
+    ChoirStage::Settings st;
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const auto d = defaultSectionPlacement (s);
+        st.sections[(size_t) s] = { d.pan, d.width, d.depth };
+    }
+    auto only = [&st] (float c, float t, float r) { auto s = st; s.close = c; s.tree = t; s.room = r; return s; };
+    const auto tree = runStage (only (0, 1, 0), Soprano, bus), close = runStage (only (1, 0, 0), Soprano, bus), room = runStage (only (0, 0, 1), Soprano, bus);
+    // The room pair is far out in the hall: the choir reaches it ~20 ms later, darker and nearer the middle.
+    const int roomLag = lagOf (tree.l, room.l, 1500);
+    std::printf ("  room mics: %.1f ms later, brightness %.3f (tree %.3f, close %.3f), position %.2f (tree %.2f)\n",
+                 roomLag / sr * 1000.0, brightness (room.l, sr), brightness (tree.l, sr), brightness (close.l, sr),
+                 stereoPosition (room), stereoPosition (tree));
+    CHECK (roomLag / sr * 1000.0 > 15.0 && roomLag / sr * 1000.0 < 20.0);
+    CHECK (brightness (room.l, sr) < brightness (tree.l, sr) * 0.7);
+    CHECK (brightness (close.l, sr) > brightness (tree.l, sr));   // presence on the spot mics
+    CHECK (std::abs (stereoPosition (room)) < std::abs (stereoPosition (tree)));
+
+    // How much of the hall each pair hears, and the hall's input stays at the tree's level.
+    ChoirStage hall;
+    hall.setSettings (only (0, 1, 0));
+    hall.prepare (sr, 64);
+    hall.begin (64);
+    CHECK_NEAR (hall.reverbAmount(), 1.0, 1.0e-4);
+    CHECK_NEAR (hall.reverbInputScale(), 1.0, 1.0e-4);
+    hall.setSettings (only (1, 0, 0));
+    for (int i = 0; i < 400; ++i) hall.begin (64);
+    CHECK (hall.reverbAmount() < 0.4f);
+    hall.setSettings (only (0, 0, 1));
+    for (int i = 0; i < 400; ++i) hall.begin (64);
+    CHECK (hall.reverbAmount() > 1.7f);
+    hall.setSettings (only (0, 0, 0));
+    for (int i = 0; i < 400; ++i) hall.begin (64);
+    CHECK (hall.reverbInputScale() == 0.0f);
+}
+
+TEST (renderedTakeCanBeMovedOnStage)
+{
+    // The stage comes after the rendered stems, so a rendered take can be rearranged and the
+    // mics changed without rendering again.
+    const double sr = 48000.0;
+    auto x = test::singMelody (test::amazingGrace(), sr, Tenor, 25.0f);
+    x.resize ((size_t) (sr * 6.0));
+    const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+    auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+    p.key = 0;
+    const auto score = harmoniseTake (take, HarmonySettings {});
+    RenderedStems stems;
+    CHECK (renderTake (x.data(), (int64_t) x.size(), sr, p, score, stems));
+    auto balance = [] (const std::array<std::vector<float>, 2>& m)
+    {
+        double l = 0, r = 0;
+        for (size_t i = 0; i < m[0].size(); ++i) { l += (double) m[0][i] * m[0][i]; r += (double) m[1][i] * m[1][i]; }
+        return 10.0 * std::log10 ((r + 1.0e-12) / (l + 1.0e-12));   // dB right of left
+    };
+    auto sopOnly = p;
+    for (int s = 1; s < NumSections; ++s) sopOnly.sections[(size_t) s].mute = true;
+    const double home = balance (mixdownStems (stems, sopOnly, false, 0.2f));
+    sopOnly.sections[Soprano].pan = 0.8f;
+    const double moved = balance (mixdownStems (stems, sopOnly, false, 0.2f));
+    std::printf ("  sopranos: %.1f dB right of left at home, %.1f dB once moved right\n", home, moved);
+    CHECK (home < -3.0);
+    CHECK (moved > 3.0);
 }
 
 TEST (performanceBudget)

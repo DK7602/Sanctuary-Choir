@@ -24,6 +24,10 @@ namespace ParamIDs
     inline constexpr const char* response = "response";
     inline constexpr const char* ensemble = "ensemble";
     inline constexpr const char* scene = "scene";
+    // Stage page: the microphones
+    inline constexpr const char* micClose = "micClose";
+    inline constexpr const char* micTree = "micTree";
+    inline constexpr const char* micRoom = "micRoom";
     // Mix
     inline constexpr const char* leadLevel = "leadLevel";
     inline constexpr const char* choirLevel = "choirLevel";
@@ -57,7 +61,9 @@ namespace ParamIDs
     inline constexpr const char* latencyMode = "latencyMode";
 }
 
-/** Section parameter ids: prefix + "Level" / "Pan" / "Mute" / "Solo" / "Low" / "High". */
+/** Section parameter ids: prefix + "Level" / "Pan" / "Width" / "Depth" / "Mute" / "Solo" / "Low" / "High".
+    Pan is where the section stands on the stage (-1 left .. 1 right); before the stage (state
+    and presets without a stage version) it was an offset from the section's home. */
 juce::String sectionParamID (int section, const char* suffix);
 const char* sectionPrefix (int section);   // "sop", "alt", "ten", "bas"
 const char* sectionName (int section);     // "Soprano", ...
@@ -75,6 +81,11 @@ private:
     struct Ptrs;
     std::shared_ptr<Ptrs> ptrs;
 };
+
+/** Saved states, scenes and presets from before the stage stored Pan as an offset from the
+    section's home: where that section stands now. */
+float panFromOffset (int section, float offset);
+constexpr int kStageVersion = 2;
 
 /** Parameters that change the learned harmony (score) when edited. */
 bool affectsHarmony (const juce::String& paramID);

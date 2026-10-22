@@ -63,7 +63,8 @@
 - **Key changes**: LEARN follows a song that modulates (G MAJOR → A MAJOR) and harmonises each part in its own key.
 - **MIDI parts and Program Change**: channels 1–4 sing exactly the soprano, alto, tenor and bass notes you write; Program Change picks a preset.
 - **Scenes**: 8 stored sounds per song (verse, chorus, bridge), recalled with a click or by automating the Scene parameter.
-- **64 factory presets** in 8 categories (Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, Kids & Crowds) plus your own.
+- **The stage and its microphones**: drag the sections around the choir loft (left/right, forward/back, wide/narrow) or pick a formation, and mix Close, Tree and Room microphones like a recording engineer. Rendered takes follow without rendering again.
+- **67 factory presets** in 8 categories (Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, Kids & Crowds) plus your own.
 
 ## Download
 
@@ -104,7 +105,7 @@ There is also a command-line renderer, handy for testing the engine without a DA
 input ─► YIN pitch tracker ─► harmoniser ─────────► control timeline (notes per section, per 5 ms)
    │        (key detection)    (live, or the                     │
    │                            learned score)                   ▼
-   └────► PSOLA analyser ─► up to 40 singers ─► S/A/T/B buses ─► tone · glue ─► cathedral FDN reverb ─► + lead ─► limiter
+   └────► PSOLA analyser ─► up to 40 singers ─► S/A/T/B buses ─► stage · Close/Tree/Room mics ─► tone · glue ─► cathedral FDN reverb ─► + lead ─► limiter
                             (Words: pitch-shifted grains of your voice;
                              vowels: glottal source + SATB formant filters;
                              each singer with its own timing, detune, drift and vibrato)

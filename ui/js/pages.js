@@ -45,9 +45,12 @@
     Params.on(id, (v) => { val.textContent = noteName(Math.round(v)); });
   }
 
-  function buildMix(page) {
+  function buildMix(page, info) {
     page.innerHTML = "";
     el("h2", "", page, "MIX");
+    const stageBtn = el("button", "pill page-link", page, "STAGE & MICS");
+    stageBtn.title = "Arrange the sections on the stage and choose the microphones";
+    stageBtn.addEventListener("click", () => info && info.openStage && info.openStage());
     const top = el("div", "row", page);
     top.style.justifyContent = "space-between";
 
@@ -444,7 +447,7 @@
     const audioChips = [
       chip("FULL CHOIR", "full", "The whole choir as you hear it, with the room", "#f3e9d7", true),
       ...SECTIONS.map((s, i) => chip(["SOPRANOS", "ALTOS", "TENORS", "BASSES"][i], ["sop", "alt", "ten", "bas"][i],
-                                     ["Sopranos", "Altos", "Tenors", "Basses"][i] + " on their own (dry)", s.color, true)),
+                                     ["Sopranos", "Altos", "Tenors", "Basses"][i] + " on their own, where they stand on the stage (without the hall)", s.color, true)),
       chip("ALL STEMS", "all", "The four sections and the full choir at once", "#e8c98a", true),
     ];
 
@@ -605,5 +608,258 @@
     drawLane();
   }
 
-  window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings, buildTake };
+  //==========================================================================
+  // THE STAGE: drag the sections around the choir loft and choose the microphones.
+  const FORMATIONS = [
+    ["BLOCKS", "Sopranos and altos in front, tenors and basses behind", [[-0.55, 42, 25], [0.55, 42, 25], [-0.42, 40, 75], [0.42, 40, 75]]],
+    ["ACROSS", "One wide row, left to right: sopranos, altos, tenors, basses", [[-0.75, 24, 45], [-0.25, 24, 45], [0.25, 24, 55], [0.75, 24, 55]]],
+    ["MEN CENTRE", "Women on the sides, men in the middle at the back", [[-0.62, 36, 30], [0.62, 36, 30], [-0.2, 20, 70], [0.2, 20, 70]]],
+    ["MIXED", "Everyone spread across the whole stage: the most blended sound", [[0, 95, 30], [0, 95, 45], [0, 95, 60], [0, 95, 75]]],
+  ];
+  const MIC_SETS = [
+    ["NATURAL", "The main pair above the conductor: the choir as an audience hears it", [-60, 0, -60]],
+    ["INTIMATE", "Close mics up: near, dry and detailed", [0, -8, -60]],
+    ["CONCERT", "All three: present, wide and full", [-6, 0, -6]],
+    ["DISTANT", "Room mics up: far away in a big hall", [-60, -9, 0]],
+  ];
+
+  function buildStage(page, info) {
+    const { hiDpiCanvas } = window.SCW;
+    page.innerHTML = "";
+    el("h2", "", page, "THE STAGE");
+    const close = el("button", "page-close", page, "✕");
+    close.title = "Back";
+    close.addEventListener("click", () => info.close && info.close());
+
+    const row = el("div", "row", page);
+    const left = el("div", "group stage-group", row);
+    const head = el("div", "stage-head", left);
+    el("h3", "", head, "FORMATION").style.margin = "0";
+    const formRow = el("div", "pill-row", head);
+    const pos = (s) => SECTIONS[s].prefix;
+    const setPlacement = (s, x, w, d) => {
+      [["Pan", x], ["Width", w], ["Depth", d]].forEach(([k, v]) => {
+        const id = pos(s) + k;
+        Params.begin(id);
+        Params.set(id, v);
+        Params.end(id);
+      });
+    };
+    const formButtons = FORMATIONS.map(([name, tip, places]) => {
+      const b = el("button", "pill", formRow, name);
+      b.title = tip;
+      b.addEventListener("click", () => places.forEach(([x, w, d], s) => setPlacement(s, x, w, d)));
+      return { b, places };
+    });
+    const canvas = el("canvas", "stage-canvas", left);
+    const W = 690, H = 300;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    const hint = el("p", "stage-hint", left);
+    hint.innerHTML = "<b>Drag</b> a section to move it; drag its <b>edges</b> to make it wider or narrower. Further back sounds further away. <b>Space</b> on the main page makes the whole stage wider or narrower.";
+
+    // Geometry: a fan-shaped loft seen from above, the conductor (and the tree) at the bottom.
+    const cx = W / 2, cy = H + 40, r0 = 125, r1 = 318, thetaMax = 1.02;
+    const toXY = (x, d) => {
+      const r = r0 + d * (r1 - r0), th = x * thetaMax;
+      return [cx + r * Math.sin(th), cy - r * Math.cos(th)];
+    };
+    const fromXY = (px, py) => {
+      const th = Math.atan2(px - cx, cy - py), r = Math.hypot(px - cx, cy - py);
+      return [th / thetaMax, (r - r0) / (r1 - r0)];
+    };
+    const ROW = 0.16;   // a section's depth on the risers
+    let singers = [0, 0, 0, 0];
+    const place = (s) => ({ x: Params.get(pos(s) + "Pan") || 0, w: (Params.get(pos(s) + "Width") || 0) / 100, d: (Params.get(pos(s) + "Depth") || 0) / 100 });
+
+    function sector(c, x0, x1, d0, d1) {
+      const a0 = x0 * thetaMax - Math.PI / 2, a1 = x1 * thetaMax - Math.PI / 2;
+      const ra = r0 + Math.max(0, d0) * (r1 - r0), rb = r0 + Math.min(1, d1) * (r1 - r0);
+      c.beginPath();
+      c.arc(cx, cy, rb, a0, a1);
+      c.arc(cx, cy, ra, a1, a0, true);
+      c.closePath();
+    }
+
+    function draw() {
+      const c = hiDpiCanvas(canvas, W, H);
+      c.clearRect(0, 0, W, H);
+      // The loft: risers from the front edge to the back wall.
+      for (let k = 0; k <= 4; ++k) {
+        const r = r0 + k / 4 * (r1 - r0);
+        c.beginPath();
+        c.arc(cx, cy, r, -Math.PI / 2 - thetaMax, -Math.PI / 2 + thetaMax);
+        c.strokeStyle = k === 0 || k === 4 ? "rgba(232, 201, 138, 0.45)" : "rgba(232, 201, 138, 0.14)";
+        c.lineWidth = k === 0 || k === 4 ? 1.5 : 1;
+        c.stroke();
+      }
+      [-1, 1].forEach((side) => {
+        const [ax, ay] = toXY(side, 0), [bx, by] = toXY(side, 1);
+        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by);
+        c.strokeStyle = "rgba(232, 201, 138, 0.3)"; c.stroke();
+      });
+      c.font = "600 10px Montserrat, sans-serif";
+      c.fillStyle = "rgba(216, 200, 168, 0.55)";
+      c.textAlign = "center";
+      c.fillText("BACK WALL", cx, cy - r1 - 6);
+
+      const close = Params.get("micClose") > -59.5, tree = Params.get("micTree") > -59.5, room = Params.get("micRoom") > -59.5;
+      // Sections, back ones first.
+      const order = [0, 1, 2, 3].sort((a, b) => place(b).d - place(a).d);
+      order.forEach((s) => {
+        const p = place(s), S = SECTIONS[s];
+        const x0 = Math.max(-1, p.x - p.w), x1 = Math.min(1, p.x + p.w);
+        sector(c, x0, x1, p.d - ROW / 2, p.d + ROW / 2);
+        c.fillStyle = hexA(S.color, dragging && dragging.s === s ? 0.32 : 0.18);
+        c.fill();
+        c.strokeStyle = hexA(S.color, 0.85);
+        c.lineWidth = 1.5;
+        c.stroke();
+        // Singers as heads in rows.
+        const n = Math.max(1, singers[s] || 0);
+        const rows = n > 6 ? 2 : 1, perRow = Math.ceil(n / rows);
+        for (let k = 0; k < n; ++k) {
+          const rr = rows === 1 ? 0.5 : (Math.floor(k / perRow) + 0.5) / rows;
+          const i = k % perRow, m = rows === 1 ? n : (Math.floor(k / perRow) === rows - 1 ? n - perRow * (rows - 1) : perRow);
+          const fx = m === 1 ? 0.5 : (i + 0.5) / m;
+          const [hx, hy] = toXY(x0 + (x1 - x0) * fx, p.d - ROW / 2 + ROW * rr);
+          c.beginPath(); c.arc(hx, hy, 3.4, 0, Math.PI * 2);
+          c.fillStyle = singers[s] ? S.color : hexA(S.color, 0.3);
+          c.fill();
+        }
+        // Width handles on the edges.
+        [x0, x1].forEach((hx0) => {
+          const [hx, hy] = toXY(hx0, p.d);
+          c.beginPath(); c.arc(hx, hy, 5, 0, Math.PI * 2);
+          c.fillStyle = "#1b1209"; c.fill();
+          c.strokeStyle = S.color; c.lineWidth = 1.5; c.stroke();
+        });
+        const [lx, ly] = toXY(p.x, p.d + ROW / 2 + 0.07);
+        c.font = "700 10.5px Montserrat, sans-serif";
+        c.fillStyle = S.color;
+        c.fillText(["SOPRANOS", "ALTOS", "TENORS", "BASSES"][s], lx, ly);
+        // A spot mic in front of each section.
+        const [mx, my] = toXY(p.x, p.d - ROW / 2 - 0.06);
+        micIcon(c, mx, my, 3.2, close);
+      });
+      // The tree above the conductor and the room pair far out in the hall.
+      const [tx, ty] = toXY(0, -0.25);
+      micIcon(c, tx - 9, ty + 5, 4, tree); micIcon(c, tx + 9, ty + 5, 4, tree); micIcon(c, tx, ty - 6, 4, tree);
+      c.font = "600 9.5px Montserrat, sans-serif";
+      c.fillStyle = tree ? "#ffe7b0" : "rgba(216, 200, 168, 0.4)";
+      c.fillText("TREE", tx, ty + 22);
+      [[34, H - 30], [W - 34, H - 30]].forEach(([rx, ry]) => micIcon(c, rx, ry, 4.5, room));
+      c.fillStyle = room ? "#ffe7b0" : "rgba(216, 200, 168, 0.4)";
+      c.fillText("ROOM", 34, H - 12);
+      c.fillText("ROOM", W - 34, H - 12);
+    }
+
+    function micIcon(c, x, y, r, on) {
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+      c.fillStyle = on ? "#ffe7b0" : "rgba(216, 200, 168, 0.25)";
+      c.shadowColor = on ? "rgba(255, 220, 160, 0.9)" : "transparent";
+      c.shadowBlur = on ? 8 : 0;
+      c.fill();
+      c.shadowBlur = 0;
+    }
+
+    function hexA(h, a) { const n = parseInt(h.slice(1), 16); return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; }
+
+    // Pointer: grab a section's body (move) or one of its edges (width).
+    let dragging = null;
+    const local = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
+    };
+    const hit = (px, py) => {
+      const order = [0, 1, 2, 3].sort((a, b) => place(a).d - place(b).d);   // front ones win
+      for (const s of order) {
+        const p = place(s);
+        for (const [edge, ex] of [["left", Math.max(-1, p.x - p.w)], ["right", Math.min(1, p.x + p.w)]]) {
+          const [hx, hy] = toXY(ex, p.d);
+          if (Math.hypot(px - hx, py - hy) < 9) return { s, mode: edge };
+        }
+      }
+      const [x, d] = fromXY(px, py);
+      for (const s of order) {
+        const p = place(s);
+        if (x >= p.x - p.w - 0.03 && x <= p.x + p.w + 0.03 && Math.abs(d - p.d) <= ROW / 2 + 0.03) return { s, mode: "move" };
+      }
+      return null;
+    };
+    canvas.addEventListener("pointerdown", (e) => {
+      const [px, py] = local(e);
+      const h = hit(px, py);
+      if (!h) return;
+      const [x, d] = fromXY(px, py), p = place(h.s);
+      dragging = Object.assign(h, { grabX: x - p.x, grabD: d - p.d });
+      canvas.setPointerCapture(e.pointerId);
+      (h.mode === "move" ? ["Pan", "Depth"] : ["Width"]).forEach((k) => Params.begin(pos(h.s) + k));
+      draw();
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      const [px, py] = local(e);
+      if (!dragging) {
+        const h = hit(px, py);
+        canvas.style.cursor = !h ? "default" : h.mode === "move" ? "grab" : "ew-resize";
+        return;
+      }
+      const [x, d] = fromXY(px, py);
+      const s = dragging.s;
+      if (dragging.mode === "move") {
+        Params.set(pos(s) + "Pan", Math.max(-1, Math.min(1, x - dragging.grabX)));
+        Params.set(pos(s) + "Depth", Math.max(0, Math.min(100, (d - dragging.grabD) * 100)));
+      } else {
+        Params.set(pos(s) + "Width", Math.max(2, Math.min(100, Math.abs(x - place(s).x) * 100)));
+      }
+    });
+    const end = () => {
+      if (!dragging) return;
+      ["Pan", "Depth", "Width"].forEach((k) => Params.end(pos(dragging.s) + k));
+      dragging = null;
+      draw();
+    };
+    canvas.addEventListener("pointerup", end);
+    canvas.addEventListener("pointercancel", end);
+
+    const mics = el("div", "group mic-group", row);
+    el("h3", "", mics, "MICROPHONES");
+    const micSets = el("div", "pill-row", mics);
+    micSets.style.flexWrap = "wrap";
+    const setButtons = MIC_SETS.map(([name, tip, vals]) => {
+      const b = el("button", "pill", micSets, name);
+      b.title = tip;
+      b.addEventListener("click", () => ["micClose", "micTree", "micRoom"].forEach((id, i) => { Params.begin(id); Params.set(id, vals[i]); Params.end(id); }));
+      return { b, vals };
+    });
+    const faders = el("div", "mic-faders", mics);
+    [["micClose", "CLOSE", "Spot mics in front of each section: near, dry and detailed"],
+     ["micTree", "TREE", "The main pair above the conductor: the natural picture"],
+     ["micRoom", "ROOM", "A pair far out in the hall: wide, distant, full of the room"]].forEach(([id, label, tip]) => {
+      const col = el("div", "mic-col", faders);
+      col.title = tip;
+      el("div", "mic-name", col, label);
+      new Fader(col, id, "#f3d08a", true);
+      const v = el("div", "fader-val", col);
+      Params.on(id, () => { v.textContent = Params.format(id); draw(); syncPills(); });
+    });
+    const micText = el("p", "mic-text", mics);
+    micText.innerHTML = "Mix the three pairs like a recording engineer. Moving the stage or the mics never needs a new RENDER.";
+
+    function syncPills() {
+      formButtons.forEach(({ b, places }) => b.classList.toggle("on", places.every(([x, w, d], s) =>
+        Math.abs(place(s).x - x) < 0.015 && Math.abs(place(s).w * 100 - w) < 1.5 && Math.abs(place(s).d * 100 - d) < 1.5)));
+      setButtons.forEach(({ b, vals }) => b.classList.toggle("on", ["micClose", "micTree", "micRoom"].every((id, i) => Math.abs(Params.get(id) - vals[i]) < 0.6)));
+    }
+    SECTIONS.forEach((S) => ["Pan", "Width", "Depth"].forEach((k) => Params.on(S.prefix + k, () => { draw(); syncPills(); })));
+    info.onMeters = (m) => {
+      const n = (m.sections || []).map((x) => x.singers || 0);
+      if (n.join() !== singers.join()) { singers = n; draw(); }
+    };
+    window.addEventListener("sc-rescale", draw);
+    draw();
+    syncPills();
+  }
+
+  window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings, buildTake, buildStage };
 })();

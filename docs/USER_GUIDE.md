@@ -83,7 +83,7 @@ Your chords are saved with the project and win over everything else, including t
 Press on a chip, hold the mouse button, and drag it onto a track or an empty part of your DAW's arrangement:
 
 - **MIDI · Parts & Chords**: one MIDI file, ready right after LEARN with no render needed. It has soprano, alto, tenor and bass on MIDI channels 1–4 (so *Parts on ch. 1–4* plays them back), your melody on channel 5, and the chords on channel 6 with their names. It uses your song's tempo. Use it with another choir or orchestra library, print a lead sheet, or edit the parts and send them back to Sanctuary.
-- **Full Choir**, **Sopranos**, **Altos**, **Tenors**, **Basses** and **All Stems**: 24-bit WAV files of the rendered choir, so they need a RENDER first. The section files are dry; Full Choir is the whole choir as you hear it, with the room. The page gets them ready in the background the first time it opens after a render ("Getting the audio ready…").
+- **Full Choir**, **Sopranos**, **Altos**, **Tenors**, **Basses** and **All Stems**: 24-bit WAV files of the rendered choir, so they need a RENDER first. Each section file is that section where it stands on the stage, through the microphones, without the hall; Full Choir is the whole choir as you hear it, with the hall. The page gets them ready in the background the first time it opens after a render ("Getting the audio ready…").
 
 When the take was learned with your DAW playing, the files start at the very beginning of your song. **Drop them at bar 1** and they line up with your take. A take loaded from a file starts at its own beginning; drop those files where the take starts.
 
@@ -110,7 +110,34 @@ Sanctuary can listen to your band, keys or backing track and sing **the chords t
 
 MIDI chords still come first: hold a chord and the choir sings it, whatever the band plays.
 
-## 6. More things to try
+## 6. The stage and the microphones
+
+Click the choir loft on the main page, or **MIX → Stage & Mics**, to see the choir from above, with the audience at the bottom.
+
+**Arrange the singers**
+
+- **Drag a section** to move it: left or right across the stage, and forward or back. Further back sounds further away: a little quieter, a little later and a little darker.
+- **Drag a section's edges** (the round handles) to make it wider or narrower. A narrow section sounds like one spot; a wide one surrounds you.
+- **Formation** buttons set all four at once:
+  - **Blocks** (the default): sopranos and altos in front, tenors and basses behind.
+  - **Across**: one wide row, left to right.
+  - **Men Centre**: women on the sides, men in the middle at the back.
+  - **Mixed**: everyone spread across the whole stage, the most blended sound.
+- **Space** on the main page makes the whole stage wider or narrower. The **PAN** knobs on the MIX page move the sections left and right too.
+
+**Choose the microphones**
+
+Three pairs of microphones pick up the choir. Mix them like a recording engineer:
+
+- **Close**: spot mics in front of each section. Near, dry and detailed, and every row sounds as close as the front.
+- **Tree**: the main pair above the conductor. The natural picture, as the audience hears it. This is the only pair up by default, so the choir sounds as it always has.
+- **Room**: a pair far out in the hall. Wide and distant, with much more of the hall.
+
+The **Natural**, **Intimate**, **Concert** and **Distant** buttons are good starting points. The **Intimate Chamber**, **Distant Cathedral** and **Choir in the Round** presets use them.
+
+Moving the stage or changing the mics never needs a new RENDER: rendered takes follow straight away. Section stems you drag out of **Chords & Stems** come from where each section stands, through the mics, without the hall.
+
+## 7. More things to try
 
 - **Presets** (top left) come in categories: Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, and Kids & Crowds. Point at a category to see its presets. Presets change the choir's sound, not your song: the Key and Scale you set stay as they are.
 - **Ensemble** (MIX page) chooses who sings:

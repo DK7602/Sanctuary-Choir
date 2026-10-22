@@ -128,6 +128,19 @@ const char* const* getRhythmSectionNames()
     return names;
 }
 
+SectionParams defaultSectionPlacement (int section)
+{
+    static const float x[] = { -0.55f, 0.55f, -0.42f, 0.42f };
+    static const float width[] = { 0.42f, 0.42f, 0.4f, 0.4f };
+    static const float depth[] = { 0.25f, 0.25f, 0.75f, 0.75f };
+    const int s = clampv (section, 0, NumSections - 1);
+    SectionParams p;
+    p.pan = x[s];
+    p.width = width[s];
+    p.depth = depth[s];
+    return p;
+}
+
 int singersForChoirSize (float percent)
 {
     return clampv ((int) std::lround (clampv (percent, 0.0f, 100.0f) / 100.0f * (float) kMaxSingers), 0, kMaxSingers);
@@ -153,8 +166,8 @@ struct ChoirEngine::Singer
     bool active = false;
     float fade = 0.0f;
 
-    // placement
-    float panL = 0.7071f, panR = 0.7071f, depthGain = 1.0f;
+    // placement inside the section (its edges are the section bus's left and right)
+    float panL = 0.7071f, panR = 0.7071f;
     int delay = 0, pendingDelay = 0;
 
     // fixed random character
@@ -253,12 +266,8 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     leadSend.prepare (sr, smoothS, 0.1f);
     warmthAmt.prepare (sr, smoothS, 0.0f);
     for (int s = 0; s < NumSections; ++s)
-    {
         sectionGain[(size_t) s].prepare (sr, smoothS, 1.0f);
-        sectionPanL[(size_t) s].prepare (sr, smoothS, 1.0f);
-        sectionPanR[(size_t) s].prepare (sr, smoothS, 1.0f);
-        sectionWidth[(size_t) s].prepare (sr, smoothS, 1.0f);
-    }
+    stage.prepare (sr, kChunk);
 
     prepared = true;
     lastSingerTarget = -1;
@@ -297,6 +306,7 @@ void ChoirEngine::reset()
     sectionCount.fill (0);
     lastSingerTarget = -1;
     tone.reset();
+    stage.reset();
     glue.reset();
     reverb.reset();
     limiter.reset();
@@ -446,7 +456,10 @@ void ChoirEngine::setParams (const EngineParams& in)
         {
             fix (p.sections[s].level, d.sections[s].level);
             fix (p.sections[s].pan, d.sections[s].pan);
+            fix (p.sections[s].width, d.sections[s].width);
+            fix (p.sections[s].depth, d.sections[s].depth);
         }
+        fix (p.micCloseDb, d.micCloseDb); fix (p.micTreeDb, d.micTreeDb); fix (p.micRoomDb, d.micRoomDb);
         fix (p.rhythmLength, d.rhythmLength);
         fix (p.rhythmDepth, d.rhythmDepth);
         if ((int) p.ensemble < 0 || p.ensemble >= Ensemble::Count)
@@ -496,18 +509,21 @@ void ChoirEngine::setParams (const EngineParams& in)
 
     bool anySolo = false;
     for (const auto& s : p.sections) anySolo = anySolo || s.solo;
-    const float width = 0.25f + 0.75f * clampv (p.space / 100.0f, 0.0f, 1.0f);
+    ChoirStage::Settings stageSettings;
+    stageSettings.spread = 0.25f + 0.75f * clampv (p.space / 100.0f, 0.0f, 1.0f);
     for (int s = 0; s < NumSections; ++s)
     {
         const auto& sp = p.sections[(size_t) s];
         const bool audible = ! sp.mute && (! anySolo || sp.solo);
         const float f = clampv (sp.level, 0.0f, 1.0f) / 0.75f;
         sectionGain[(size_t) s].setTarget (audible ? f * f : 0.0f);
-        const float pan = clampv (sp.pan, -1.0f, 1.0f);
-        sectionPanL[(size_t) s].setTarget (pan > 0.0f ? 1.0f - pan : 1.0f);
-        sectionPanR[(size_t) s].setTarget (pan < 0.0f ? 1.0f + pan : 1.0f);
-        sectionWidth[(size_t) s].setTarget (width);
+        stageSettings.sections[(size_t) s] = { clampv (sp.pan, -1.0f, 1.0f), clampv (sp.width, 0.0f, 1.0f), clampv (sp.depth, 0.0f, 1.0f) };
     }
+    auto mic = [] (float db) { return db <= -59.5f ? 0.0f : dbToGain (std::min (db, 12.0f)); };
+    stageSettings.close = mic (p.micCloseDb);
+    stageSettings.tree = mic (p.micTreeDb);
+    stageSettings.room = mic (p.micRoomDb);
+    stage.setSettings (stageSettings);
 
     ChoirReverb::Settings rs;
     rs.venue = p.venue;
@@ -577,19 +593,16 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
     s.shimmer = Wander{};
     s.shimmer.timeConstant = 0.35f;
 
-    // Stage placement (audience view): sopranos front-left, altos front-right,
-    // tenors back-left, basses back-right. New singers join at alternating edges.
-    static const float centre[] = { -0.55f, 0.55f, -0.42f, 0.42f };
-    static const float halfWidth[] = { 0.42f, 0.42f, 0.4f, 0.4f };
+    // Place in the section: the first singer in the middle, new ones joining at alternating
+    // edges. The section bus's left and right are the section's edges; the stage puts the whole
+    // section where it stands (so a rendered take can still be moved).
     const int k = (index + 1) / 2;
     const float side = (index % 2 == 0) ? 1.0f : -1.0f;
-    float x = centre[section] + side * halfWidth[section] * clampv ((float) k / 12.0f, 0.0f, 1.0f) + 0.04f * s.rng.bi();
+    float x = side * clampv ((float) k / 12.0f, 0.0f, 1.0f) + 0.1f * s.rng.bi();
     x = clampv (x, -1.0f, 1.0f);
     const float theta = (x + 1.0f) * 0.25f * kPi;
     s.panL = std::cos (theta);
     s.panR = std::sin (theta);
-    const bool backRow = section == Tenor || section == Bass;
-    s.depthGain = backRow ? 0.88f : 1.0f;
 
     s.currentMidi = s.targetMidi = -1.0f;
     s.amp = s.ampTarget = 0.0f;
@@ -664,8 +677,7 @@ void ChoirEngine::allocateSingers()
                     singer.vowel.setFormants (getFormants (vowelForVocalType (params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType), formantSection (s)),
                                               singerFormant (singer) * ens.tract * std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f));
                     singer.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s].range.centre(), params.a4), style.softness);
-                    const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f
-                                        + ((s == Tenor || s == Bass) ? 2.5f : 0.0f) * params.space / 100.0f;
+                    const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f;
                     singer.delay = singer.pendingDelay = (int) (delayMs * 0.001f * (float) sr);
                     singer.psola.reset ((double) (analyzer.getWritten() - latency - activeEchoOffset - singer.delay));
                 }
@@ -959,7 +971,7 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
         s.pctl.targetHz = hz;
     }
     s.pctl.formant = vocalTract[(size_t) sec] * singerFormant (s) * formantParam * s.lastFollow;
-    s.pctl.gain = s.rGain * s.depthGain;
+    s.pctl.gain = s.rGain;
     s.pctl.unvoicedGain = 0.6f;
 
     // Vowels: synth pitch and amplitude.
@@ -971,7 +983,7 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
     // Recorded voices already have their own vibrato: add only a touch on top.
     s.sampleHz = s.synthF0 * std::exp2 (-0.75f * (followLead ? vib * 0.35f : vib) / 12.0f);
     const float shimmer = 1.0f + 0.06f * s.shimmer.tick (s.rng, dt) * humanize;
-    s.ampTarget = singing ? cf.level * s.rGain * s.depthGain * shimmer : 0.0f;
+    s.ampTarget = singing ? cf.level * s.rGain * shimmer : 0.0f;
     s.ampTarget = clampv (s.ampTarget, 0.0f, 1.5f);
 
     // Fade for joining/leaving the choir.
@@ -1012,8 +1024,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         lastEnsemble = params.ensemble;
         for (auto& sp : singers)
         {
-            const bool back = sp->section == Tenor || sp->section == Bass;
-            const float delayMs = sp->rDelay * style.timingMs * params.humanize / 100.0f + (back ? 2.5f : 0.0f) * params.space / 100.0f;
+            const float delayMs = sp->rDelay * style.timingMs * params.humanize / 100.0f;
             sp->pendingDelay = (int) (delayMs * 0.001f * (float) sr);
         }
     }
@@ -1289,27 +1300,24 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
     // Rhythm: tempo-synced gates on the sections (live and rendered singers alike).
     applyRhythm (c, offset);
 
-    // Section mix: width, level, balance.
-    std::fill (choirL.begin(), choirL.end(), 0.0f);
-    std::fill (choirR.begin(), choirR.end(), 0.0f);
+    // Section levels, then the stage: each section where it stands, heard by the microphones.
+    stage.begin (c);
     for (int s = 0; s < NumSections; ++s)
     {
         const float g = sectionGain[(size_t) s].advance (c);
-        const float pl = sectionPanL[(size_t) s].advance (c), pr = sectionPanR[(size_t) s].advance (c);
-        const float w = sectionWidth[(size_t) s].advance (c);
-        const float* L = sec (s, 0);
-        const float* R = sec (s, 1);
+        float* L = sec (s, 0);
+        float* R = sec (s, 1);
         float peak = 0.0f;
         for (int i = 0; i < c; ++i)
         {
-            const float m = 0.5f * (L[i] + R[i]), d = 0.5f * (L[i] - R[i]) * w;
-            const float l = (m + d) * g * pl, r = (m - d) * g * pr;
-            choirL[(size_t) i] += l;
-            choirR[(size_t) i] += r;
-            peak = std::max (peak, std::max (std::abs (l), std::abs (r)));
+            L[i] *= g;
+            R[i] *= g;
+            peak = std::max (peak, std::max (std::abs (L[i]), std::abs (R[i])));
         }
         peakAccum[(size_t) s] = std::max (peakAccum[(size_t) s], peak);
+        stage.addSection (s, L, R, c);
     }
+    stage.mix (choirL.data(), choirR.data(), c);
 
     // Choir bus processing.
     tone.process (choirL.data(), choirR.data(), c);
@@ -1325,13 +1333,17 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
     glue.process (choirL.data(), choirR.data(), c, clampv (params.glue / 100.0f, 0.0f, 1.0f));
 
     const float cg = choirGain.advance (c), lg = leadGain.advance (c), ls = leadSend.advance (c);
-    const float wet = wetGain.advance (c), dry = dryChoirGain.advance (c), vol = volume.advance (c);
+    const float dry = dryChoirGain.advance (c), vol = volume.advance (c);
+    // The hall hears the choir at the same level whichever mics are up; the mics decide how
+    // much of the hall comes back (the room pair far more than the spot mics).
+    const float wet = wetGain.advance (c) * stage.reverbAmount();
+    const float revScale = stage.reverbInputScale();
     for (int i = 0; i < c; ++i)
     {
         choirL[(size_t) i] *= cg;
         choirR[(size_t) i] *= cg;
-        revInL[(size_t) i] = choirL[(size_t) i] + leadL[i] * ls;
-        revInR[(size_t) i] = choirR[(size_t) i] + leadR[i] * ls;
+        revInL[(size_t) i] = choirL[(size_t) i] * revScale + leadL[i] * ls;
+        revInR[(size_t) i] = choirR[(size_t) i] * revScale + leadR[i] * ls;
     }
     reverb.process (revInL.data(), revInR.data(), revOutL.data(), revOutR.data(), c);
 

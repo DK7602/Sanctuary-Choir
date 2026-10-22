@@ -46,12 +46,15 @@
       choice("response", "Response", ["With Me", "Echo (Right After)"]),
       choice("ensemble", "Ensemble", ["Choir", "Children", "Gang Vocals", "Congregation"]),
       choice("scene", "Scene", ["None", "Scene 1", "Scene 2", "Scene 3", "Scene 4", "Scene 5", "Scene 6", "Scene 7", "Scene 8"]),
+      db("micClose", "Close Mics", -60, -60, 6), db("micTree", "Tree Mics", 0, -60, 6), db("micRoom", "Room Mics", -60, -60, 6),
     ];
     const ranges = [[60, 81], [53, 74], [48, 69], [40, 64]];
+    const home = [[-0.55, 42, 25], [0.55, 42, 25], [-0.42, 40, 75], [0.42, 40, 75]];
     ["sop", "alt", "ten", "bas"].forEach((p, i) => {
       const n = ["Soprano", "Alto", "Tenor", "Bass"][i];
       defs.push({ id: p + "Level", name: n + " Level", type: "float", min: 0, max: 1, interval: 0.001, skew: 1, default: 0.75 });
-      defs.push({ id: p + "Pan", name: n + " Pan", type: "float", min: -1, max: 1, interval: 0.01, skew: 1, default: 0 });
+      defs.push({ id: p + "Pan", name: n + " Position", type: "float", min: -1, max: 1, interval: 0.01, skew: 1, default: home[i][0] });
+      defs.push(pct(p + "Width", n + " Width", home[i][1]), pct(p + "Depth", n + " Depth", home[i][2]));
       defs.push(bool(p + "Mute", n + " Mute"), bool(p + "Solo", n + " Solo"));
       defs.push(int(p + "Low", n + " Range Low", 24, 96, ranges[i][0]), int(p + "High", n + " Range High", 24, 96, ranges[i][1]));
     });
@@ -94,6 +97,9 @@
       ["Sacred & Classical", "Requiem"],
       ["Sacred & Classical", "Renaissance Motet"],
       ["Sacred & Classical", "Psalm Tone"],
+      ["Sacred & Classical", "Intimate Chamber"],
+      ["Sacred & Classical", "Distant Cathedral"],
+      ["Sacred & Classical", "Choir in the Round"],
       ["Worship", "Worship Night"],
       ["Worship", "Men of Praise"],
       ["Worship", "Unison Anthem"],

@@ -196,9 +196,8 @@ private:
     {
         int takeId = 0;
         juce::File folder;
-        int stemsId = 0;                 // the render the section files come from
         juce::StringArray sections;
-        juce::String fullSignature, roomSignature;
+        juce::String sectionsSignature, fullSignature, roomSignature;   // the render and mix each was written with
         juce::File full, room;
     };
     ExportFiles exported;

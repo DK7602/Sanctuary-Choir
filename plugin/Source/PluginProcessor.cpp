@@ -486,6 +486,7 @@ void SanctuaryProcessor::getStateInformation (MemoryBlock& destData)
     tree.setProperty ("detectedKey", rememberedKey.load(), nullptr);   // Auto key starts right next time
     tree.setProperty ("voicesFolder", voices.getFolder().getFullPathName(), nullptr);
     tree.setProperty ("voicesBuiltIn", voices.userChoseBuiltIn(), nullptr);
+    tree.setProperty ("stageVersion", kStageVersion, nullptr);
     {
         Array<var> sceneList;
         for (const auto& s : scenes)
@@ -527,6 +528,18 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (xml != nullptr && xml->hasTagName (state.state.getType()))
     {
         auto tree = ValueTree::fromXml (*xml);
+        // Projects from before the stage stored each section's pan as an offset from its home.
+        const bool panIsOffset = (int) tree.getProperty ("stageVersion", 1) < kStageVersion;
+        if (panIsOffset)
+        {
+            for (int s = 0; s < sc::NumSections; ++s)
+            {
+                auto child = tree.getChildWithProperty ("id", sectionParamID (s, "Pan"));
+                if (child.isValid())
+                    child.setProperty ("value", panFromOffset (s, (float) child.getProperty ("value", 0.0f)), nullptr);
+            }
+            tree.setProperty ("stageVersion", kStageVersion, nullptr);
+        }
         state.replaceState (tree);
 
         // replaceState skips parameters whose denormalised value looks unchanged, which can
@@ -565,7 +578,13 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             const var sceneList = JSON::parse (tree.getProperty ("scenes", "").toString());
             for (int i = 0; i < kNumScenes; ++i)
+            {
                 scenes[(size_t) i] = sceneList.isArray() && i < sceneList.size() && sceneList[i].isObject() ? sceneList[i] : var();
+                if (auto* obj = scenes[(size_t) i].getDynamicObject(); obj != nullptr && panIsOffset)
+                    for (int s = 0; s < sc::NumSections; ++s)
+                        if (const Identifier id (sectionParamID (s, "Pan")); obj->hasProperty (id))
+                            obj->setProperty (id, panFromOffset (s, (float) obj->getProperty (id)));
+            }
             sceneDirty = false;
             cancelPendingUpdate();
         }

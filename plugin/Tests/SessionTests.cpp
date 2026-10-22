@@ -410,11 +410,13 @@ static void chordLaneAndDragOut()
         const File firstFull (all.size() == 5 ? all[4] : String());
         rig.mixSignature = "mix 2";
         check (rig.session.getStatus().getProperty ("export", "").toString() == "stale", "the full choir is out of date after a mix change");
-        check (rig.session.getExportFiles (LearnSession::ExportItem::Sopranos) == StringArray (all[0]), "the section files still stand");
+        check (rig.session.getExportFiles (LearnSession::ExportItem::Sopranos).isEmpty(), "the sections follow the mix too (they stand on the stage)");
         rig.session.prepareExport();
         check (waitFor (rig.session, [&] { return rig.session.getStatus().getProperty ("export", "").toString() == "ready"; }), "mixed again");
         const auto full2 = rig.session.getExportFiles (LearnSession::ExportItem::FullChoir);
         check (full2.size() == 1 && File (full2[0]) != firstFull && firstFull.existsAsFile(), "a new file, the old one kept");
+        const auto sop2 = rig.session.getExportFiles (LearnSession::ExportItem::Sopranos);
+        check (sop2.size() == 1 && sop2[0] != all[0] && File (all[0]).existsAsFile(), "new section files too, the old ones kept");
 
         MemoryOutputStream out (state, false);
         rig.session.writeState (out);

@@ -99,6 +99,82 @@ private:
     Biquad tailHpL, tailHpR;
 };
 
+/** The stage and its microphones. Each section arrives as a stereo bus whose left and right
+    edges are the section's own edges; the stage puts it at its place (left/right, how wide,
+    how far back) and three pairs of microphones pick the choir up:
+      - Close: spot mics in front of each section. Dry, near and detailed; every row as loud.
+      - Tree: the main pair above the conductor. The natural picture: back rows a little later,
+        quieter and darker.
+      - Room: a pair far out in the hall. Wide and distant, with much more of the hall.
+    The mics are mixed by level; the hall's reverb is added afterwards by the engine (how much
+    of it the mics hear is reverbAmount()). */
+class ChoirStage
+{
+public:
+    struct Placement
+    {
+        float x = 0.0f;       // -1 stage left .. 1 stage right (audience view)
+        float width = 0.42f;  // half the section's width, in the same units
+        float depth = 0.25f;  // 0 front edge .. 1 back wall
+    };
+    struct Settings
+    {
+        std::array<Placement, NumSections> sections;
+        float spread = 0.7f;                             // how wide the whole stage sounds (Space)
+        float close = 0.0f, tree = 1.0f, room = 0.0f;    // mic levels (linear gain)
+    };
+
+    void prepare (double sampleRate, int maxBlock);
+    void reset();
+    void setSettings (const Settings& s);
+    /** Starts a block: call once, then addSection() for each section, then mix(). */
+    void begin (int n);
+    /** Adds a section's bus (already at its level) to the microphones. */
+    void addSection (int section, const float* left, const float* right, int n);
+    /** The mic mix (overwrites out). */
+    void mix (float* outL, float* outR, int n);
+    /** How much of the hall the mics hear, relative to the Tree alone (0.35 Close + Tree + 1.8 Room). */
+    float reverbAmount() const noexcept { return 0.35f * gClose + gTree + 1.8f * gRoom; }
+    /** Scales the mic mix back to a Tree-like level for the hall's reverb input. */
+    float reverbInputScale() const noexcept { const float g = gClose + gTree + gRoom; return g > 1.0e-3f ? 1.0f / g : 0.0f; }
+    /** Where a section sits, in seconds behind the front-most section (for tests). */
+    float sectionDelaySeconds (int section) const noexcept;
+
+private:
+    struct Ring
+    {
+        std::vector<float> buf;
+        int mask = 0, pos = 0;
+        void prepare (int maxLen);
+        void clear() { std::fill (buf.begin(), buf.end(), 0.0f); pos = 0; }
+        inline void push (float x) { buf[(size_t) pos] = x; pos = (pos + 1) & mask; }
+        inline float tap (float d) const
+        {
+            const int i = (int) d;
+            const float fr = d - (float) i;
+            const float a = buf[(size_t) ((pos - 1 - i) & mask)], b = buf[(size_t) ((pos - 2 - i) & mask)];
+            return a + (b - a) * fr;
+        }
+    };
+    struct SectionState
+    {
+        Smoothed x, width, depth;
+        Ring delayL, delayR;
+        float delay = 0.0f, delayTarget = 0.0f;   // samples
+        OnePoleLP airL, airR;                     // the tree hears the back rows darker
+    };
+
+    double sr = 48000.0;
+    Settings settings;
+    std::array<SectionState, NumSections> sections;
+    Smoothed close, tree, room, spread;
+    float gClose = 0.0f, gTree = 1.0f, gRoom = 0.0f, gSpread = 0.7f;
+    std::vector<float> closeL, closeR, treeL, treeR, roomL, roomR;
+    std::array<Biquad, 2> closePresence, roomTone;
+    Ring roomDelayL, roomDelayR;
+    float roomDelayLeft = 0.0f, roomDelayRight = 0.0f;
+};
+
 /** Low cut, high cut, tilt ("Tone") and presence for the choir bus. */
 class ToneStage
 {

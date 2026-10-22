@@ -195,6 +195,176 @@ void ChoirReverb::process (const float* inL, const float* inR, float* outL, floa
 }
 
 //==============================================================================
+//==============================================================================
+void ChoirStage::Ring::prepare (int maxLen)
+{
+    int size = 1;
+    while (size < maxLen + 4) size <<= 1;
+    buf.assign ((size_t) size, 0.0f);
+    mask = size - 1;
+    pos = 0;
+}
+
+void ChoirStage::prepare (double sampleRate, int maxBlock)
+{
+    sr = sampleRate;
+    const float smoothS = 0.06f;
+    for (size_t s = 0; s < sections.size(); ++s)
+    {
+        auto& st = sections[s];
+        const auto& p = settings.sections[s];
+        st.x.prepare (sr, smoothS, p.x);
+        st.width.prepare (sr, smoothS, p.width);
+        st.depth.prepare (sr, smoothS, p.depth);
+        st.delayL.prepare ((int) (0.006 * sr) + 2);
+        st.delayR.prepare ((int) (0.006 * sr) + 2);
+    }
+    close.prepare (sr, smoothS, settings.close);
+    tree.prepare (sr, smoothS, settings.tree);
+    room.prepare (sr, smoothS, settings.room);
+    spread.prepare (sr, smoothS, settings.spread);
+    for (auto* b : { &closeL, &closeR, &treeL, &treeR, &roomL, &roomR })
+        b->assign ((size_t) std::max (1, maxBlock), 0.0f);
+    for (auto& f : closePresence)
+        f.highShelf (sr, 4500.0, 2.5);
+    for (auto& f : roomTone)
+        f.lowPass (sr, 6500.0, 0.6);
+    // The room pair stands far out in the hall: the choir reaches it later (a little more on one
+    // side, so the two mics don't hear the same thing).
+    roomDelayLeft = (float) (0.017 * sr);
+    roomDelayRight = (float) (0.023 * sr);
+    roomDelayL.prepare ((int) (0.025 * sr) + 2);
+    roomDelayR.prepare ((int) (0.025 * sr) + 2);
+    setSettings (settings);
+    reset();
+}
+
+void ChoirStage::reset()
+{
+    for (auto& st : sections)
+    {
+        st.delayL.clear();
+        st.delayR.clear();
+        st.delay = st.delayTarget;
+        st.airL.reset();
+        st.airR.reset();
+    }
+    roomDelayL.clear();
+    roomDelayR.clear();
+    for (auto& f : closePresence) f.reset();
+    for (auto& f : roomTone) f.reset();
+}
+
+void ChoirStage::setSettings (const Settings& s)
+{
+    settings = s;
+    // Rows further back are heard later, measured from the front-most section (so the front of
+    // the choir stays in time with the lead).
+    float front = 1.0f;
+    for (const auto& p : s.sections)
+        front = std::min (front, clampv (p.depth, 0.0f, 1.0f));
+    const float stageSize = clampv (s.spread, 0.0f, 1.0f);
+    for (size_t i = 0; i < sections.size(); ++i)
+    {
+        auto& st = sections[i];
+        const auto& p = s.sections[i];
+        st.x.setTarget (clampv (p.x, -1.0f, 1.0f));
+        st.width.setTarget (clampv (p.width, 0.0f, 1.0f));
+        st.depth.setTarget (clampv (p.depth, 0.0f, 1.0f));
+        st.delayTarget = (float) (0.0045 * sr) * (clampv (p.depth, 0.0f, 1.0f) - front) * stageSize;
+    }
+    close.setTarget (std::max (0.0f, s.close));
+    tree.setTarget (std::max (0.0f, s.tree));
+    room.setTarget (std::max (0.0f, s.room));
+    spread.setTarget (clampv (s.spread, 0.0f, 1.0f));
+}
+
+float ChoirStage::sectionDelaySeconds (int section) const noexcept
+{
+    return sections[(size_t) clampv (section, 0, NumSections - 1)].delayTarget / (float) sr;
+}
+
+void ChoirStage::begin (int n)
+{
+    gClose = close.advance (n);
+    gTree = tree.advance (n);
+    gRoom = room.advance (n);
+    gSpread = spread.advance (n);
+    for (auto* b : { &closeL, &closeR, &treeL, &treeR, &roomL, &roomR })
+        std::fill (b->begin(), b->begin() + n, 0.0f);
+}
+
+void ChoirStage::addSection (int section, const float* L, const float* R, int n)
+{
+    auto& st = sections[(size_t) section];
+    const float x = st.x.advance (n), w = st.width.advance (n), d = st.depth.advance (n);
+    constexpr float quarter = 0.25f * kPi;
+
+    // Where the section sits (Space scales the whole stage), kept inside the stage's edges.
+    const float xe = clampv (x * gSpread, -1.0f, 1.0f);
+    const float we = clampv (std::min (w * gSpread, 1.0f - std::abs (xe)), 0.0f, 1.0f);
+    const float ca = std::cos (xe * quarter), sa = std::sin (xe * quarter);
+    const float car = std::cos (xe * 0.55f * quarter), sar = std::sin (xe * 0.55f * quarter);   // the room hears the stage narrower
+
+    // The section's edges are its bus's left and right: narrowing it (mid/side) to its width,
+    // then turning the picture to its place. A narrow section keeps its loudness.
+    auto widthK = [] (float halfWidth) { return std::tan (clampv (halfWidth, 0.0f, 1.0f) * quarter); };
+    auto keepLevel = [] (float k) { return 1.0f / std::sqrt (0.818f + 0.182f * k * k); };
+    const float kt = widthK (we), kc = widthK (std::min (we, 0.3f) * 0.6f), kr = widthK (we * 0.6f);
+    const float gt = keepLevel (kt) * 1.05f / (1.0f + 0.4f * d);  // the tree: back rows further away
+    const float gc = keepLevel (kc);                                // spot mics: every row close
+    const float gr = keepLevel (kr) * 0.8f;
+    st.airL.setCutoff (sr, 20000.0 - 12000.0 * d);
+    st.airR.setCutoff (sr, 20000.0 - 12000.0 * d);
+    const bool useClose = gClose > 1.0e-5f || close.target > 1.0e-5f;
+    const bool useRoom = gRoom > 1.0e-5f || room.target > 1.0e-5f;
+
+    constexpr float slew = 1.0f / 16.0f;   // moving a row back or forth glides its delay
+    for (int i = 0; i < n; ++i)
+    {
+        st.delayL.push (L[i]);
+        st.delayR.push (R[i]);
+        if (st.delay != st.delayTarget)
+            st.delay += clampv (st.delayTarget - st.delay, -slew, slew);
+        const float l = st.delayL.tap (st.delay), r = st.delayR.tap (st.delay);
+        {
+            const float fl = st.airL.process (l), fr = st.airR.process (r);
+            const float m = 0.5f * (fl + fr), side = 0.5f * (fl - fr) * kt;
+            const float a = (m + side) * gt, b = (m - side) * gt;
+            treeL[(size_t) i] += a * ca - b * sa;
+            treeR[(size_t) i] += a * sa + b * ca;
+        }
+        if (useClose)
+        {
+            const float m = 0.5f * (l + r), side = 0.5f * (l - r) * kc;
+            const float a = (m + side) * gc, b = (m - side) * gc;
+            closeL[(size_t) i] += a * ca - b * sa;
+            closeR[(size_t) i] += a * sa + b * ca;
+        }
+        if (useRoom)
+        {
+            const float m = 0.5f * (l + r), side = 0.5f * (l - r) * kr;
+            const float a = (m + side) * gr, b = (m - side) * gr;
+            roomL[(size_t) i] += a * car - b * sar;
+            roomR[(size_t) i] += a * sar + b * car;
+        }
+    }
+}
+
+void ChoirStage::mix (float* outL, float* outR, int n)
+{
+    for (int i = 0; i < n; ++i)
+    {
+        const float cl = closePresence[0].process (closeL[(size_t) i]), cr = closePresence[1].process (closeR[(size_t) i]);
+        roomDelayL.push (roomL[(size_t) i]);
+        roomDelayR.push (roomR[(size_t) i]);
+        const float rl = roomTone[0].process (roomDelayL.tap (roomDelayLeft));
+        const float rr = roomTone[1].process (roomDelayR.tap (roomDelayRight));
+        outL[i] = gClose * cl + gTree * treeL[(size_t) i] + gRoom * rl;
+        outR[i] = gClose * cr + gTree * treeR[(size_t) i] + gRoom * rr;
+    }
+}
+
 void ToneStage::prepare (double sampleRate)
 {
     sr = sampleRate;

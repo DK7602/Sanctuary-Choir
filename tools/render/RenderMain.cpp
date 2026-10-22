@@ -11,6 +11,8 @@
 //     --reverb PCT         reverb 0..100 (default 65)
 //     --lead DB            lead vocal level in dB (default 0, -60 = off)
 //     --stems DIR          also write the dry section stems (learn mode)
+//     --mics C,T,R         close, tree and room microphone levels in dB (-60 = off; default -60,0,-60)
+//     --formation NAME     blocks | across | mencentre | mixed
 //     --synth-demo         ignore the input and sing a demo melody (writes it next to the output)
 #include "TestSignals.h"
 
@@ -36,7 +38,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--synth-demo]\n", argv[0]);
         return 2;
     }
 
@@ -69,6 +71,27 @@ int main (int argc, char** argv)
         else if (a == "--voices") voicesDir = next();
         else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
         else if (a == "--rhythm") p.rhythmPattern = std::clamp (std::stoi (next()), 0, kNumRhythmPatterns - 1);
+        else if (a == "--mics")
+        {
+            float c = -60.0f, t = 0.0f, r = -60.0f;
+            if (std::sscanf (next().c_str(), "%f,%f,%f", &c, &t, &r) == 3) { p.micCloseDb = c; p.micTreeDb = t; p.micRoomDb = r; }
+        }
+        else if (a == "--formation")
+        {
+            // x, half-width, depth for S, A, T, B (as the Stage page's formation buttons).
+            static const float shapes[4][4][3] = {
+                { { -0.55f, 0.42f, 0.25f }, { 0.55f, 0.42f, 0.25f }, { -0.42f, 0.40f, 0.75f }, { 0.42f, 0.40f, 0.75f } },
+                { { -0.75f, 0.24f, 0.45f }, { -0.25f, 0.24f, 0.45f }, { 0.25f, 0.24f, 0.55f }, { 0.75f, 0.24f, 0.55f } },
+                { { -0.62f, 0.36f, 0.30f }, { 0.62f, 0.36f, 0.30f }, { -0.2f, 0.20f, 0.70f }, { 0.2f, 0.20f, 0.70f } },
+                { { 0.0f, 0.95f, 0.30f }, { 0.0f, 0.95f, 0.45f }, { 0.0f, 0.95f, 0.60f }, { 0.0f, 0.95f, 0.75f } } };
+            const int f = indexOf ({ { "blocks", 0 }, { "across", 1 }, { "mencentre", 2 }, { "mixed", 3 } }, next(), 0);
+            for (int s = 0; s < NumSections; ++s)
+            {
+                p.sections[(size_t) s].pan = shapes[f][s][0];
+                p.sections[(size_t) s].width = shapes[f][s][1];
+                p.sections[(size_t) s].depth = shapes[f][s][2];
+            }
+        }
         else { std::fprintf (stderr, "unknown option %s\n", a.c_str()); return 2; }
     }
 

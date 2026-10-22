@@ -30,6 +30,11 @@ static AudioParameterFloatAttributes percentAttrs()
         .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; });
 }
 
+float panFromOffset (int section, float offset)
+{
+    return jlimit (-1.0f, 1.0f, sc::defaultSectionPlacement (section).pan + offset);
+}
+
 static AudioParameterFloatAttributes dbAttrs()
 {
     return AudioParameterFloatAttributes()
@@ -72,13 +77,28 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                                 const float g = (v / 0.75f) * (v / 0.75f);
                                                 return g <= 0.0001f ? String ("-inf dB") : String (Decibels::gainToDecibels (g), 1) + " dB";
                                             })));
-        group->addChild (std::make_unique<APF> (ParameterID { sectionParamID (s, "Pan"), 1 }, n + " Pan", NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f));
+        const auto home = sc::defaultSectionPlacement (s);
+        group->addChild (std::make_unique<APF> (ParameterID { sectionParamID (s, "Pan"), 1 }, n + " Position", NormalisableRange<float> (-1.0f, 1.0f, 0.01f), home.pan,
+                                            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+                                            {
+                                                const int pct = roundToInt (std::abs (v) * 100.0f);
+                                                return pct == 0 ? String ("C") : (v < 0.0f ? "L" : "R") + String (pct);
+                                            })));
+        group->addChild (std::make_unique<APF> (ParameterID { sectionParamID (s, "Width"), 1 }, n + " Width", NormalisableRange<float> (0.0f, 100.0f, 1.0f), home.width * 100.0f, percentAttrs()));
+        group->addChild (std::make_unique<APF> (ParameterID { sectionParamID (s, "Depth"), 1 }, n + " Depth", NormalisableRange<float> (0.0f, 100.0f, 1.0f), home.depth * 100.0f,
+                                            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+                                            {
+                                                return v < 33.0f ? String ("Front") : (v < 67.0f ? String ("Middle") : String ("Back"));
+                                            })));
         group->addChild (std::make_unique<APB> (ParameterID { sectionParamID (s, "Mute"), 1 }, n + " Mute", false));
         group->addChild (std::make_unique<APB> (ParameterID { sectionParamID (s, "Solo"), 1 }, n + " Solo", false));
         group->addChild (std::make_unique<API> (ParameterID { sectionParamID (s, "Low"), 1 }, n + " Range Low", 24, 96, ranges[(size_t) s].low, noteAttrs));
         group->addChild (std::make_unique<API> (ParameterID { sectionParamID (s, "High"), 1 }, n + " Range High", 24, 96, ranges[(size_t) s].high, noteAttrs));
         perform->addChild (std::move (group));
     }
+    perform->addChild (std::make_unique<APF> (pid (ParamIDs::micClose), "Close Mics", NormalisableRange<float> (-60.0f, 6.0f, 0.1f, 2.2f), -60.0f, dbAttrs()));
+    perform->addChild (std::make_unique<APF> (pid (ParamIDs::micTree), "Tree Mics", NormalisableRange<float> (-60.0f, 6.0f, 0.1f, 2.2f), 0.0f, dbAttrs()));
+    perform->addChild (std::make_unique<APF> (pid (ParamIDs::micRoom), "Room Mics", NormalisableRange<float> (-60.0f, 6.0f, 0.1f, 2.2f), -60.0f, dbAttrs()));
     layout.add (std::move (perform));
 
     // Mix -----------------------------------------------------------------
@@ -144,11 +164,11 @@ struct ParameterCache::Ptrs
 {
     std::atomic<float>* volume, *choirSize, *space, *reverb, *tone, *presence, *harmonyMode, *key, *scale, *style, *vocalType, *freeze, *response;
     std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath, *harmonySpeed;
-    std::atomic<float>* ensemble;
+    std::atomic<float>* ensemble, *micClose, *micTree, *micRoom;
     std::atomic<float>* venue, *decay, *preDelay, *brightness, *leadReverb, *lowCut, *highCut, *warmth, *glue;
     std::atomic<float>* rhythmPattern, *rhythmRate, *rhythmLength, *rhythmDepth, *rhythmSections;
     std::atomic<float>* midiEnabled, *midiParts, *followBand, *tuning, *latencyMode;
-    std::array<std::atomic<float>*, sc::NumSections> level, pan, mute, solo, low, high;
+    std::array<std::atomic<float>*, sc::NumSections> level, pan, width, depth, mute, solo, low, high;
 };
 
 ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std::make_shared<Ptrs>())
@@ -166,6 +186,7 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.style = get (ParamIDs::style); p.vocalType = get (ParamIDs::vocalType); p.freeze = get (ParamIDs::freeze);
     p.response = get (ParamIDs::response);
     p.ensemble = get (ParamIDs::ensemble);
+    p.micClose = get (ParamIDs::micClose); p.micTree = get (ParamIDs::micTree); p.micRoom = get (ParamIDs::micRoom);
     p.leadLevel = get (ParamIDs::leadLevel); p.choirLevel = get (ParamIDs::choirLevel); p.humanize = get (ParamIDs::humanize);
     p.vibrato = get (ParamIDs::vibrato); p.glide = get (ParamIDs::glide); p.formant = get (ParamIDs::formant);
     p.pitchCorrection = get (ParamIDs::pitchCorrection); p.breath = get (ParamIDs::breath);
@@ -182,6 +203,8 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     {
         p.level[(size_t) s] = get (sectionParamID (s, "Level"));
         p.pan[(size_t) s] = get (sectionParamID (s, "Pan"));
+        p.width[(size_t) s] = get (sectionParamID (s, "Width"));
+        p.depth[(size_t) s] = get (sectionParamID (s, "Depth"));
         p.mute[(size_t) s] = get (sectionParamID (s, "Mute"));
         p.solo[(size_t) s] = get (sectionParamID (s, "Solo"));
         p.low[(size_t) s] = get (sectionParamID (s, "Low"));
@@ -209,12 +232,17 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.freeze = f (p.freeze) > 0.5f;
     e.response = jlimit (0, 1, i (p.response));
     e.ensemble = (sc::Ensemble) jlimit (0, (int) sc::Ensemble::Count - 1, i (p.ensemble));
+    e.micCloseDb = f (p.micClose);
+    e.micTreeDb = f (p.micTree);
+    e.micRoomDb = f (p.micRoom);
 
     for (int s = 0; s < sc::NumSections; ++s)
     {
         auto& sp = e.sections[(size_t) s];
         sp.level = f (p.level[(size_t) s]);
         sp.pan = f (p.pan[(size_t) s]);
+        sp.width = f (p.width[(size_t) s]) / 100.0f;
+        sp.depth = f (p.depth[(size_t) s]) / 100.0f;
         sp.mute = f (p.mute[(size_t) s]) > 0.5f;
         sp.solo = f (p.solo[(size_t) s]) > 0.5f;
         int lo = i (p.low[(size_t) s]), hi = i (p.high[(size_t) s]);

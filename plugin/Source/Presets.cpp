@@ -46,6 +46,13 @@ namespace
             p ("Requiem",           { { harmonyMode, Full }, { style, Sacred }, { vocalType, Ah }, { choirSize, 85 }, { space, 80 }, { reverb, 80 }, { decay, 140 }, { tone, -3 }, { harmonySpeed, 30 }, { venue, Cathedral } }),
             p ("Renaissance Motet", { { harmonyMode, Open }, { style, Chamber }, { vocalType, Oh }, { choirSize, 25 }, { space, 55 }, { reverb, 58 }, { humanize, 60 }, { vibrato, 40 }, { venue, Chapel } }),
             p ("Psalm Tone",        { { harmonyMode, Organum }, { style, Gregorian }, { vocalType, Ah }, { choirSize, 20 }, { space, 60 }, { reverb, 78 }, { decay, 120 }, { vibrato, 20 }, { venue, Abbey } }),
+            // The stage and its microphones.
+            p ("Intimate Chamber",  { { harmonyMode, Full }, { style, Chamber }, { vocalType, Words }, { choirSize, 25 }, { space, 45 }, { reverb, 40 }, { micClose, 0 }, { micTree, -8 }, { venue, Chapel } }),
+            p ("Distant Cathedral", { { harmonyMode, Full }, { style, Sacred }, { vocalType, Oo }, { choirSize, 80 }, { space, 80 }, { reverb, 72 }, { micTree, -9 }, { micRoom, 0 }, { venue, Cathedral } }),
+            p ("Choir in the Round", { { harmonyMode, Full }, { style, Sacred }, { vocalType, Ah }, { choirSize, 60 }, { space, 75 }, { reverb, 62 }, { micClose, -6 }, { micRoom, -6 }, { venue, Cathedral },
+                                       { "sopPan", 0 }, { "altPan", 0 }, { "tenPan", 0 }, { "basPan", 0 },
+                                       { "sopWidth", 95 }, { "altWidth", 95 }, { "tenWidth", 95 }, { "basWidth", 95 },
+                                       { "sopDepth", 30 }, { "altDepth", 45 }, { "tenDepth", 60 }, { "basDepth", 75 } }),
         });
 
         category = "Worship";
@@ -176,9 +183,19 @@ void PresetManager::refresh()
             e.factory = false;
             e.file = f;
             e.name = json.getProperty ("name", f.getFileNameWithoutExtension()).toString();
+            // Presets from before the stage stored each section's pan as an offset from its home.
+            const bool panIsOffset = (int) json.getProperty ("version", 1) < kStageVersion;
             if (auto* obj = json.getProperty ("params", var()).getDynamicObject())
+            {
                 for (const auto& prop : obj->getProperties())
-                    e.values.push_back ({ prop.name.toString(), (float) prop.value });
+                {
+                    float value = (float) prop.value;
+                    for (int sec = 0; sec < sc::NumSections && panIsOffset; ++sec)
+                        if (prop.name.toString() == sectionParamID (sec, "Pan"))
+                            value = panFromOffset (sec, value);
+                    e.values.push_back ({ prop.name.toString(), value });
+                }
+            }
             entries.push_back (std::move (e));
         }
     }
@@ -261,7 +278,7 @@ bool PresetManager::saveUser (const String& nameIn)
     auto root = std::make_unique<DynamicObject>();
     root->setProperty ("name", name);
     root->setProperty ("plugin", "Sanctuary Choir");
-    root->setProperty ("version", 1);
+    root->setProperty ("version", kStageVersion);
     root->setProperty ("params", var (params.release()));
 
     const auto file = folder.getChildFile (File::createLegalFileName (name) + ".json");

@@ -445,3 +445,19 @@ html, body {
 .menu.chord-menu .item .fit { margin-left: auto; width: 46px; height: 5px; border-radius: 3px; background: rgba(232, 201, 138, 0.15); overflow: hidden; }
 .menu.chord-menu .item .fit i { display: block; height: 100%; background: linear-gradient(90deg, #c69a52, #ffe3a3); }
 .menu.chord-menu .item.action { font-family: "Montserrat", sans-serif; font-size: 12px; }
+
+/* ---------- The stage ---------- */
+#loftHit { left: 330px; top: 150px; width: 790px; height: 340px; border-radius: 40px; cursor: pointer; }
+#loftHit:hover::after { background: radial-gradient(ellipse at 50% 55%, rgba(255, 230, 180, 0.07), rgba(255, 230, 180, 0) 70%); box-shadow: none; }
+.page-link { position: absolute; right: 30px; top: 22px; height: 30px; padding: 0 14px; }
+.stage-group { width: 722px; padding: 10px 14px 6px; }
+.stage-head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+.stage-head .pill-row { margin-left: auto; }
+.stage-canvas { display: block; margin: 2px auto 0; touch-action: none; }
+.stage-hint { font-size: 14.5px !important; line-height: 1.3 !important; color: #a8977c !important; margin: 4px 0 0 !important; }
+.mic-group { flex: 1; padding: 10px 14px; display: flex; flex-direction: column; }
+.mic-group .pill-row { gap: 6px; }
+.mic-faders { display: flex; justify-content: space-around; margin: 14px 0 6px; }
+.mic-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.mic-name { font-family: "Montserrat", sans-serif; font-weight: 700; font-size: 12px; letter-spacing: 2.6px; color: #ffe7b0; }
+.mic-text { font-size: 14.5px !important; line-height: 1.3 !important; color: #a8977c !important; margin-top: auto !important; }

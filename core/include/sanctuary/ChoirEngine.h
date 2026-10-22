@@ -3,7 +3,8 @@
 // Signal flow:
 //   input -> pitch tracker -> harmoniser (live or learned score) -> control timeline
 //   input -> PSOLA analyser -> per-singer PSOLA voices ("Words") or vowel synths ("Ah", "Oh"...)
-//   singers -> section buses (S/A/T/B) -> level/pan/width -> tone/glue -> + reverb -> + lead -> limiter
+//   singers -> section buses (S/A/T/B) -> level -> stage & mics (Close/Tree/Room) -> tone/glue
+//          -> + reverb -> + lead -> limiter
 #pragma once
 
 #include "ChordDetector.h"
@@ -21,10 +22,16 @@ namespace sc
 struct SectionParams
 {
     float level = 0.75f;   // 0..1 fader position (0.75 = unity)
-    float pan = 0.0f;      // -1..1 offset
+    float pan = 0.0f;      // where the section stands: -1 stage left .. 1 stage right (audience view)
+    float width = 0.42f;   // how wide it stands: half its width, in the same units (0..1)
+    float depth = 0.25f;   // how far back: 0 front edge .. 1 back wall
     bool mute = false, solo = false;
     SectionRange range;
 };
+
+/** Where the sections stand by default: sopranos front left, altos front right, tenors back
+    left, basses back right. */
+SectionParams defaultSectionPlacement (int section);
 
 /** Who is singing: an adult choir, children, a shouting gang, or a whole congregation. */
 enum class Ensemble : int { Choir = 0, Children, Gang, Congregation, Count };
@@ -45,7 +52,10 @@ struct EngineParams
     {
         const auto r = defaultSectionRanges();
         for (size_t s = 0; s < sections.size(); ++s)
+        {
+            sections[s] = defaultSectionPlacement ((int) s);
             sections[s].range = r[s];
+        }
     }
 
     // Perform page
@@ -64,6 +74,11 @@ struct EngineParams
     int response = 0;            // 0 = sing with me, 1 = echo each phrase right after it
     Ensemble ensemble = Ensemble::Choir;
     std::array<SectionParams, NumSections> sections;
+
+    // Stage page: the microphones (dB, -60 = off)
+    float micCloseDb = -60.0f;
+    float micTreeDb = 0.0f;
+    float micRoomDb = -60.0f;
 
     // Mix page
     float leadDb = 0.0f;
@@ -288,7 +303,8 @@ private:
     ChoirReverb reverb;
     SafetyLimiter limiter;
     Smoothed volume, leadGain, choirGain, wetGain, dryChoirGain, leadSend, warmthAmt;
-    std::array<Smoothed, NumSections> sectionGain, sectionPanL, sectionPanR, sectionWidth;
+    std::array<Smoothed, NumSections> sectionGain;
+    ChoirStage stage;
 
     // Words mode voice character: every singer is the lead's own voice, so sections that sing
     // in the other gender's register get that gender's vocal tract and tone.
