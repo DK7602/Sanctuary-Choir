@@ -240,12 +240,13 @@
 
     const take = el("div", "group", left);
     el("h3", "", take, "LEARNED TAKE");
-    const btns = el("div", "", take);
+    const btns = el("div", "take-btns", take);
     btns.style.cssText = "display:flex;gap:10px;flex-wrap:wrap";
     const preview = el("button", "big-btn", btns, "\u25b6  PREVIEW");
     preview.addEventListener("click", () => SC.send({ type: "cmd", name: "preview" }));
-    const exp = el("button", "big-btn", btns, "EXPORT STEMS");
-    exp.addEventListener("click", () => SC.send({ type: "cmd", name: "export" }));
+    const exp = el("button", "big-btn", btns, "CHORDS & STEMS");
+    exp.title = "See the learned chords, choose others, and drag the parts and stems into your DAW";
+    exp.addEventListener("click", () => info.openTake && info.openTake());
     const presetFolder = el("button", "big-btn", btns, "PRESETS FOLDER");
     presetFolder.addEventListener("click", () => SC.send({ type: "cmd", name: "presetFolder" }));
     const takeInfo = el("p", "", take, "");
@@ -262,7 +263,7 @@
       const l = st.learn || {};
       preview.disabled = !l.hasTake;
       preview.textContent = l.previewing ? "\u25a0  STOP PREVIEW" : "\u25b6  PREVIEW";
-      exp.disabled = !l.hasStems;
+      exp.disabled = !l.hasTake;
       takeInfo.textContent = l.hasTake ? (l.text || "") : "No take yet. Press LEARN and sing, or LOAD a vocal file.";
     };
 
@@ -364,5 +365,245 @@
     describe(Params.get("latencyMode"));
   }
 
-  window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings };
+  //==========================================================================
+  // CHORDS & STEMS: the learned chords as a lane (click one to choose another) and the files
+  // to drag into the DAW.
+  function buildTake(page, info) {
+    const { Menu, stageRect, hiDpiCanvas } = window.SCW;
+    page.innerHTML = "";
+    el("h2", "", page, "CHORDS & STEMS");
+    const close = el("button", "page-close", page, "✕");
+    close.title = "Back";
+    close.addEventListener("click", () => info.close && info.close());
+
+    const head = el("div", "take-head", page);
+    const headText = el("p", "", head);
+    const headBtns = el("div", "pill-row", head);
+    const preview = el("button", "pill", headBtns, "▶ PREVIEW");
+    preview.title = "Play the take through the choir";
+    preview.addEventListener("click", () => SC.send({ type: "cmd", name: "preview" }));
+    const unlockAll = el("button", "pill", headBtns, "UNLOCK ALL");
+    unlockAll.title = "Forget every chord you chose: the choir chooses them all again";
+    unlockAll.addEventListener("click", () => SC.send({ type: "cmd", name: "chordUnlockAll" }));
+
+    const laneGroup = el("div", "group lane-group", page);
+    const scroller = el("div", "lane-scroll", laneGroup);
+    const inner = el("div", "lane-inner", scroller);
+    const ruler = el("div", "lane-ruler", inner);
+    const chords = el("div", "lane-chords", inner);
+    const melodyCanvas = el("canvas", "lane-melody", inner);
+    const playhead = el("div", "lane-playhead hidden", inner);
+    const empty = el("div", "lane-empty", laneGroup, "");
+    const hint = el("p", "take-hint", page);
+
+    const drag = el("div", "group drag-group", page);
+    const dragHead = el("div", "", drag);
+    dragHead.style.cssText = "display:flex;align-items:center;gap:12px";
+    el("h3", "", dragHead, "DRAG INTO YOUR DAW").style.margin = "0";
+    const dragText = el("p", "drag-text", dragHead);
+    const save = el("button", "pill", dragHead, "SAVE TO FOLDER");
+    save.title = "Save the MIDI and the audio (with the room) to a folder";
+    save.addEventListener("click", () => SC.send({ type: "cmd", name: "export" }));
+    const chips = el("div", "drag-row", drag);
+
+    // Chips start a real file drag: press, then move (the plug-in takes over from there).
+    let press = null;
+    const chip = (label, item, tip, color, audio) => {
+      const c = el("div", "drag-chip", chips);
+      c.innerHTML = '<span class="grip"></span><span class="label"></span>';
+      c.querySelector(".label").textContent = label;
+      c.title = tip;
+      if (color) c.style.setProperty("--c", color);
+      c.dataset.audio = audio ? "1" : "";
+      c.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        press = { x: e.clientX, y: e.clientY, item, chip: c, sent: false };
+      });
+      return c;
+    };
+    window.addEventListener("mousemove", (e) => {
+      if (!press) return;
+      if (!(e.buttons & 1)) { press = null; return; }
+      if (!press.sent && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4) {
+        press.sent = true;
+        press.chip.classList.add("dragging");
+        SC.send({ type: "cmd", name: "dragOut", item: press.item });
+      }
+    });
+    window.addEventListener("mouseup", () => {
+      if (press && !press.sent) info.toast && info.toast("Hold the button down and drag it onto a track in your DAW");
+      if (press) press.chip.classList.remove("dragging");
+      press = null;
+    });
+    SC.on("dragDone", () => {
+      if (press) press.chip.classList.remove("dragging");
+      press = null;
+    });
+    const midiChip = chip("MIDI · PARTS & CHORDS", "midi", "Soprano, alto, tenor and bass (channels 1–4), the melody and the chords with their names", "#e8c98a", false);
+    const audioChips = [
+      chip("FULL CHOIR", "full", "The whole choir as you hear it, with the room", "#f3e9d7", true),
+      ...SECTIONS.map((s, i) => chip(["SOPRANOS", "ALTOS", "TENORS", "BASSES"][i], ["sop", "alt", "ten", "bas"][i],
+                                     ["Sopranos", "Altos", "Tenors", "Basses"][i] + " on their own (dry)", s.color, true)),
+      chip("ALL STEMS", "all", "The four sections and the full choir at once", "#e8c98a", true),
+    ];
+
+    let lane = null, pxPerSec = 40, learn = {}, lastExportAsk = 0;
+    const fmt = (sec) => Math.floor(sec / 60) + ":" + String(Math.floor(sec % 60)).padStart(2, "0");
+
+    function showHead() {
+      if (!lane) {
+        headText.innerHTML = "No take yet. Press <b>LEARN</b> and sing, or <b>LOAD</b> a vocal file.";
+        return;
+      }
+      const n = (lane.spans || []).length, locked = (lane.spans || []).filter((s) => s.locked).length;
+      let where = "";
+      if (lane.songStart !== undefined)
+        where = " · starts " + (lane.bar ? "at bar " + lane.bar + (lane.beat > 1 ? " beat " + lane.beat : "") + " (" + fmt(lane.songStart) + ")" : "at " + fmt(lane.songStart));
+      headText.innerHTML = "<b>" + String(lane.key || "").replace(/[<>&]/g, "") + "</b> · " + n + " chord" + (n === 1 ? "" : "s")
+        + (locked ? " · <b>" + locked + " chosen by you</b>" : "") + (lane.band ? " · with the band" : "") + where;
+      unlockAll.disabled = !locked;
+    }
+
+    function drawLane() {
+      chords.innerHTML = "";
+      ruler.innerHTML = "";
+      showHead();
+      const has = !!(lane && lane.spans && lane.spans.length);
+      scroller.classList.toggle("hidden", !has);
+      empty.classList.toggle("hidden", has);
+      empty.textContent = lane ? "No chords: nothing was sung in this take." : "The chords of your take appear here after LEARN.";
+      hint.innerHTML = !lane ? "" : !lane.editable
+        ? "Chords can be chosen in the chord harmony modes (Full Choir, Gospel Stack, Open Voicing...)."
+        : "<b>Click a chord</b> to choose another; the ones you choose stay (gold) and the harmony around them follows.";
+      if (!has) return;
+      const secs = lane.length / lane.rate;
+      const view = scroller.clientWidth || 1060;
+      pxPerSec = Math.max(view / Math.max(secs, 1), 44);
+      pxPerSec = Math.min(pxPerSec, 16000 / Math.max(secs, 1));
+      const width = Math.max(view, Math.ceil(secs * pxPerSec) + 8);
+      inner.style.width = width + "px";
+
+      // Ruler: a label every 1, 2, 5, 10 or 30 seconds, whichever leaves room.
+      const step = [1, 2, 5, 10, 30, 60].find((st) => st * pxPerSec >= 70) || 60;
+      for (let t = 0; t <= secs; t += step) {
+        const tick = el("span", "", ruler, fmt(t));
+        tick.style.left = (t * pxPerSec) + "px";
+      }
+
+      lane.spans.forEach((sp) => {
+        const b = el("div", "chord-block", chords);
+        const x = sp.s / lane.rate * pxPerSec, w = Math.max(6, (sp.e - sp.s) / lane.rate * pxPerSec - 2);
+        b.style.left = x + "px";
+        b.style.width = w + "px";
+        b.classList.toggle("locked", !!sp.locked);
+        b.classList.toggle("band", !!sp.band);
+        b.textContent = w > 22 ? sp.name : "";
+        b.title = sp.name + (sp.locked ? " (chosen by you)" : sp.band ? " (from the band)" : "") + " · " + fmt(sp.s / lane.rate);
+        b.addEventListener("click", () => openOptions(sp, b));
+      });
+
+      // The melody under the chords.
+      const h = 92;
+      const ctx = hiDpiCanvas(melodyCanvas, width, h);
+      melodyCanvas.style.width = width + "px";
+      melodyCanvas.style.height = h + "px";
+      const notes = lane.melody || [];
+      if (notes.length) {
+        let lo = Math.min(...notes.map((n) => n.p)) - 2, hi = Math.max(...notes.map((n) => n.p)) + 2;
+        if (hi - lo < 12) { const mid = (hi + lo) / 2; lo = mid - 6; hi = mid + 6; }
+        notes.forEach((n) => {
+          const x = n.s / lane.rate * pxPerSec, w = Math.max(2, (n.e - n.s) / lane.rate * pxPerSec - 1);
+          const y = (1 - (n.p - lo) / (hi - lo)) * (h - 8) + 2;
+          ctx.fillStyle = "rgba(255, 226, 168, 0.85)";
+          ctx.shadowColor = "rgba(255, 200, 120, 0.6)";
+          ctx.shadowBlur = 4;
+          ctx.fillRect(x, y, w, 4);
+        });
+      }
+      movePlayhead();
+    }
+
+    function movePlayhead() {
+      const on = lane && learn.previewing && learn.previewSeconds !== undefined;
+      playhead.classList.toggle("hidden", !on);
+      if (!on) return;
+      const x = learn.previewSeconds * pxPerSec;
+      playhead.style.left = x + "px";
+      if (x < scroller.scrollLeft + 40 || x > scroller.scrollLeft + scroller.clientWidth - 80)
+        scroller.scrollLeft = Math.max(0, x - 120);
+    }
+
+    let asked = null;
+    function openOptions(sp, block) {
+      if (!lane.editable) {
+        info.toast && info.toast("Choose a chord harmony mode (Full Choir, Gospel Stack...) to change the chords");
+        return;
+      }
+      asked = { s: sp.s, e: sp.e, sp, block };
+      SC.send({ type: "cmd", name: "chordOptions", s: sp.s, e: sp.e });
+    }
+    SC.on("chordOptions", (o) => {
+      if (!asked || o.s !== asked.s || o.e !== asked.e || !lane) return;
+      const { sp, block } = asked;
+      asked = null;
+      const r = stageRect(block);
+      r.left -= scroller.scrollLeft;
+      Menu.open(r, (m) => {
+        m.classList.add("chord-menu");
+        Menu.heading(m, "CHORD AT " + fmt(sp.s / lane.rate) + (sp.locked ? " · CHOSEN" : sp.band ? " · FROM THE BAND" : ""));
+        (o.options || []).forEach((opt) => {
+          // Picking the current chord keeps it, whatever happens around it.
+          const it = Menu.item(m, opt.name, !!opt.current, () => {
+            if (opt.current && sp.locked) return;
+            SC.send({ type: "cmd", name: "chordLock", s: sp.s, e: sp.e, root: opt.root, iv: opt.iv });
+          });
+          const fit = document.createElement("span");
+          fit.className = "fit";
+          fit.title = Math.round(opt.fit * 100) + "% of the melody here is on its notes";
+          fit.innerHTML = '<i style="width:' + Math.round(opt.fit * 100) + '%"></i>';
+          it.appendChild(fit);
+        });
+        if (sp.locked) {
+          Menu.sep(m);
+          Menu.item(m, "LET THE CHOIR CHOOSE", false, () => SC.send({ type: "cmd", name: "chordUnlock", s: sp.s, e: sp.e }), "action");
+        }
+      });
+    });
+
+    SC.on("lane", (l) => {
+      lane = l && l.spans ? l : null;
+      if (Menu.current && Menu.current.classList.contains("chord-menu")) Menu.close();
+      drawLane();
+    });
+    window.addEventListener("sc-rescale", () => { if (lane) drawLane(); });
+
+    info.onTakeStatus = (st) => {
+      learn = st.learn || {};
+      preview.textContent = learn.previewing ? "■ STOP" : "▶ PREVIEW";
+      preview.disabled = !learn.hasTake;
+      const ex = learn.export || "none";
+      midiChip.classList.toggle("disabled", !learn.hasTake);
+      audioChips.forEach((c) => {
+        c.classList.toggle("disabled", ex === "none");
+        c.classList.toggle("busy", ex === "preparing");
+      });
+      dragText.innerHTML = !learn.hasTake ? "MIDI after LEARN, audio after RENDER."
+        : ex === "none" ? "MIDI is ready. <b>RENDER</b> for the audio."
+        : ex === "preparing" ? "Getting the audio ready…"
+        : ex === "failed" ? "Couldn't write the audio files (is the disk full?). Drag again or SAVE TO FOLDER to retry."
+        : learn.tiedToTimeline ? "Drop them at the <b>start of your song</b>: they line up with your take."
+        : "Drop them where your take starts.";
+      save.disabled = !learn.hasTake;
+      // The audio is written once per render and mix, while this page is open.
+      if (info.visible && info.visible() && ex === "stale" && performance.now() - lastExportAsk > 1500) {
+        lastExportAsk = performance.now();
+        SC.send({ type: "cmd", name: "exportPrepare" });
+      }
+      movePlayhead();
+    };
+    drawLane();
+  }
+
+  window.SCPages = { SECTIONS, buildMix, buildFx, buildSettings, buildTake };
 })();

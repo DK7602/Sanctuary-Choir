@@ -1174,6 +1174,162 @@ TEST (learnHarmonisesWithTheBand)
     CHECK (same < 12);
 }
 
+TEST (chordLocksSplitAndJoin)
+{
+    // A new lock replaces whatever it overlaps; unlocking a range cuts locks that reach past it.
+    auto chord = [] (int root) { const int iv[] = { 0, 4, 7 }; return makeChordFromIntervals (root, iv, 3); };
+    std::vector<ChordLock> locks;
+    addChordLock (locks, { 0, 100, chord (0) });
+    addChordLock (locks, { 50, 150, chord (7) });
+    CHECK (locks.size() == 2);
+    CHECK (locks[0].start == 0 && locks[0].end == 50 && locks[0].chord.name == "C");
+    CHECK (locks[1].start == 50 && locks[1].end == 150 && locks[1].chord.name == "G");
+    addChordLock (locks, { 20, 30, chord (5) });
+    CHECK (locks.size() == 4);
+    CHECK (locks[1].start == 20 && locks[1].end == 30 && locks[1].chord.name == "F");
+    CHECK (locks[2].start == 30 && locks[2].end == 50 && locks[2].chord.name == "C");
+    removeChordLocks (locks, 25, 60);
+    CHECK (locks.size() == 3);
+    CHECK (locks[0].end == 20 && locks[1].start == 20 && locks[1].end == 25 && locks[2].start == 60 && locks[2].chord.name == "G");
+    addChordLock (locks, { 10, 10, chord (2) });   // empty: ignored
+    CHECK (locks.size() == 3);
+    const int sev[] = { 0, 4, 7, 11 };
+    CHECK (makeChordFromIntervals (8, sev, 4, true).name == "Abmaj7");
+}
+
+/** A hymn-like line in C major: four phrases of quarter and half notes. */
+static std::vector<test::SungNote> hymnLine()
+{
+    const float q = 0.42f, h = 0.84f;
+    return { { 64, q, 0 }, { 64, q, 0 }, { 65, q, 0 }, { 67, h, 0.4f },
+             { 67, q, 0 }, { 65, q, 0 }, { 64, q, 0 }, { 62, h, 0.4f },
+             { 60, q, 0 }, { 60, q, 0 }, { 62, q, 0 }, { 64, h, 0.4f },
+             { 64, q, 0 }, { 62, q, 0 }, { 62, q, 0 }, { 60, h, 0.4f } };
+}
+
+TEST (chordLaneLocksAndAlternatives)
+{
+    const double sr = 48000.0;
+    const auto voice = test::singMelody (hymnLine(), sr, Soprano, 15.0f);
+    const auto take = analyseTake (voice.data(), (int64_t) voice.size(), sr);
+    HarmonySettings hs;
+    const auto score = harmoniseTake (take, hs);
+    CHECK (score.scale.tonic == 0);
+    const auto lane = score.chordLane();
+    std::string line;
+    for (const auto& s : lane) line += s.chord.name + " ";
+    std::printf ("  lane: %s(%zu spans for %zu notes)\n", line.c_str(), lane.size(), score.events.size());
+    CHECK (lane.size() >= 4 && lane.size() < score.events.size());
+    bool ordered = true, anyLocked = false;
+    for (size_t k = 0; k < lane.size(); ++k)
+    {
+        ordered = ordered && lane[k].end > lane[k].start && (k == 0 || lane[k].start >= lane[k - 1].end);
+        anyLocked = anyLocked || lane[k].locked;
+    }
+    CHECK (ordered);
+    CHECK (! anyLocked);
+
+    // Alternatives for a span in the middle: ranked, with the current chord marked.
+    const auto& span = lane[lane.size() / 2];
+    const auto options = chordAlternatives (take, score, hs, span.start, span.end);
+    std::string opts;
+    for (const auto& o : options) opts += o.chord.name + (o.current ? "* " : " ");
+    std::printf ("  options for %s: %s\n", span.chord.name.c_str(), opts.c_str());
+    CHECK (options.size() >= 4 && options.size() <= 8);
+    int current = 0;
+    bool distinct = true;
+    for (size_t a = 0; a < options.size(); ++a)
+    {
+        current += options[a].current;
+        if (options[a].current)
+            CHECK (options[a].chord.name == span.chord.name);
+        for (size_t b = a + 1; b < options.size(); ++b)
+            distinct = distinct && options[a].chord.name != options[b].chord.name;
+    }
+    CHECK (current == 1);
+    CHECK (distinct);
+    CHECK (options.front().fit >= 0.5f);
+
+    // Lock the best other choice: those notes sing it, and the harmony leads in and out of it.
+    const ChordOption* pick = nullptr;
+    for (const auto& o : options)
+        if (! o.current) { pick = &o; break; }
+    CHECK (pick != nullptr);
+    if (pick == nullptr) return;
+    HarmonySettings locked = hs;
+    addChordLock (locked.locks, { span.start, span.end, pick->chord });
+    const auto score2 = harmoniseTake (take, locked);
+    int inSpan = 0, singIt = 0, bassOk = 0;
+    for (const auto& e : score2.events)
+    {
+        if (e.start < span.start || e.start >= span.end) { CHECK (! e.locked); continue; }
+        ++inSpan;
+        singIt += e.locked && e.chord.name == pick->chord.name;
+        bassOk += e.voicing.primary (Bass) >= 0 && pick->chord.contains (e.voicing.primary (Bass));
+    }
+    std::printf ("  locked %s: %d/%d notes sing it\n", pick->chord.name.c_str(), singIt, inSpan);
+    CHECK (inSpan > 0 && singIt == inSpan && bassOk == inSpan);
+    bool laneShowsIt = false;
+    for (const auto& s : score2.chordLane())
+        laneShowsIt = laneShowsIt || (s.locked && s.chord.name == pick->chord.name && s.start == span.start);
+    CHECK (laneShowsIt);
+
+    // A chord from outside the key (Ab, the flat sixth) can be chosen too.
+    const auto& last = lane.back();
+    HarmonySettings borrowed = hs;
+    addChordLock (borrowed.locks, { last.start, last.end, makeChordOfQuality (8, ChordQuality::Major, true) });
+    const auto score3 = harmoniseTake (take, borrowed);
+    int ab = 0, lastNotes = 0;
+    for (const auto& e : score3.events)
+        if (e.start >= last.start && e.start < last.end) { ++lastNotes; ab += e.chord.name == "Ab"; }
+    CHECK (lastNotes > 0 && ab == lastNotes);
+
+    // Unlocking brings the choir's own choice back exactly.
+    removeChordLocks (locked.locks, span.start, span.end);
+    CHECK (locked.locks.empty());
+    const auto score4 = harmoniseTake (take, locked);
+    bool same = score4.events.size() == score.events.size();
+    for (size_t i = 0; same && i < score.events.size(); ++i)
+        same = score4.events[i].chord.name == score.events[i].chord.name;
+    CHECK (same);
+}
+
+TEST (chosenChordsWinOverTheBand)
+{
+    const double sr = 48000.0;
+    const auto prog = bandProgression();
+    std::vector<test::SungNote> melody;
+    const int line[] = { 67, 67, 64, 65, 65, 67, 67, 64, 64, 67, 67, 64 };
+    for (size_t k = 0; k < prog.size(); ++k)
+        melody.push_back ({ (float) line[k], prog[k].seconds - 0.1f, 0.1f });
+    auto voice = test::singMelody (melody, sr, Soprano, 15.0f);
+    auto band = test::playBand (prog, sr);
+    auto take = analyseTake (voice.data(), (int64_t) voice.size(), sr);
+    take.bandChords = analyseBandChords (band.data(), (int64_t) band.size(), sr);
+    HarmonySettings hs;
+    const auto score = harmoniseTake (take, hs);
+    const auto lane = score.chordLane();
+    CHECK (! lane.empty() && lane.front().fromBand);
+    // The band plays Am third; the singer wants C there.
+    const ChordSpan* am = nullptr;
+    for (const auto& s : lane)
+        if (s.chord.name == "Am") { am = &s; break; }
+    CHECK (am != nullptr);
+    if (am == nullptr) return;
+    const auto options = chordAlternatives (take, score, hs, am->start, am->end);
+    CHECK (! options.empty() && options.front().chord.name == "Am" && options.front().current);
+    addChordLock (hs.locks, { am->start, am->end, makeChordOfQuality (0, ChordQuality::Major) });
+    const auto score2 = harmoniseTake (take, hs);
+    int c = 0, n = 0, band2 = 0;
+    for (const auto& e : score2.events)
+    {
+        if (e.start >= am->start && e.start < am->end) { ++n; c += e.chord.name == "C" && e.locked && ! e.fromBand; }
+        else band2 += e.fromBand;
+    }
+    CHECK (n > 0 && c == n);
+    CHECK (band2 == (int) score2.events.size() - n);
+}
+
 TEST (bandHelpsFindTheKey)
 {
     // C, D and E fit C, F and G major alike; a band playing F, Bb and C settles it.

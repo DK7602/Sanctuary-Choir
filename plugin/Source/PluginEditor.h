@@ -36,6 +36,8 @@ private:
     void sendParams (const juce::StringArray& ids);
     void sendMeters();
     void sendStatus();
+    void sendLane();
+    void dragOut (const juce::String& item);
     void addLatencyInfo (juce::DynamicObject& o);
     void toast (const juce::String& text, int milliseconds = 0);
     juce::var describeParameter (juce::RangedAudioParameter& p) const;
@@ -49,6 +51,7 @@ private:
     std::set<juce::String> activeGestures;
     bool pageReady = false;
     int lastStatusVersion = -1;
+    int lastLaneVersion = -1;
     int sentLatency = -1;            // latency and sample rate last sent to the UI (the audio device may start later)
     double sentRate = -1.0;
 

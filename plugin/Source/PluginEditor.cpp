@@ -158,6 +158,7 @@ void SanctuaryEditor::sendInit()
     processor.takeChangedParameters();
     lastStatusVersion = -1;
     sendStatus();
+    sendLane();
     if (processor.getTotalNumOutputChannels() < 2)
         toast ("This track is mono, so the choir is folded to mono. Put Sanctuary Choir on a stereo track "
                "(or an FX channel) to hear the full stage.", 9000);
@@ -266,9 +267,56 @@ void SanctuaryEditor::timerCallback()
         lastStatusVersion = v;
         sendStatus();
     }
+    if (processor.getLearn().getLaneVersion() != lastLaneVersion)
+        sendLane();
+}
+
+void SanctuaryEditor::sendLane()
+{
+    lastLaneVersion = processor.getLearn().getLaneVersion();
+    web->emitEventIfBrowserIsVisible ("lane", processor.getLearn().getChordLane());
 }
 
 //==============================================================================
+void SanctuaryEditor::dragOut (const String& itemName)
+{
+    using Item = LearnSession::ExportItem;
+    static const std::pair<const char*, Item> items[] = {
+        { "midi", Item::Midi }, { "full", Item::FullChoir }, { "sop", Item::Sopranos }, { "alt", Item::Altos },
+        { "ten", Item::Tenors }, { "bas", Item::Basses }, { "all", Item::AllStems } };
+    auto it = std::find_if (std::begin (items), std::end (items), [&] (const auto& p) { return itemName == p.first; });
+    SafePointer<SanctuaryEditor> safe (this);
+    auto done = [safe] { if (safe != nullptr) safe->web->emitEventIfBrowserIsVisible ("dragDone", var()); };
+    if (it == std::end (items))
+        return done();
+
+    auto& learn = processor.getLearn();
+    const auto files = learn.getExportFiles (it->second);
+    if (files.isEmpty())
+    {
+        const auto& st = learn.getStatus();
+        if (! learn.hasTake())
+            toast ("Learn or load a take first");
+        else if (! (bool) st.getProperty ("hasStems", false) || (bool) st.getProperty ("stale", false))
+            toast ("RENDER first: the audio comes from the rendered choir. The MIDI is ready now.");
+        else
+        {
+            learn.prepareExport();
+            toast ("Getting the audio ready - drag it again in a moment");
+        }
+        return done();
+    }
+
+    // The drag starts from the mouse button that is still held on the page. If the system
+    // won't start one, show the files instead so they can be dragged from there.
+    if (! DragAndDropContainer::performExternalDragDropOfFiles (files, false, this, done))
+    {
+        File (files[0]).revealToUser();
+        toast ("Drag the files from this folder into your DAW");
+        done();
+    }
+}
+
 void SanctuaryEditor::handleUiMessage (const var& message)
 {
     const String type = message.getProperty ("type", "").toString();
@@ -375,20 +423,59 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
     }
     else if (name == "export")
     {
-        if (! (bool) learn.getStatus().getProperty ("hasStems", false))
+        // Save to a folder: the audio of the rendered choir (and its room) plus the MIDI.
+        if (! learn.hasTake())
         {
-            toast ("Render first, then export the stems");
+            toast ("Learn or load a take first");
             return;
         }
-        toast ("Exporting stems...");
-        SafePointer<SanctuaryEditor> safe (this);
-        learn.exportStems ([safe] (File folder)
+        const auto midi = learn.getExportFiles (LearnSession::ExportItem::Midi);
+        const auto& st = learn.getStatus();
+        if (! (bool) st.getProperty ("hasStems", false) || (bool) st.getProperty ("stale", false))
         {
-            folder.revealToUser();
+            if (! midi.isEmpty())
+                File (midi[0]).revealToUser();
+            toast ("MIDI saved. RENDER to save the choir's audio too.");
+            return;
+        }
+        toast ("Saving the stems...");
+        SafePointer<SanctuaryEditor> safe (this);
+        learn.prepareExport (true, [safe] (File folder)
+        {
+            if (folder.isDirectory())
+                folder.revealToUser();
             if (safe != nullptr)
-                safe->toast ("Stems saved to " + folder.getFullPathName());
+                safe->toast (folder.isDirectory() ? "Saved to " + folder.getFullPathName() : String ("Could not save the stems"));
         });
     }
+    else if (name == "exportPrepare")
+        learn.prepareExport (false, {}, true);
+    else if (name == "dragOut")
+        dragOut (message.getProperty ("item", "").toString());
+    else if (name == "lane")
+        sendLane();
+    else if (name == "chordOptions")
+    {
+        const auto start = (int64) message.getProperty ("s", 0), end = (int64) message.getProperty ("e", 0);
+        auto o = std::make_unique<DynamicObject>();
+        o->setProperty ("s", start);
+        o->setProperty ("e", end);
+        o->setProperty ("options", learn.getChordOptions (start, end));
+        web->emitEventIfBrowserIsVisible ("chordOptions", var (o.release()));
+    }
+    else if (name == "chordLock")
+    {
+        Array<int> intervals;
+        if (auto* iv = message.getProperty ("iv", {}).getArray())
+            for (const auto& v : *iv)
+                intervals.add ((int) v);
+        learn.lockChord ((int64) message.getProperty ("s", 0), (int64) message.getProperty ("e", 0),
+                         (int) message.getProperty ("root", 0), intervals);
+    }
+    else if (name == "chordUnlock")
+        learn.unlockChords ((int64) message.getProperty ("s", 0), (int64) message.getProperty ("e", 0));
+    else if (name == "chordUnlockAll")
+        learn.unlockAllChords();
     else if (name == "presetLoad")
         presets.load ((int) message.getProperty ("index", 0));
     else if (name == "presetNext")

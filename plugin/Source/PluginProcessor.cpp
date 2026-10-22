@@ -29,6 +29,20 @@ SanctuaryProcessor::SanctuaryProcessor()
     learn.onStatusChanged = [this] { ++statusVersion; };
     learn.getVoices = [this] { return voices.getCurrent(); };
     learn.voicesBusy = [this] { return voices.isBusy(); };
+    learn.getHostBpm = [this] { return hostBpm.load (std::memory_order_relaxed); };
+    learn.getMixSignature = [this]
+    {
+        // Every parameter's value: an exported mix is out of date as soon as any of them moves.
+        uint64 h = 1469598103934665603ull;
+        for (auto* p : getParameters())
+        {
+            const float v = p->getValue();
+            uint32 bits = 0;
+            std::memcpy (&bits, &v, sizeof (bits));
+            h = (h ^ bits) * 1099511628211ull;
+        }
+        return String::toHexString ((int64) h);
+    };
     voices.onStatusChanged = [this] { ++statusVersion; };
     voices.onSetChanged = [this] { learn.renderSettingsChanged(); };   // rendered takes used the old voices
     // The recorded Sanctuary Voices are the default when they are installed.
@@ -197,8 +211,17 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
             // The song's tempo and beat, so the singers (and the rhythm effects) move with it.
             const auto bpm = pos->getBpm();
             const auto ppq = pos->getPpqPosition();
+            if (bpm.hasValue() && *bpm > 20.0 && *bpm < 400.0)
+                hostBpm.store (*bpm, std::memory_order_relaxed);
+            if (auto sig = pos->getTimeSignature())
+            {
+                info.sigNum = sig->numerator;
+                info.sigDen = sig->denominator;
+            }
             if (info.hostPlaying && bpm.hasValue() && ppq.hasValue() && *bpm > 20.0 && *bpm < 400.0)
             {
+                info.bpm = *bpm;
+                info.ppq = *ppq;
                 songBeat.store (*ppq, std::memory_order_relaxed);
                 songBeatTime.store (Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
                 songBpm.store (*bpm, std::memory_order_release);

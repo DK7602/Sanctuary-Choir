@@ -75,6 +75,10 @@ std::vector<Chord> buildChordVocabulary (const Scale& scale, Style style);
 void buildChordVocabulary (const Scale& scale, Style style, std::vector<Chord>& out);
 /** Build a chord from arbitrary pitch classes (e.g. MIDI chord input). */
 Chord chordFromPitchClasses (const int* notes, int count);
+/** A chord from its root and its intervals above the root (e.g. {0, 4, 7, 10}), up to 4. */
+Chord makeChordFromIntervals (int root, const int* intervals, int count, bool preferFlats = false);
+/** Whether chord names in this key are spelled with flats (Bb, Eb...) rather than sharps. */
+bool keyPrefersFlats (const Scale& scale);
 
 /** Chord qualities recognised in a band's audio. */
 enum class ChordQuality : int { Major = 0, Minor, Dominant7, Major7, Minor7, Sus4, Diminished, Count };

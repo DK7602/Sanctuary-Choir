@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const { Params, BigKnob, Dropdown, Menu, hiDpiCanvas, stageRect, noteName } = window.SCW;
-  const { SECTIONS, buildMix, buildFx, buildSettings } = window.SCPages;
+  const { SECTIONS, buildMix, buildFx, buildSettings, buildTake } = window.SCPages;
   const Choir = window.SCChoir;
   const $ = (id) => document.getElementById(id);
 
@@ -296,9 +296,12 @@
   //==========================================================================
   // Tabs and pages
   function setTab(tab) {
+    if (tab !== "take" && state.tab !== "take") state.returnTab = state.tab;
     state.tab = tab;
-    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-    ["mix", "fx", "settings"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
+    // CHORDS & STEMS opens from SETTINGS (or the learned-take plaque) and keeps that tab lit.
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === (tab === "take" ? "settings" : tab)));
+    ["mix", "fx", "settings", "take"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
+    if (tab === "take") SC.send({ type: "cmd", name: "lane" });
     SC.send({ type: "cmd", name: "tab", value: tab });
     Menu.close();
   }
@@ -398,9 +401,18 @@
 
     buildMix($("page-mix"));
     buildFx($("page-fx"));
-    const settingsInfo = { version: info.version, latencyMs: info.latencyMs, liveChoirMs: info.liveChoirMs, standalone: !!info.standalone };
+    const settingsInfo = { version: info.version, latencyMs: info.latencyMs, liveChoirMs: info.liveChoirMs, standalone: !!info.standalone,
+                           openTake: () => setTab("take") };
     buildSettings($("page-settings"), settingsInfo);
     state.settingsInfo = settingsInfo;
+    const takeInfo = { toast, close: () => setTab(state.returnTab && state.returnTab !== "take" ? state.returnTab : "settings"), visible: () => state.tab === "take" };
+    buildTake($("page-take"), takeInfo);
+    state.takeInfo = takeInfo;
+    // The learned-take plaque opens the chords.
+    $("statusPlaque").addEventListener("click", () => {
+      const l = (state.status || {}).learn || {};
+      if (l.hasTake && ["learned", "rendered"].includes(l.phase)) setTab("take");
+    });
 
     document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
     $("gearBtn").addEventListener("click", () => setTab(state.tab === "settings" ? "perform" : "settings"));
@@ -423,7 +435,7 @@
     });
 
     Choir.init($("choirCanvas")).then(() => Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || MAX_ENGINE_SINGERS)), Choir.maxSingers() || MAX_ENGINE_SINGERS), true));
-    setTab(info.tab && ["perform", "mix", "fx", "settings"].includes(info.tab) ? info.tab : "perform");
+    setTab(info.tab && ["perform", "mix", "fx", "settings", "take"].includes(info.tab) ? info.tab : "perform");
   }
 
   //==========================================================================
@@ -486,7 +498,10 @@
     const prog = $("statusProgress");
     prog.classList.toggle("hidden", l.phase !== "rendering");
     prog.firstElementChild.style.width = ((l.progress || 0) * 100) + "%";
+    plaque.classList.toggle("clickable", !!l.hasTake && ["learned", "rendered"].includes(l.phase));
+    plaque.title = plaque.classList.contains("clickable") ? "See the chords, choose others, and drag the stems into your DAW" : "";
     if (state.settingsInfo && state.settingsInfo.onStatus) state.settingsInfo.onStatus(st);
+    if (state.takeInfo && state.takeInfo.onTakeStatus) state.takeInfo.onTakeStatus(st);
     clearTimeout(state.plaqueTimer);
     if (!busy) state.plaqueTimer = setTimeout(() => onStatus(state.status), 7100);
   }

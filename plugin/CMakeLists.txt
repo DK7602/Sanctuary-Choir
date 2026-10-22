@@ -52,7 +52,8 @@ target_sources(SanctuaryChoir PRIVATE
     Source/Parameters.cpp
     Source/PluginEditor.cpp
     Source/PluginProcessor.cpp
-    Source/Presets.cpp)
+    Source/Presets.cpp
+    Source/TakeExport.cpp)
 
 target_compile_definitions(SanctuaryChoir PUBLIC
     JUCE_WEB_BROWSER=1
@@ -82,6 +83,7 @@ if(SANCTUARY_BUILD_TESTS)
     target_sources(SanctuarySessionTests PRIVATE
         Tests/SessionTests.cpp
         Source/LearnSession.cpp
+        Source/TakeExport.cpp
         "${PROJECT_SOURCE_DIR}/tests/TestSignals.cpp")
     target_include_directories(SanctuarySessionTests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
     target_compile_definitions(SanctuarySessionTests PRIVATE

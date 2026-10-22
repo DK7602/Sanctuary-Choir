@@ -55,7 +55,8 @@
 - **Your own choir**: record a few held notes per section and the vowel modes sing with those real voices ([guide](docs/RECORDING_YOUR_CHOIR.md)).
 - **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
 - **Chord Speed** and a one-click **key lock** for the detected key.
-- **Stem export**: Sopranos, Altos, Tenors, Basses, Room and Full Choir as 24-bit WAVs.
+- **Chord lane**: after LEARN, see every chord of the take over your melody. Click one for ranked alternatives (with how well each fits the melody), pick one, and the harmony around it is worked out again. Chosen chords are kept with the project.
+- **Drag-out stems and MIDI**: drag the parts (SATB on channels 1–4, melody, named chords) as MIDI, or the rendered Full Choir and section stems as 24-bit WAVs, straight into your DAW. They line up when dropped at the start of the song. Or save them all to a folder.
 - **Ensemble**: an adult choir, a children's choir (every part sung by trebles), shouted gang vocals, or a whole congregation.
 - **Rhythm** (FX page): tempo-synced gates and section arpeggios that follow your DAW: pulses, offbeats, gallops, trance gates, Arp Up/Down/Bounce and Call & Answer.
 - **Follows the band**: route your band, keys or backing track to the side-chain and the choir sings the chords they play, inversions included. LEARN records the band too and harmonises every note with the chord under it.

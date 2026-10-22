@@ -5,6 +5,8 @@
 // stems in sync with the host.
 #pragma once
 
+#include "TakeExport.h"
+
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <sanctuary/Learn.h>
@@ -41,6 +43,9 @@ public:
         int latency = 0;
         const float* sidechainL = nullptr;   // the band on the side-chain (recorded with the take)
         const float* sidechainR = nullptr;
+        double bpm = 0.0;                    // the song's tempo and position while it plays
+        double ppq = -1.0;                   // (so exported MIDI lines up with the song)
+        int sigNum = 4, sigDen = 4;
     };
 
     /** The side-chain bus is enabled (audio thread sets it every block). */
@@ -62,11 +67,43 @@ public:
     void render();
     void cancelWork();
     void togglePreview();
-    void exportStems (std::function<void (juce::File)> onDone);
     /** Settings that change the harmony were edited: re-harmonise (cheap). */
     void harmonySettingsChanged();
     /** Settings that change the rendered sound were edited. */
     void renderSettingsChanged();
+
+    //==============================================================================
+    // The chord lane (message thread)
+
+    /** The learned chords, melody and keys for the chord lane (void without a take). */
+    juce::var getChordLane() const;
+    /** Ranked chords that could go under the notes between start and end (samples). */
+    juce::var getChordOptions (int64_t start, int64_t end) const;
+    /** Sing this chord between start and end (the harmony around it adapts). */
+    void lockChord (int64_t start, int64_t end, int root, const juce::Array<int>& intervals);
+    void unlockChords (int64_t start, int64_t end);
+    void unlockAllChords();
+    /** Changes whenever the lane does (new take, new harmony, a chord chosen). */
+    int getLaneVersion() const noexcept { return laneVersion; }
+
+    //==============================================================================
+    // Files to drag into the DAW (message thread)
+
+    enum class ExportItem { Midi, FullChoir, Sopranos, Altos, Tenors, Basses, AllStems };
+    /** The item's files, ready to drag. MIDI is written there and then; audio is empty while it
+        still has to be written (prepareExport starts that) or the render is out of date. */
+    juce::StringArray getExportFiles (ExportItem item);
+    /** Writes the audio files that are missing or out of date in the background (the room as
+        well, for saving to a folder). onDone gets the folder (also when nothing was needed), or
+        an invalid File if writing failed. automatic: asked by the page rather than the user, so
+        a write that failed (disk full) is not tried again until the user asks. */
+    void prepareExport (bool withRoom = false, std::function<void (juce::File)> onDone = {}, bool automatic = false);
+    /** Changes whenever the sound of the mix does (set by the processor). */
+    std::function<juce::String()> getMixSignature;
+    /** The tempo the song plays at now, for takes loaded from a file (set by the processor). */
+    std::function<double()> getHostBpm;
+    /** Where exported files go (default: Documents/Sanctuary Choir/Exports). */
+    juce::File exportRoot;
 
     Phase getPhase() const noexcept { return phase.load(); }
     bool hasTake() const;
@@ -85,6 +122,11 @@ private:
     void releaseCapture();
     void startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter,
                         std::vector<float> band = {}, std::vector<sc::BandChord> bandChords = {});
+    void reharmonise();
+    sc::HarmonySettings currentHarmonySettings() const;
+    juce::File exportFolder();
+    void finishExport();
+    juce::String exportStateName() const;
     void allocateChunk (int64_t index);
     void matchSessionRate();
     void publish (std::unique_ptr<PlaybackData> data);
@@ -138,6 +180,32 @@ private:
     bool renderStale = false;
     bool renderWhenReady = false;     // RENDER pressed while learning, or a rendered project reloaded
     bool changedDuringWork = false;   // settings edited while analysing or rendering
+
+    // Chords chosen by hand and the song position of the current take (copied into each
+    // PlaybackData, which is what the audio thread and the saved state read).
+    std::vector<sc::ChordLock> locks;
+    TakeTiming takeTiming;
+    std::atomic<double> captureBpm { 0.0 }, capturePpq { -1.0 };
+    std::atomic<int> captureSigNum { 4 }, captureSigDen { 4 };
+    int laneVersion = 0;
+    int nextTakeId = 1;
+
+    // Files written for dragging into the DAW, kept per take so a DAW that references them in
+    // place never sees them change: a new render or mix gets new files.
+    struct ExportFiles
+    {
+        int takeId = 0;
+        juce::File folder;
+        int stemsId = 0;                 // the render the section files come from
+        juce::StringArray sections;
+        juce::String fullSignature, roomSignature;
+        juce::File full, room;
+    };
+    ExportFiles exported;
+    juce::String exportFailedSignature;
+    std::unique_ptr<std::thread> exportWorker;
+    std::atomic<bool> exportDone { false }, exportCancel { false };
+    std::function<void()> onExportDone;
 
     // The take as stored in the project, encoded once rather than on every save.
     mutable std::mutex encodeLock;

@@ -13,6 +13,7 @@ using namespace juce;
 /** Section stems stored as 16-bit to keep memory reasonable for long takes. */
 struct StemSet
 {
+    int id = 0;   // each render gets its own (exports know which render they came from)
     int64_t length = 0;
     std::array<std::vector<int16_t>, sc::NumSections * 2> data;
     std::array<float, sc::NumSections * 2> scale {};
@@ -27,6 +28,9 @@ struct LearnSession::PlaybackData
     sc::LearnedScore score;
     std::shared_ptr<const StemSet> stems;
     std::atomic<bool> stale { false };
+    int takeId = 0;
+    std::vector<sc::ChordLock> locks;   // the chords chosen by hand that the score was written with
+    TakeTiming timing;
     int64_t length() const { return take != nullptr ? (int64_t) take->size() : 0; }
 };
 
@@ -43,7 +47,9 @@ struct LearnSession::ScoreAdapter : public sc::ScoreSource
 
 static std::shared_ptr<StemSet> toStemSet (const sc::RenderedStems& r)
 {
+    static std::atomic<int> nextId { 1 };
     auto s = std::make_shared<StemSet>();
+    s->id = nextId++;
     s->length = r.length;
     for (size_t ch = 0; ch < s->data.size(); ++ch)
     {
@@ -57,20 +63,6 @@ static std::shared_ptr<StemSet> toStemSet (const sc::RenderedStems& r)
             s->data[ch][i] = (int16_t) jlimit (-32767, 32767, roundToInt (src[i] / scale));
     }
     return s;
-}
-
-static sc::RenderedStems fromStemSet (const StemSet& s, double sr)
-{
-    sc::RenderedStems r;
-    r.sampleRate = sr;
-    r.length = s.length;
-    for (size_t ch = 0; ch < s.data.size(); ++ch)
-    {
-        r.channels[ch].resize (s.data[ch].size());
-        for (size_t i = 0; i < s.data[ch].size(); ++i)
-            r.channels[ch][i] = (float) s.data[ch][i] * s.scale[ch];
-    }
-    return r;
 }
 
 static sc::HarmonySettings harmonySettingsFor (const sc::EngineParams& p)
@@ -111,8 +103,11 @@ LearnSession::~LearnSession()
 {
     stopTimer();
     cancel = true;
+    exportCancel = true;
     if (worker != nullptr && worker->joinable())
         worker->join();
+    if (exportWorker != nullptr && exportWorker->joinable())
+        exportWorker->join();
     live.store (nullptr);
 }
 
@@ -162,6 +157,11 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
             {
                 captureStarted = true;
                 lastCapturePos = info.hostPosition;
+                // Where the take starts in the song, so its MIDI lines up with the song.
+                captureBpm = info.bpm;
+                capturePpq = captureStart.load() >= 0 ? info.ppq : -1.0;
+                captureSigNum = info.sigNum;
+                captureSigDen = info.sigDen;
             }
         }
         else if (captureStart.load() >= 0)
@@ -308,6 +308,8 @@ void LearnSession::startRecording()
     stopRequested = false;
     captureSampleRate = sr;
     armedLoudSamples = 0;
+    captureBpm = 0.0;
+    capturePpq = -1.0;
     const bool freeRunning = standalone || JUCEApplicationBase::isStandaloneApp();
     captureStart = freeRunning ? -1 : -2;   // -2 = armed, wait for the host to play
     lastError.clear();
@@ -372,6 +374,12 @@ void LearnSession::finishRecording()
         return;
     }
     const int64_t start = captureStart.load();
+    locks.clear();
+    takeTiming = {};
+    takeTiming.bpm = captureBpm.load();
+    takeTiming.ppqStart = start >= 0 ? capturePpq.load() : -1.0;
+    takeTiming.sigNum = captureSigNum.load();
+    takeTiming.sigDen = captureSigDen.load();
     startAnalysis (std::move (audio), captureSampleRate, start >= 0 ? start : -1, false, std::move (band));
 }
 
@@ -397,11 +405,14 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
     if (renderAfter)
         renderWhenReady = true;
     const sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
+    sc::HarmonySettings hs = currentHarmonySettings();
+    const int takeId = nextTakeId++;
+    const TakeTiming timing = takeTiming;
 
     auto result = std::make_shared<std::unique_ptr<PlaybackData>>();
     cancel = false;
     workDone = false;
-    worker = std::make_unique<std::thread> ([this, result, params, sampleRate, timelineStart, audio = std::move (audio),
+    worker = std::make_unique<std::thread> ([this, result, params, hs, takeId, timing, sampleRate, timelineStart, audio = std::move (audio),
                                              band = std::move (band), bandChords = std::move (bandChords)]() mutable
     {
         auto take = std::make_shared<std::vector<float>> (std::move (audio));
@@ -416,7 +427,10 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
             d->timelineStart = timelineStart;
             d->take = take;
             d->analysis = analysis;
-            d->score = sc::harmoniseTake (*analysis, harmonySettingsFor (params));
+            d->takeId = takeId;
+            d->locks = hs.locks;
+            d->timing = timing;
+            d->score = sc::harmoniseTake (*analysis, hs);
             *result = std::move (d);
         }
         progress = 1.0f;
@@ -455,6 +469,7 @@ void LearnSession::publish (std::unique_ptr<PlaybackData> data)
         graveyard.push_back ({ std::move (owned), Time::getMillisecondCounter() });
     owned = std::move (data);
     live.store (raw, std::memory_order_release);
+    ++laneVersion;
 }
 
 std::shared_ptr<const std::vector<float>> LearnSession::currentTake() const
@@ -496,6 +511,9 @@ void LearnSession::loadFile (const File& file)
     }
     previewPlaying = false;
     renderWhenReady = false;
+    locks.clear();
+    takeTiming = {};
+    takeTiming.bpm = getHostBpm ? getHostBpm() : 0.0;   // so its MIDI comes out at the song's tempo
     startAnalysis (std::move (mono), sr, -1, false);
 }
 
@@ -514,6 +532,9 @@ void LearnSession::clear()
         graveyard.push_back ({ std::move (owned), Time::getMillisecondCounter() });
     lastError.clear();
     renderStale = false;
+    locks.clear();
+    takeTiming = {};
+    ++laneVersion;
     setPhase (Phase::Empty);
 }
 
@@ -545,24 +566,30 @@ void LearnSession::render()
     changedDuringWork = false;
 
     sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
+    const sc::HarmonySettings hs = currentHarmonySettings();
     auto voices = getVoices ? getVoices() : nullptr;   // held for the whole render
     auto take = owned->take;
     auto analysis = owned->analysis;
     const double rate = owned->sampleRate;
     const int64_t timelineStart = owned->timelineStart;
+    const int takeId = owned->takeId;
+    const TakeTiming timing = owned->timing;
     auto result = std::make_shared<std::unique_ptr<PlaybackData>>();
     const auto t0 = Time::getMillisecondCounterHiRes();
 
     cancel = false;
     workDone = false;
-    worker = std::make_unique<std::thread> ([this, result, params, voices, take, analysis, rate, timelineStart]
+    worker = std::make_unique<std::thread> ([this, result, params, hs, voices, take, analysis, rate, timelineStart, takeId, timing]
     {
         auto d = std::make_unique<PlaybackData>();
         d->sampleRate = rate;
         d->timelineStart = timelineStart;
         d->take = take;
         d->analysis = analysis;
-        d->score = sc::harmoniseTake (*analysis, harmonySettingsFor (params));
+        d->takeId = takeId;
+        d->locks = hs.locks;
+        d->timing = timing;
+        d->score = sc::harmoniseTake (*analysis, hs);
         sc::RenderedStems stems;
         if (sc::renderTake (take->data(), (int64_t) take->size(), rate, params, d->score, stems,
                             [this] (float f) { progress = f; }, &cancel, voices.get()))
@@ -637,13 +664,16 @@ void LearnSession::harmonySettingsChanged()
     if (p == Phase::Recording)
         return;
 
-    const sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
+    const sc::HarmonySettings hs = currentHarmonySettings();
     auto d = std::make_unique<PlaybackData>();
     d->sampleRate = owned->sampleRate;
     d->timelineStart = owned->timelineStart;
     d->take = owned->take;
     d->analysis = owned->analysis;
-    d->score = sc::harmoniseTake (*owned->analysis, harmonySettingsFor (params));
+    d->takeId = owned->takeId;
+    d->locks = hs.locks;
+    d->timing = owned->timing;
+    d->score = sc::harmoniseTake (*owned->analysis, hs);
     d->stems = owned->stems;
     d->stale = true;
     publish (std::move (d));
@@ -667,43 +697,348 @@ void LearnSession::renderSettingsChanged()
     }
 }
 
-void LearnSession::exportStems (std::function<void (File)> onDone)
+sc::HarmonySettings LearnSession::currentHarmonySettings() const
 {
-    if (owned == nullptr || owned->stems == nullptr)
-        return;
-    const sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
-    auto stems = owned->stems;
-    const double rate = owned->sampleRate;
+    auto hs = harmonySettingsFor (getParams ? getParams() : sc::EngineParams{});
+    hs.locks = locks;
+    return hs;
+}
 
-    const auto folder = File::getSpecialLocation (File::userDocumentsDirectory)
-                            .getChildFile ("Sanctuary Choir").getChildFile ("Exports")
-                            .getChildFile (Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"));
+//==============================================================================
+static const char* const sectionFileNames[] = { "Sopranos", "Altos", "Tenors", "Basses" };
 
-    std::thread ([stems, rate, params, folder, onDone]
+/** The intervals of a chord above its root, as the UI sends them back. */
+static Array<var> intervalsOf (const sc::Chord& c)
+{
+    Array<var> iv;
+    for (int k = 0; k < c.numTones; ++k)
+        iv.add (sc::wrapPc (c.tones[(size_t) k] - c.root));
+    return iv;
+}
+
+var LearnSession::getChordLane() const
+{
+    if (owned == nullptr || owned->analysis == nullptr || owned->analysis->isEmpty())
+        return {};
+    const auto& score = owned->score;
+    const auto& take = *owned->analysis;
+    auto o = std::make_unique<DynamicObject>();
+    o->setProperty ("version", laneVersion);
+    o->setProperty ("rate", owned->sampleRate);
+    o->setProperty ("length", (int64) owned->length());
+    o->setProperty ("key", String (CharPointer_UTF8 (score.keyName().c_str())));
+    o->setProperty ("band", score.followsBand);
+    const auto mode = getParams ? getParams().harmonyMode : sc::HarmonyMode::FullChoir;
+    o->setProperty ("editable", mode != sc::HarmonyMode::Drone && mode != sc::HarmonyMode::MidiChords
+                                    && score.scale.type != sc::ScaleType::Chromatic);
+    o->setProperty ("locks", (int) owned->locks.size());
+
+    // Where the take starts in the song (bar.beat when the song's tempo was known).
+    if (owned->timelineStart >= 0)
     {
-        folder.createDirectory();
-        const auto rendered = fromStemSet (*stems, rate);
-        auto write = [&] (const String& name, const float* l, const float* r, int64_t len)
+        o->setProperty ("songStart", (double) owned->timelineStart / owned->sampleRate);
+        if (owned->timing.ppqStart >= 0.0)
         {
-            WavAudioFormat wav;
-            std::unique_ptr<OutputStream> stream = std::make_unique<FileOutputStream> (folder.getChildFile (name + ".wav"));
-            auto writer = wav.createWriterFor (stream, AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (2).withBitsPerSample (24));
-            if (writer == nullptr) return;
-            for (int64_t pos = 0; pos < len; pos += 65536)
-            {
-                const float* chans[] = { l + pos, r + pos };
-                writer->writeFromFloatArrays (chans, 2, (int) std::min<int64_t> (65536, len - pos));
-            }
+            const double beatsPerBar = 4.0 * owned->timing.sigNum / std::max (1, owned->timing.sigDen);
+            const double beatLength = 4.0 / std::max (1, owned->timing.sigDen);
+            const int bar = (int) std::floor (owned->timing.ppqStart / beatsPerBar + 1.0e-6);
+            const int beat = (int) std::floor ((owned->timing.ppqStart - bar * beatsPerBar) / beatLength + 1.0e-6);
+            o->setProperty ("bar", bar + 1);
+            o->setProperty ("beat", beat + 1);
+        }
+    }
+
+    Array<var> spans;
+    for (const auto& span : score.chordLane())
+    {
+        auto so = std::make_unique<DynamicObject>();
+        so->setProperty ("s", (int64) span.start);
+        so->setProperty ("e", (int64) span.end);
+        so->setProperty ("name", String (CharPointer_UTF8 (span.chord.name.c_str())));
+        so->setProperty ("root", span.chord.root);
+        so->setProperty ("iv", intervalsOf (span.chord));
+        so->setProperty ("locked", span.locked);
+        so->setProperty ("band", span.fromBand);
+        spans.add (var (so.release()));
+    }
+    o->setProperty ("spans", spans);
+
+    Array<var> melody;
+    const bool aligned = score.events.size() == take.notes.size();
+    for (size_t i = 0; i < take.notes.size(); ++i)
+    {
+        const auto& n = take.notes[i];
+        auto no = std::make_unique<DynamicObject>();
+        no->setProperty ("s", (int64) n.start);
+        no->setProperty ("e", (int64) n.end);
+        no->setProperty ("p", aligned && score.events[i].melody >= 0 ? score.events[i].melody : (int) std::lround (n.pitch));
+        melody.add (var (no.release()));
+    }
+    o->setProperty ("melody", melody);
+    return var (o.release());
+}
+
+var LearnSession::getChordOptions (int64_t start, int64_t end) const
+{
+    Array<var> list;
+    if (owned == nullptr || owned->analysis == nullptr || owned->analysis->isEmpty())
+        return list;
+    for (const auto& opt : sc::chordAlternatives (*owned->analysis, owned->score, currentHarmonySettings(), start, end))
+    {
+        auto o = std::make_unique<DynamicObject>();
+        o->setProperty ("name", String (CharPointer_UTF8 (opt.chord.name.c_str())));
+        o->setProperty ("root", opt.chord.root);
+        o->setProperty ("iv", intervalsOf (opt.chord));
+        o->setProperty ("fit", opt.fit);
+        o->setProperty ("current", opt.current);
+        list.add (var (o.release()));
+    }
+    return list;
+}
+
+void LearnSession::lockChord (int64_t start, int64_t end, int root, const Array<int>& intervals)
+{
+    if (owned == nullptr || owned->analysis == nullptr || end <= start || intervals.isEmpty() || intervals.size() > 4)
+        return;
+    int iv[4] {};
+    for (int k = 0; k < intervals.size(); ++k)
+        iv[k] = sc::wrapPc (intervals[k]);
+    sc::ChordLock lock;
+    lock.start = start;
+    lock.end = end;
+    lock.chord = sc::makeChordFromIntervals (root, iv, intervals.size(), sc::keyPrefersFlats (owned->score.scaleAt (start)));
+    sc::addChordLock (locks, lock);
+    harmonySettingsChanged();
+}
+
+void LearnSession::unlockChords (int64_t start, int64_t end)
+{
+    const auto before = locks;
+    sc::removeChordLocks (locks, start, end);
+    auto same = [] (const sc::ChordLock& a, const sc::ChordLock& b) { return a.start == b.start && a.end == b.end; };
+    if (! std::equal (before.begin(), before.end(), locks.begin(), locks.end(), same))
+        harmonySettingsChanged();
+}
+
+void LearnSession::unlockAllChords()
+{
+    if (locks.empty())
+        return;
+    locks.clear();
+    harmonySettingsChanged();
+}
+
+//==============================================================================
+File LearnSession::exportFolder()
+{
+    if (owned == nullptr)
+        return {};
+    if (exported.takeId != owned->takeId || ! exported.folder.isDirectory())
+    {
+        exported = {};
+        exported.takeId = owned->takeId;
+        const auto base = exportRoot != File() ? exportRoot
+                                               : File::getSpecialLocation (File::userDocumentsDirectory)
+                                                     .getChildFile ("Sanctuary Choir").getChildFile ("Exports");
+        base.createDirectory();
+        exported.folder = base.getNonexistentChildFile (Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), {}, false);
+        exported.folder.createDirectory();
+    }
+    return exported.folder;
+}
+
+StringArray LearnSession::getExportFiles (ExportItem item)
+{
+    StringArray files;
+    if (owned == nullptr || owned->analysis == nullptr || owned->analysis->isEmpty())
+        return files;
+
+    if (item == ExportItem::Midi)
+    {
+        // Cheap, and a DAW copies MIDI in when it is dropped: written fresh every time.
+        const auto file = exportFolder().getChildFile ("Sanctuary Choir - Parts.mid");
+        const bool words = getParams && getParams().vocalType == sc::VocalType::Words;
+        const auto midi = makeTakeMidi (*owned->analysis, owned->score, owned->timing, words);
+        file.deleteFile();
+        FileOutputStream out (file);
+        if (out.openedOk() && midi.writeTo (out))
+        {
+            out.flush();
+            files.add (file.getFullPathName());
+        }
+        return files;
+    }
+
+    if (owned->stems == nullptr || owned->stale.load() || exportWorker != nullptr
+        || exported.takeId != owned->takeId || exported.stemsId != owned->stems->id)
+        return files;
+    const String signature = String (owned->stems->id) + "|" + (getMixSignature ? getMixSignature() : String());
+    const bool fullReady = exported.fullSignature == signature && exported.full.existsAsFile();
+    switch (item)
+    {
+        case ExportItem::FullChoir:
+            if (fullReady) files.add (exported.full.getFullPathName());
+            break;
+        case ExportItem::Sopranos:
+        case ExportItem::Altos:
+        case ExportItem::Tenors:
+        case ExportItem::Basses:
+        {
+            const int s = (int) item - (int) ExportItem::Sopranos;
+            if (s < exported.sections.size() && File (exported.sections[s]).existsAsFile())
+                files.add (exported.sections[s]);
+            break;
+        }
+        case ExportItem::AllStems:
+            if (! fullReady)
+                break;
+            for (const auto& f : exported.sections)
+                if (File (f).existsAsFile())
+                    files.add (f);
+            if (files.size() != sc::NumSections)
+                files.clear();
+            else
+                files.add (exported.full.getFullPathName());
+            break;
+        case ExportItem::Midi:
+        default:
+            break;
+    }
+    return files;
+}
+
+void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDone, bool automatic)
+{
+    const bool fresh = owned != nullptr && owned->stems != nullptr && ! owned->stale.load();
+    if (! fresh)
+    {
+        if (onDone) onDone ({});
+        return;
+    }
+    if (exportWorker != nullptr)
+    {
+        // Busy: once this finishes, see what is still missing.
+        auto previous = std::move (onExportDone);
+        onExportDone = [this, previous, withRoom, onDone, automatic]
+        {
+            if (previous) previous();
+            prepareExport (withRoom, onDone, automatic);
         };
-        static const char* names[] = { "Sopranos", "Altos", "Tenors", "Basses" };
-        for (int s = 0; s < sc::NumSections; ++s)
-            write (String ("Sanctuary Choir - ") + names[s], rendered.channels[(size_t) s * 2].data(), rendered.channels[(size_t) s * 2 + 1].data(), rendered.length);
-        const auto full = sc::mixdownStems (rendered, params, false);
-        write ("Sanctuary Choir - Full Choir", full[0].data(), full[1].data(), (int64_t) full[0].size());
-        const auto room = sc::mixdownStems (rendered, params, true);
-        write ("Sanctuary Choir - Room", room[0].data(), room[1].data(), (int64_t) room[0].size());
-        MessageManager::callAsync ([folder, onDone] { if (onDone) onDone (folder); });
-    }).detach();
+        return;
+    }
+
+    const auto stems = owned->stems;
+    const String signature = String (stems->id) + "|" + (getMixSignature ? getMixSignature() : String());
+    if (automatic && signature == exportFailedSignature)
+        return;
+    const auto folder = exportFolder();
+    bool needSections = exported.stemsId != stems->id || exported.sections.size() != sc::NumSections;
+    for (const auto& f : exported.sections)
+        needSections = needSections || ! File (f).existsAsFile();
+    const bool needFull = exported.fullSignature != signature || ! exported.full.existsAsFile();
+    const bool needRoom = withRoom && (exported.roomSignature != signature || ! exported.room.existsAsFile());
+    if (! needSections && ! needFull && ! needRoom)
+    {
+        if (onDone) onDone (folder);
+        return;
+    }
+
+    // New names for new sound: a DAW that plays the earlier files from here keeps them as they were.
+    auto plan = std::make_shared<ExportFiles> (exported);
+    plan->stemsId = stems->id;
+    if (needSections)
+    {
+        plan->sections.clear();
+        for (auto* name : sectionFileNames)
+            plan->sections.add (folder.getNonexistentChildFile (String ("Sanctuary Choir - ") + name, ".wav", true).getFullPathName());
+    }
+    if (needFull)
+    {
+        plan->fullSignature = signature;
+        plan->full = folder.getNonexistentChildFile ("Sanctuary Choir - Full Choir", ".wav", true);
+    }
+    if (needRoom)
+    {
+        plan->roomSignature = signature;
+        plan->room = folder.getNonexistentChildFile ("Sanctuary Choir - Room", ".wav", true);
+    }
+
+    const sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
+    const double rate = owned->sampleRate;
+    // Files start at the song's start when the take was learned in time with the song, so
+    // they line up when dropped at the beginning of the song.
+    const int64_t offset = std::max<int64_t> (0, owned->timelineStart);
+    auto ok = std::make_shared<bool> (true);
+    exportCancel = false;
+    exportDone = false;
+    exportWorker = std::make_unique<std::thread> ([this, plan, stems, params, rate, offset, ok, needSections, needFull, needRoom]
+    {
+        const StemSet& st = *stems;
+        auto readStems = [&st] (int64_t pos, int len, float* const* channels)
+        {
+            for (size_t ch = 0; ch < st.data.size(); ++ch)
+                for (int i = 0; i < len; ++i)
+                    channels[ch][i] = pos + i < (int64_t) st.data[ch].size() ? (float) st.data[ch][(size_t) (pos + i)] * st.scale[ch] : 0.0f;
+        };
+        if (needSections)
+        {
+            std::vector<float> l (8192), r (8192);
+            for (int s = 0; s < sc::NumSections && *ok; ++s)
+            {
+                StereoWavWriter w;
+                *ok = w.open (File (plan->sections[s]), rate) && w.writeSilence (offset);
+                const auto& srcL = st.data[(size_t) s * 2];
+                const auto& srcR = st.data[(size_t) s * 2 + 1];
+                for (int64_t pos = 0; pos < st.length && *ok && ! exportCancel.load(); pos += (int64_t) l.size())
+                {
+                    const int len = (int) std::min<int64_t> ((int64_t) l.size(), st.length - pos);
+                    for (int i = 0; i < len; ++i)
+                    {
+                        const auto k = (size_t) (pos + i);
+                        l[(size_t) i] = k < srcL.size() ? (float) srcL[k] * st.scale[(size_t) s * 2] : 0.0f;
+                        r[(size_t) i] = k < srcR.size() ? (float) srcR[k] * st.scale[(size_t) s * 2 + 1] : 0.0f;
+                    }
+                    *ok = w.write (l.data(), r.data(), len);
+                }
+                *ok = *ok && ! exportCancel.load() && w.close();
+            }
+        }
+        auto mix = [&] (const File& file, bool roomOnly)
+        {
+            StereoWavWriter w;
+            *ok = w.open (file, rate) && w.writeSilence (offset)
+                  && sc::mixdownStemsStreaming (rate, st.length, params, roomOnly, 4.0f, readStems,
+                                                [&] (const float* l, const float* r, int len) { return ! exportCancel.load() && w.write (l, r, len); })
+                  && w.close();
+        };
+        if (needFull && *ok)
+            mix (plan->full, false);
+        if (needRoom && *ok)
+            mix (plan->room, true);
+        exportDone = true;
+    });
+
+    auto previous = std::move (onExportDone);
+    onExportDone = [this, plan, ok, folder, onDone, signature]
+    {
+        exportFailedSignature = *ok ? String() : signature;
+        if (*ok && plan->takeId == exported.takeId)
+            exported = *plan;
+        if (onDone) onDone (*ok ? folder : File());
+    };
+    jassert (previous == nullptr);
+    if (onStatusChanged) onStatusChanged();
+}
+
+void LearnSession::finishExport()
+{
+    if (exportWorker != nullptr && exportWorker->joinable())
+        exportWorker->join();
+    exportWorker.reset();
+    auto fn = std::move (onExportDone);
+    onExportDone = nullptr;
+    if (fn) fn();
+    if (onStatusChanged) onStatusChanged();
 }
 
 //==============================================================================
@@ -739,6 +1074,9 @@ void LearnSession::timerCallback()
 
     if (previewPlaying.load() && onStatusChanged)
         onStatusChanged();
+
+    if (exportDone.exchange (false))
+        finishExport();
 
     matchSessionRate();
 
@@ -790,6 +1128,11 @@ void LearnSession::matchSessionRate()
         b.start = (int64_t) std::llround ((double) b.start / ratio);
         b.end = (int64_t) std::llround ((double) b.end / ratio);
     }
+    for (auto& l : locks)
+    {
+        l.start = (int64_t) std::llround ((double) l.start / ratio);
+        l.end = (int64_t) std::llround ((double) l.end / ratio);
+    }
     startAnalysis (std::move (out), sr, start, wasRendered || renderWhenReady, {}, std::move (band));
 }
 
@@ -831,6 +1174,22 @@ String LearnSession::describe() const
     return s;
 }
 
+String LearnSession::exportStateName() const
+{
+    if (owned == nullptr || owned->stems == nullptr || owned->stale.load())
+        return "none";   // render first
+    if (exportWorker != nullptr)
+        return "preparing";
+    const String signature = String (owned->stems->id) + "|" + (getMixSignature ? getMixSignature() : String());
+    if (signature == exportFailedSignature)
+        return "failed";
+    bool ready = exported.takeId == owned->takeId && exported.stemsId == owned->stems->id
+                 && exported.fullSignature == signature && exported.full.existsAsFile() && exported.sections.size() == sc::NumSections;
+    for (const auto& f : exported.sections)
+        ready = ready && File (f).existsAsFile();
+    return ready ? "ready" : "stale";
+}
+
 var LearnSession::getStatus() const
 {
     auto o = std::make_unique<DynamicObject>();
@@ -845,6 +1204,9 @@ var LearnSession::getStatus() const
     o->setProperty ("stale", owned != nullptr && owned->stems != nullptr && owned->stale.load());
     o->setProperty ("previewing", previewPlaying.load());
     o->setProperty ("tiedToTimeline", owned != nullptr && owned->timelineStart >= 0);
+    o->setProperty ("laneVersion", laneVersion);
+    o->setProperty ("locks", (int) locks.size());
+    o->setProperty ("export", exportStateName());
     if (owned != nullptr)
     {
         o->setProperty ("seconds", owned->score.durationSeconds);
@@ -858,7 +1220,8 @@ var LearnSession::getStatus() const
 }
 
 //==============================================================================
-static constexpr int kStateMagic = 0x4b544353; // "SCTK"
+static constexpr int kStateMagic = 0x4b544353;  // "SCTK"
+static constexpr int kExtrasMagic = 0x58544353; // "SCTX": chosen chords and song position, after the take
 
 void LearnSession::writeState (OutputStream& out) const
 {
@@ -912,6 +1275,32 @@ void LearnSession::writeState (OutputStream& out) const
             out.writeInt (b.bass);
         }
     }
+
+    // Chords chosen by hand and where the take sits in the song follow in a block of their own,
+    // which earlier versions of the plug-in never read.
+    const auto& timing = owned->timing;
+    if (! owned->locks.empty() || timing.bpm > 0.0 || timing.ppqStart >= 0.0)
+    {
+        auto o = std::make_unique<DynamicObject>();
+        o->setProperty ("bpm", timing.bpm);
+        o->setProperty ("ppq", timing.ppqStart);
+        o->setProperty ("sigNum", timing.sigNum);
+        o->setProperty ("sigDen", timing.sigDen);
+        Array<var> lockList;
+        for (const auto& l : owned->locks)
+        {
+            auto lo = std::make_unique<DynamicObject>();
+            lo->setProperty ("s", (int64) l.start);
+            lo->setProperty ("e", (int64) l.end);
+            lo->setProperty ("root", l.chord.root);
+            lo->setProperty ("iv", intervalsOf (l.chord));
+            lo->setProperty ("name", String (CharPointer_UTF8 (l.chord.name.c_str())));
+            lockList.add (var (lo.release()));
+        }
+        o->setProperty ("locks", lockList);
+        out.writeInt (kExtrasMagic);
+        out.writeString (JSON::toString (var (o.release()), true));
+    }
 }
 
 void LearnSession::readState (InputStream& in)
@@ -959,6 +1348,37 @@ void LearnSession::readState (InputStream& in)
         }
     }
 
+    // Chords chosen by hand and the song position.
+    std::vector<sc::ChordLock> savedLocks;
+    TakeTiming timing;
+    if (in.getNumBytesRemaining() >= 5 && in.readInt() == kExtrasMagic)
+    {
+        const auto extras = JSON::parse (in.readString());
+        timing.bpm = jlimit (0.0, 999.0, (double) extras.getProperty ("bpm", 0.0));
+        timing.ppqStart = (double) extras.getProperty ("ppq", -1.0);
+        timing.sigNum = jlimit (1, 32, (int) extras.getProperty ("sigNum", 4));
+        timing.sigDen = jlimit (1, 32, (int) extras.getProperty ("sigDen", 4));
+        if (auto* list = extras.getProperty ("locks", {}).getArray())
+        {
+            for (const auto& l : *list)
+            {
+                const auto* iv = l.getProperty ("iv", {}).getArray();
+                if (iv == nullptr || iv->isEmpty() || iv->size() > 4)
+                    continue;
+                int intervals[4] {};
+                for (int k = 0; k < iv->size(); ++k)
+                    intervals[k] = sc::wrapPc ((int) (*iv)[k]);
+                sc::ChordLock lock;
+                lock.start = (int64) l.getProperty ("s", 0);
+                lock.end = (int64) l.getProperty ("e", 0);
+                lock.chord = sc::makeChordFromIntervals ((int) l.getProperty ("root", 0), intervals, iv->size());
+                lock.chord.name = l.getProperty ("name", "").toString().toStdString();
+                if (lock.end > lock.start && lock.chord.name.size() < 16)
+                    savedLocks.push_back (std::move (lock));
+            }
+        }
+    }
+
     // The same take we already have (undo, A/B compare, a host restoring what it just saved):
     // keep the analysis and stems; changed settings are picked up as usual.
     const Phase p = phase.load();
@@ -975,8 +1395,20 @@ void LearnSession::readState (InputStream& in)
         for (size_t i = 0; i < band.size() && same; ++i)
             same = curBand[i].start == band[i].start && curBand[i].end == band[i].end && curBand[i].index == band[i].index && curBand[i].bass == band[i].bass;
         if (same)
+        {
+            // Only the chosen chords differ (undo of a chord change): harmonise again.
+            auto sameLock = [] (const sc::ChordLock& a, const sc::ChordLock& b)
+            { return a.start == b.start && a.end == b.end && a.chord.root == b.chord.root && a.chord.mask() == b.chord.mask(); };
+            if (! std::equal (savedLocks.begin(), savedLocks.end(), locks.begin(), locks.end(), sameLock))
+            {
+                locks = std::move (savedLocks);
+                harmonySettingsChanged();
+            }
             return;
+        }
     }
+    locks = std::move (savedLocks);
+    takeTiming = timing;
     startAnalysis (std::move (audio), rate, timelineStart, wasRendered, {}, std::move (band));
 }
 } // namespace sanctuary

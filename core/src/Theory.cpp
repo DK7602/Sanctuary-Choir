@@ -215,7 +215,7 @@ static Chord makeChord (int root, std::initializer_list<int> intervals, int degr
     return c;
 }
 
-static bool keyPrefersFlats (const Scale& s)
+bool keyPrefersFlats (const Scale& s)
 {
     // Rough rule: flat keys for F, Bb, Eb, Ab, Db, Gb majors and their relative minors.
     const int majorTonic = s.isMinorFamily() ? wrapPc (s.tonic + 3) : s.tonic;
@@ -275,7 +275,7 @@ void buildChordVocabulary (const Scale& scale, Style style, std::vector<Chord>& 
         if (style != Style::Gregorian)
             v.push_back (makeChord (t + 2, { 0, 4, 7 }, 11, 0.2f, flats));   // V/V
         if (style == Style::Worship || style == Style::Cinematic || style == Style::Gospel)
-            v.push_back (makeChord (t + 10, { 0, 4, 7 }, 12, 0.25f, flats)); // bVII
+            v.push_back (makeChord (t + 10, { 0, 4, 7 }, 12, 0.25f, true));  // bVII (Bb in C, never A#)
         if (style == Style::Gospel)
         {
             v.push_back (makeChord (t, { 0, 4, 7, 10 }, 13, 0.35f, flats));      // I7
@@ -309,6 +309,23 @@ Chord makeChordOfQuality (int root, ChordQuality q, bool preferFlats)
     if (iv[3] >= 0)
         return makeChord (root, { iv[0], iv[1], iv[2], iv[3] }, 20, 1.0f, preferFlats);
     return makeChord (root, { iv[0], iv[1], iv[2] }, 20, 1.0f, preferFlats);
+}
+
+Chord makeChordFromIntervals (int root, const int* intervals, int count, bool preferFlats)
+{
+    Chord c;
+    c.root = wrapPc (root);
+    c.numTones = 0;
+    for (int i = 0; i < count && c.numTones < 4; ++i)
+        c.tones[(size_t) c.numTones++] = wrapPc (root + intervals[i]);
+    if (c.numTones == 0)
+        c.tones[(size_t) c.numTones++] = c.root;
+    c.degree = 20;
+    const int third = c.numTones > 1 ? wrapPc (c.tones[1] - c.root) : 4;
+    const int fifth = c.numTones > 2 ? wrapPc (c.tones[2] - c.root) : 7;
+    const int seventh = c.numTones > 3 ? wrapPc (c.tones[3] - c.root) : -1;
+    c.name = std::string (getPitchClassName (c.root, preferFlats)) + qualitySuffix (third, fifth, seventh);
+    return c;
 }
 
 Chord chordFromPitchClasses (const int* notes, int count)

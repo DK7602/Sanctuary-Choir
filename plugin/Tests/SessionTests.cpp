@@ -46,12 +46,19 @@ struct Rig
     sc::EngineParams params;
     bool voicesBusy = false;
 
+    String mixSignature = "mix 1";
+    File exports = File::getSpecialLocation (File::tempDirectory).getNonexistentChildFile ("SanctuarySessionTests", {}, false);
+
+    ~Rig() { exports.deleteRecursively(); }
+
     explicit Rig (double rate)
     {
         params.vocalType = sc::VocalType::Ah;
         params.choirSize = 10;
         session.getParams = [this] { return params; };
         session.voicesBusy = [this] { return voicesBusy; };
+        session.getMixSignature = [this] { return mixSignature; };
+        session.exportRoot = exports;
         session.standalone = true;   // capture starts at once, no host transport needed
         session.prepare (rate);
     }
@@ -68,6 +75,27 @@ struct Rig
             LearnSession::BlockInfo info;
             if (band != nullptr && pos + n <= band->size())
                 info.sidechainL = band->data() + pos;
+            session.processInput (ch, 1, (int) n, info);
+            if ((pos / block.size()) % 64 == 0)
+                pump (1);
+        }
+    }
+
+    /** Sings the take in time with a host that plays from songStart (samples) at bpm. */
+    void singInSong (const std::vector<float>& take, int64_t songStart, double bpm, double rate)
+    {
+        std::vector<float> block (512);
+        for (size_t pos = 0; pos < take.size(); pos += block.size())
+        {
+            const size_t n = std::min (block.size(), take.size() - pos);
+            std::copy (take.begin() + (long) pos, take.begin() + (long) (pos + n), block.begin());
+            float* ch[] = { block.data() };
+            LearnSession::BlockInfo info;
+            info.hostPlaying = true;
+            info.hasPosition = true;
+            info.hostPosition = songStart + (int64_t) pos;
+            info.bpm = bpm;
+            info.ppq = (double) info.hostPosition / rate * bpm / 60.0;
             session.processInput (ch, 1, (int) n, info);
             if ((pos / block.size()) % 64 == 0)
                 pump (1);
@@ -269,6 +297,152 @@ static void learnRecordsTheBand()
     }
 }
 
+
+static int64_t wavLength (const File& f, bool& silentUntil, int64_t offset)
+{
+    WavAudioFormat wav;
+    std::unique_ptr<AudioFormatReader> reader (wav.createReaderFor (new FileInputStream (f), true));
+    if (reader == nullptr)
+        return -1;
+    AudioBuffer<float> head (2, (int) offset + 48000);
+    reader->read (&head, 0, head.getNumSamples(), 0, true, true);
+    silentUntil = head.getMagnitude (0, (int) offset) == 0.0f && head.getMagnitude ((int) offset, 48000) > 0.0f;
+    return (int64_t) reader->lengthInSamples;
+}
+
+static void chordLaneAndDragOut()
+{
+    std::printf ("The chord lane: chosen chords stay with the project; MIDI and audio files line up with the song\n");
+    const double rate = 48000.0;
+    const int64_t songStart = 2 * 48000;   // the take starts 2 s (bar 2 at 120 bpm) into the song
+    MemoryBlock state;
+    String lockedName;
+    int64_t lockedStart = 0;
+    {
+        Rig rig (rate);
+        rig.session.standalone = false;
+        rig.session.startRecording();
+        rig.singInSong (melody (rate, 0.0f, 2), songStart, 120.0, rate);
+        rig.session.stopRecording();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned in time with the song");
+
+        const var lane = rig.session.getChordLane();
+        const auto* spans = lane.getProperty ("spans", {}).getArray();
+        check (spans != nullptr && spans->size() >= 3, "the lane shows the chords");
+        check (lane.getProperty ("melody", {}).getArray() != nullptr && lane.getProperty ("melody", {}).getArray()->size() >= 10, "and the melody");
+        check (std::abs ((double) lane.getProperty ("songStart", 0.0) - 2.0) < 0.02, "the take starts 2 s into the song");
+        check ((int) lane.getProperty ("bar", 0) == 2 && (int) lane.getProperty ("beat", 0) == 1, "at bar 2");
+        check ((bool) lane.getProperty ("editable", false), "chords can be chosen");
+        if (spans == nullptr || spans->size() < 3)
+            return;
+
+        // Choose another chord for the second span.
+        const var span = (*spans)[1];
+        const int64_t s = (int64) span.getProperty ("s", 0), e = (int64) span.getProperty ("e", 0);
+        const var options = rig.session.getChordOptions (s, e);
+        check (options.size() >= 4, "ranked choices for the chord");
+        var pick;
+        for (const auto& o : *options.getArray())
+            if (! (bool) o.getProperty ("current", false)) { pick = o; break; }
+        check (! pick.isVoid(), "something else to choose");
+        if (pick.isVoid())
+            return;
+        Array<int> iv;
+        const var pickIv = pick.getProperty ("iv", {});
+        for (const auto& v : *pickIv.getArray())
+            iv.add ((int) v);
+        const int before = rig.session.getLaneVersion();
+        rig.session.lockChord (s, e, (int) pick.getProperty ("root", 0), iv);
+        check (rig.session.getLaneVersion() != before, "the lane changes");
+        lockedName = pick.getProperty ("name", "").toString();
+        lockedStart = s;
+        bool shown = false;
+        const var laneNow = rig.session.getChordLane();
+        for (const auto& sp : *laneNow.getProperty ("spans", {}).getArray())
+            shown = shown || ((bool) sp.getProperty ("locked", false) && sp.getProperty ("name", "").toString() == lockedName
+                              && (int64) sp.getProperty ("s", 0) == s);
+        check (shown, "the chosen chord is in the lane, locked");
+        std::printf ("  chose %s at %.2f s\n", lockedName.toRawUTF8(), (double) s / rate);
+
+        // MIDI: tempo, the parts, and everything shifted to the take's place in the song.
+        const auto midiFiles = rig.session.getExportFiles (LearnSession::ExportItem::Midi);
+        check (midiFiles.size() == 1 && File (midiFiles[0]).existsAsFile(), "MIDI written at once (no render needed)");
+        if (midiFiles.size() == 1)
+        {
+            MidiFile midi;
+            FileInputStream in { File (midiFiles[0]) };
+            check (midi.readFrom (in), "the MIDI file reads back");
+            std::printf ("  MIDI: %d tracks\n", midi.getNumTracks());
+            check (midi.getNumTracks() == 7, "conductor, S, A, T, B, melody and chords");
+            double tempo = 0.0, firstNote = 1.0e9;
+            bool chordName = false;
+            int channels = 0;
+            for (int t = 0; t < midi.getNumTracks(); ++t)
+                for (const auto* ev : *midi.getTrack (t))
+                {
+                    const auto& m = ev->message;
+                    if (m.isTempoMetaEvent()) tempo = 60.0 / m.getTempoSecondsPerQuarterNote();
+                    if (m.isNoteOn()) { firstNote = std::min (firstNote, m.getTimeStamp()); channels |= 1 << m.getChannel(); }
+                    if (m.isTextMetaEvent() && m.getMetaEventType() == 1 && m.getTextFromTextMetaEvent() == lockedName) chordName = true;
+                }
+            check (std::abs (tempo - 120.0) < 0.01, "at the song's tempo");
+            check (firstNote >= 4 * 960 - 1, "starting where the take sits in the song (bar 2)");
+            check (channels == (0x3e | 0x40), "parts on channels 1-4, melody 5, chords 6");
+            check (chordName, "the chosen chord is named in the chords track");
+        }
+
+        // Audio needs a render, then the files are written in the background.
+        check (rig.session.getExportFiles (LearnSession::ExportItem::FullChoir).isEmpty(), "no audio before RENDER");
+        rig.session.render();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "rendered"; }), "rendered");
+        check (rig.session.getStatus().getProperty ("export", "").toString() == "stale", "audio files not written yet");
+        rig.session.prepareExport();
+        check (waitFor (rig.session, [&] { return rig.session.getStatus().getProperty ("export", "").toString() == "ready"; }), "audio files ready");
+        const auto all = rig.session.getExportFiles (LearnSession::ExportItem::AllStems);
+        check (all.size() == 5, "four sections and the full choir");
+        bool silent = false;
+        const int64_t len = all.size() == 5 ? wavLength (File (all[0]), silent, songStart) : -1;
+        std::printf ("  %s: %lld samples\n", all.isEmpty() ? "-" : File (all[0]).getFileName().toRawUTF8(), (long long) len);
+        check (len > songStart + (int64_t) (rate * 4.0), "a section file covers the song up to the end of the take");
+        check (silent, "silent before the take, so it lines up when dropped at the song's start");
+
+        // A mix change: a new full choir file; the files a DAW may already play stay as they were.
+        const File firstFull (all.size() == 5 ? all[4] : String());
+        rig.mixSignature = "mix 2";
+        check (rig.session.getStatus().getProperty ("export", "").toString() == "stale", "the full choir is out of date after a mix change");
+        check (rig.session.getExportFiles (LearnSession::ExportItem::Sopranos) == StringArray (all[0]), "the section files still stand");
+        rig.session.prepareExport();
+        check (waitFor (rig.session, [&] { return rig.session.getStatus().getProperty ("export", "").toString() == "ready"; }), "mixed again");
+        const auto full2 = rig.session.getExportFiles (LearnSession::ExportItem::FullChoir);
+        check (full2.size() == 1 && File (full2[0]) != firstFull && firstFull.existsAsFile(), "a new file, the old one kept");
+
+        MemoryOutputStream out (state, false);
+        rig.session.writeState (out);
+    }
+    {
+        Rig rig (rate);
+        MemoryInputStream in (state, false);
+        rig.session.readState (in);
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned" || phaseName (rig.session) == "rendered"; }), "learned again from the project");
+        bool kept = false;
+        const var restored = rig.session.getChordLane();
+        if (auto* spans = restored.getProperty ("spans", {}).getArray())
+            for (const auto& sp : *spans)
+                kept = kept || ((bool) sp.getProperty ("locked", false) && sp.getProperty ("name", "").toString() == lockedName
+                                && (int64) sp.getProperty ("s", 0) == lockedStart);
+        check (kept, "the chosen chord comes back with the project");
+        check ((int) rig.session.getChordLane().getProperty ("bar", 0) == 2, "and so does the take's place in the song");
+        rig.session.unlockAllChords();
+        bool anyLocked = false;
+        const var unlocked = rig.session.getChordLane();
+        if (auto* spans = unlocked.getProperty ("spans", {}).getArray())
+            for (const auto& sp : *spans)
+                anyLocked = anyLocked || (bool) sp.getProperty ("locked", false);
+        check (! anyLocked, "unlock all: the choir chooses again");
+        rig.session.cancelWork();
+    }
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI juce;
@@ -277,6 +451,7 @@ int main()
     projectReopenedAtAnotherRate();
     reloadWaitsForVoicesAndSkipsSameTake();
     learnRecordsTheBand();
+    chordLaneAndDragOut();
     std::printf ("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

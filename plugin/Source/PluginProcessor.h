@@ -62,6 +62,7 @@ public:
     /** Song tempo while the host plays (0 when stopped or unknown), the beat position at the last
         block, and when that block ran (Time::getMillisecondCounterHiRes). */
     std::atomic<double> songBpm { 0.0 }, songBeat { 0.0 }, songBeatTime { 0.0 };
+    std::atomic<double> hostBpm { 0.0 };   // the song's tempo, also while stopped (0 = never told)
     /** The side-chain bus is enabled (something can be routed to it). */
     std::atomic<bool> sidechainConnected { false };
 

@@ -63,9 +63,33 @@ Other buttons:
 
 - **LOAD** learns from an audio file instead, such as an a cappella stem.
 - **CLEAR** forgets the take.
-- **Settings → Export Stems** writes Sopranos, Altos, Tenors, Basses, Room and Full Choir WAVs to *Documents/Sanctuary Choir/Exports*.
 
 The learned take is saved inside your project. If you reopen the project at another sample rate, Sanctuary converts the take so it stays in tune and in time.
+
+### Chords & Stems: change a chord, drag the parts into your DAW
+
+Click the plaque after LEARN (*LEARNED 0:43 · ...*), or **Settings → Chords & Stems**. The page shows the take's chords in a lane, with your melody underneath and where the take starts in the song (e.g. *starts at bar 17*).
+
+**Change a chord**
+
+1. Click a chord in the lane. A menu lists the chords that could go there, best first. The bar next to each one shows how much of your melody sits on its notes. The menu offers the key's chords, their colours (7ths, sus4) and borrowed chords such as bVII or iv.
+2. Pick one. It turns gold with a padlock: that part of the song now sings your chord. Sanctuary works out the chords around it again so they lead in and out of it.
+3. Click a gold chord and choose **Let the choir choose** to undo it. **Unlock all** undoes every chord you chose.
+
+Your chords are saved with the project and win over everything else, including the band on the side-chain. Changing a chord makes RENDER glow; press it to hear the change in the rendered choir. Chords can be chosen in the chord harmony modes (Full Choir, Gospel Stack, Open Voicing and so on), not in Drone or MIDI Chords.
+
+**Drag into your DAW**
+
+Press on a chip, hold the mouse button, and drag it onto a track or an empty part of your DAW's arrangement:
+
+- **MIDI · Parts & Chords**: one MIDI file, ready right after LEARN with no render needed. It has soprano, alto, tenor and bass on MIDI channels 1–4 (so *Parts on ch. 1–4* plays them back), your melody on channel 5, and the chords on channel 6 with their names. It uses your song's tempo. Use it with another choir or orchestra library, print a lead sheet, or edit the parts and send them back to Sanctuary.
+- **Full Choir**, **Sopranos**, **Altos**, **Tenors**, **Basses** and **All Stems**: 24-bit WAV files of the rendered choir, so they need a RENDER first. The section files are dry; Full Choir is the whole choir as you hear it, with the room. The page gets them ready in the background the first time it opens after a render ("Getting the audio ready…").
+
+When the take was learned with your DAW playing, the files start at the very beginning of your song. **Drop them at bar 1** and they line up with your take. A take loaded from a file starts at its own beginning; drop those files where the take starts.
+
+Files are kept in *Documents/Sanctuary Choir/Exports*, one folder per take. A new render or mix gets new files, and files your DAW already uses are never overwritten. Delete old folders there when you no longer need them.
+
+**Save to folder** writes everything (MIDI, sections, Full Choir and Room) and opens the folder, if you would rather drag from there. If your DAW doesn't accept the drag, Sanctuary opens the folder for you.
 
 ## 5. Follow the band
 

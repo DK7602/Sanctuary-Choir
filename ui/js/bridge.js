@@ -13,7 +13,7 @@
   let send;
 
   if (isPlugin) {
-    ["init", "params", "meters", "status", "toast"].forEach((e) => backend.addEventListener(e, (p) => dispatch(e, p)));
+    ["init", "params", "meters", "status", "toast", "lane", "chordOptions", "dragDone"].forEach((e) => backend.addEventListener(e, (p) => dispatch(e, p)));
     send = (msg) => backend.emitEvent("ui", msg);
   } else {
     const demo = createDemoBackend(dispatch);
@@ -155,7 +155,40 @@
 
     const voices = { loading: false, name: "Sanctuary Voices", text: "4 SECTIONS \u00b7 5 VOWELS \u00b7 753 NOTES", error: "", bundled: true, usingBundled: true };
     const scenes = [true, true, false, false, false, false, false, false];
+    // The chord lane of the simulated take: the hymn progression, two melody notes per chord.
+    const RATE = 48000;
+    const vocab = [["C", 0, [0, 4, 7]], ["Dm", 2, [0, 3, 7]], ["Em", 4, [0, 3, 7]], ["F", 5, [0, 4, 7]], ["G", 7, [0, 4, 7]], ["Am", 9, [0, 3, 7]],
+      ["G7", 7, [0, 4, 7, 10]], ["Fmaj7", 5, [0, 4, 7, 11]], ["Bb", 10, [0, 4, 7]], ["Gsus4", 7, [0, 5, 7]], ["Bdim", 11, [0, 3, 6]]];
+    const laneChords = ["C", "F", "G", "C", "Am", "Dm", "G", "C"];
+    const laneMelody = [[64, 67], [69, 65], [67, 62], [64, 60], [64, 69], [65, 62], [62, 67], [64, 60]];
+    let laneSpans = null, laneVersion = 0, exportState = "none";
+    function makeLane() {
+      laneSpans = laneChords.map((name, i) => {
+        const v = vocab.find((c) => c[0] === name);
+        return { s: i * 2 * RATE, e: (i + 1) * 2 * RATE, name, root: v[1], iv: v[2], locked: false, band: false, original: name };
+      });
+    }
+    function sendLane() {
+      laneVersion++;
+      if (!learn.hasTake || !laneSpans) { emit("lane", null); return; }
+      const melody = [];
+      laneMelody.forEach((pair, i) => pair.forEach((p, k) => melody.push({ s: (i * 2 + k) * RATE + 2400, e: (i * 2 + k + 1) * RATE - 4800, p })));
+      emit("lane", { version: laneVersion, rate: RATE, length: 16 * RATE, key: "C MAJOR", band: false, editable: true, songStart: 8, bar: 5, beat: 1,
+        spans: laneSpans.map((sp) => ({ s: sp.s, e: sp.e, name: sp.name, root: sp.root, iv: sp.iv, locked: sp.locked, band: sp.band })), melody });
+    }
+    function chordOptions(s, e) {
+      const i = Math.round(s / (2 * RATE));
+      const sp = laneSpans[i];
+      const pcs = laneMelody[i].map((p) => p % 12);
+      const tones = (c) => c[2].map((iv) => (c[1] + iv) % 12);
+      const options = vocab.map((c) => ({ name: c[0], root: c[1], iv: c[2], fit: pcs.filter((pc) => tones(c).includes(pc)).length / pcs.length, current: c[0] === sp.name }))
+        .sort((a, b) => (b.current - a.current) * 0.5 + (b.fit - a.fit)).slice(0, 8);
+      emit("chordOptions", { s, e, options });
+    }
+
     function status() {
+      learn.export = !learn.hasStems || learn.stale ? "none" : exportState;
+      learn.tiedToTimeline = true;
       emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices), scenes: scenes.slice() });
     }
     function setParam(id, v) {
@@ -212,8 +245,10 @@
       learn.phase = "analysing"; learn.text = "LISTENING TO YOUR TAKE..."; status();
       setTimeout(() => {
         learn.phase = "learned"; learn.hasTake = true; learn.stale = learn.hasStems;
-        learn.text = "LEARNED 0:43 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 105 NOTES";
+        learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES";
+        makeLane();
         status();
+        sendLane();
       }, 1400);
     }
     function renderSim() {
@@ -225,8 +260,8 @@
         learn.text = "RENDERING " + Math.round(learn.progress * 100) + "%";
         if (learn.progress >= 1) {
           clearInterval(learnTimer);
-          learn.phase = "rendered"; learn.hasStems = true; learn.stale = false;
-          learn.text = "LEARNED 0:43 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 105 NOTES  \u00b7  " + Math.round(values.choirSize / 100 * 40) + " SINGERS RENDERED IN 3.1 S";
+          learn.phase = "rendered"; learn.hasStems = true; learn.stale = false; exportState = "stale";
+          learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES  \u00b7  " + Math.round(values.choirSize / 100 * 40) + " SINGERS RENDERED IN 3.1 S";
         }
         status();
       }, 120);
@@ -241,16 +276,37 @@
         setParam(msg.id, msg.value);
         if (learn.hasStems && ["harmonyMode", "key", "scale", "style", "vocalType", "choirSize"].includes(msg.id)) {
           learn.stale = true; if (learn.phase === "rendered") learn.phase = "learned";
-          learn.text = "LEARNED 0:43 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 105 NOTES  \u00b7  RENDER TO UPDATE";
+          learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES  \u00b7  RENDER TO UPDATE";
           status();
         }
       } else if (msg.type === "cmd") {
         switch (msg.name) {
           case "learn": learn.phase === "recording" ? stopLearnSim() : startLearnSim(); break;
-          case "clear": clearInterval(learnTimer); Object.assign(learn, { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", hasTake: false, hasStems: false, stale: false }); status(); break;
+          case "clear": clearInterval(learnTimer); Object.assign(learn, { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", hasTake: false, hasStems: false, stale: false }); exportState = "none"; status(); sendLane(); break;
+          case "lane": sendLane(); break;
+          case "chordOptions": if (laneSpans) chordOptions(msg.s, msg.e); break;
+          case "chordLock": case "chordUnlock": {
+            const sp = laneSpans && laneSpans.find((x) => x.s === msg.s);
+            if (sp) {
+              const v = msg.name === "chordUnlock" ? null : vocab.find((c) => c[1] === msg.root && c[2].join() === msg.iv.join());
+              Object.assign(sp, v ? { name: v[0], root: v[1], iv: v[2], locked: true } : { name: sp.original, locked: false });
+              const o = vocab.find((c) => c[0] === sp.name); if (o) { sp.root = o[1]; sp.iv = o[2]; }
+              if (learn.hasStems) { learn.stale = true; learn.phase = "learned"; learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES  \u00b7  RENDER TO UPDATE"; }
+              status(); sendLane();
+            }
+            break;
+          }
+          case "chordUnlockAll": if (laneSpans) { laneSpans.forEach((sp) => { const o = vocab.find((c) => c[0] === sp.original); Object.assign(sp, { name: sp.original, root: o[1], iv: o[2], locked: false }); }); status(); sendLane(); } break;
+          case "exportPrepare": if (exportState !== "ready") { exportState = "preparing"; status(); setTimeout(() => { exportState = "ready"; status(); }, 1200); } break;
+          case "dragOut":
+            emit("toast", { text: msg.item === "midi" ? "In the plugin, the MIDI file (parts and chords) drops onto a track in your DAW"
+              : exportState === "ready" ? "In the plugin, the audio drops into your DAW, lined up with the start of your song"
+              : "Render first: the audio comes from the rendered choir" });
+            setTimeout(() => emit("dragDone", null), 50);
+            break;
           case "render": renderSim(); break;
           case "load": emit("toast", { text: "In the plugin this opens a file browser for a vocal take" }); setTimeout(stopLearnSim, 300); break;
-          case "export": emit("toast", { text: learn.hasStems ? "Stems saved to Documents/Sanctuary Choir/Exports" : "Render first, then export the stems" }); break;
+          case "export": emit("toast", { text: !learn.hasTake ? "Learn or load a take first" : learn.hasStems && !learn.stale ? "Saved to Documents/Sanctuary Choir/Exports" : "MIDI saved. RENDER to save the choir's audio too." }); break;
           case "voicesLoad":
             Object.assign(voices, { loading: true, name: "", text: "", error: "", usingBundled: false }); status();
             setTimeout(() => { Object.assign(voices, { loading: false, name: "St. Mark's Choir", text: "4 SECTIONS \u00b7 2 VOWELS \u00b7 96 NOTES" }); status(); }, 900);

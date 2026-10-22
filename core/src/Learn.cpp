@@ -1,5 +1,6 @@
 #include "sanctuary/Learn.h"
 
+#include <algorithm>
 #include <cstring>
 #include <cctype>
 #include <chrono>
@@ -316,12 +317,89 @@ static std::vector<int> phraseKeys (const TakeAnalysis& take, Scale base)
     return key;
 }
 
+void removeChordLocks (std::vector<ChordLock>& locks, int64_t start, int64_t end)
+{
+    if (end <= start)
+        return;
+    std::vector<ChordLock> kept;
+    kept.reserve (locks.size() + 1);
+    for (const auto& l : locks)
+    {
+        if (l.end <= start || l.start >= end)
+        {
+            kept.push_back (l);
+            continue;
+        }
+        if (l.start < start) { auto before = l; before.end = start; kept.push_back (before); }
+        if (l.end > end)     { auto after = l;  after.start = end;  kept.push_back (after); }
+    }
+    locks = std::move (kept);
+}
+
+void addChordLock (std::vector<ChordLock>& locks, const ChordLock& lock)
+{
+    if (lock.end <= lock.start)
+        return;
+    removeChordLocks (locks, lock.start, lock.end);
+    locks.push_back (lock);
+    std::sort (locks.begin(), locks.end(), [] (const ChordLock& a, const ChordLock& b) { return a.start < b.start; });
+}
+
+static bool sameChord (const Chord& a, const Chord& b) { return a.root == b.root && a.mask() == b.mask(); }
+
+/** The scale degree a chord stands on in a key (so a chosen Cmaj7 still leads like a I chord),
+    or 20 when it is not built on the key's own notes. */
+static int degreeInKey (const Chord& c, const Scale& scale)
+{
+    const auto dia = scale.diatonic();
+    for (int d = 0; d < 7; ++d)
+        if (dia[(size_t) d] == c.root)
+            return c.contains (dia[(size_t) ((d + 2) % 7)]) ? d : 20;
+    return 20;
+}
+
+const Scale& LearnedScore::scaleAt (int64_t t) const
+{
+    for (size_t k = keys.size(); k-- > 0;)
+        if (keys[k].start <= t)
+            return keys[k].scale;
+    return scale;
+}
+
+std::vector<ChordSpan> LearnedScore::chordLane() const
+{
+    std::vector<ChordSpan> lane;
+    const int64_t pause = (int64_t) (0.5 * sampleRate);
+    for (const auto& e : events)
+    {
+        if (! lane.empty())
+        {
+            auto& last = lane.back();
+            if (sameChord (last.chord, e.chord) && last.locked == e.locked && last.fromBand == e.fromBand
+                && e.start - last.end <= pause)
+            {
+                last.end = std::max (last.end, e.end);
+                continue;
+            }
+        }
+        ChordSpan span;
+        span.start = e.start;
+        span.end = e.end;
+        span.chord = e.chord;
+        span.locked = e.locked;
+        span.fromBand = e.fromBand;
+        lane.push_back (std::move (span));
+    }
+    return lane;
+}
+
 LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
 {
     LearnedScore score;
     score.numNotes = (int) take.notes.size();
     score.numPhrases = (int) take.phrases.size();
     score.durationSeconds = (float) ((double) take.length / take.sampleRate);
+    score.sampleRate = take.sampleRate;
 
     Scale scale;
     scale.type = hs.scale;
@@ -379,7 +457,30 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
     }
     auto scaleAt = [&] (int i) -> const Scale& { return score.keys[(size_t) region[(size_t) i]].scale; };
     auto vocabAt = [&] (int i) -> const std::vector<Chord>& { return vocabs[(size_t) region[(size_t) i]]; };
-    auto chordsAt = [&] (int i) { return (int) vocabAt (i).size(); };
+
+    // Chords chosen by hand: a locked note has that one chord to choose from (the key's own copy
+    // of it when there is one, so it keeps its function), and the path around it adapts.
+    std::vector<Chord> lockedChord ((size_t) N);
+    std::vector<char> locked ((size_t) N, 0);
+    for (int i = 0; i < N && ! hs.locks.empty(); ++i)
+    {
+        const auto& note = take.notes[(size_t) i];
+        const int64_t mid = note.start + (note.end - note.start) / 2;
+        for (const auto& l : hs.locks)
+        {
+            if (mid < l.start || mid >= l.end)
+                continue;
+            locked[(size_t) i] = 1;
+            lockedChord[(size_t) i] = l.chord;
+            lockedChord[(size_t) i].degree = degreeInKey (l.chord, scaleAt (i));
+            for (const auto& c : vocabAt (i))
+                if (sameChord (c, l.chord))
+                    lockedChord[(size_t) i] = c;
+            break;
+        }
+    }
+    auto candidates = [&] (int i) -> const Chord* { return locked[(size_t) i] ? &lockedChord[(size_t) i] : vocabAt (i).data(); };
+    auto chordsAt = [&] (int i) { return locked[(size_t) i] ? 1 : (int) vocabAt (i).size(); };
 
     // Viterbi over chords, one step per note.
     std::vector<int> chordOf ((size_t) N, 0);
@@ -395,7 +496,7 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
             const auto& note = take.notes[(size_t) i];
             const float dur = (float) ((double) (note.end - note.start) / sr);
             const float w = clampv (dur / 0.25f, 0.3f, 2.0f);
-            const Chord& ch = vocabAt (i)[(size_t) c];
+            const Chord& ch = candidates (i)[c];
             const int role = ch.roleOf (q[(size_t) i]);
             static const float roleCost[] = { 0.0f, 0.05f, 0.15f, 0.35f };
             float e = role < 0 ? 2.5f * w : roleCost[role];
@@ -415,30 +516,30 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         const float changeCost = speed <= 0.5f ? 2.2f - 2.4f * speed : 1.0f - 1.2f * (speed - 0.5f);
 
         for (int c = 0; c < chordsAt (0); ++c)
-            cost[(size_t) c] = emission (0, c) - (vocabAt (0)[(size_t) c].degree == 0 ? 0.3f : 0.0f);
+            cost[(size_t) c] = emission (0, c) - (candidates (0)[c].degree == 0 ? 0.3f : 0.0f);
 
         for (int i = 1; i < N; ++i)
         {
             const auto& note = take.notes[(size_t) i];
             const bool phraseStart = take.phrases[(size_t) note.phrase].firstNote == i;
             const float dur = (float) ((double) (note.end - note.start) / sr);
-            const auto& from = vocabAt (i - 1);
-            const auto& to = vocabAt (i);
+            const Chord* from = candidates (i - 1);
+            const Chord* to = candidates (i);
+            const int numFrom = chordsAt (i - 1), numTo = chordsAt (i);
             const bool sameKey = region[(size_t) i] == region[(size_t) i - 1];
-            for (int b = 0; b < (int) to.size(); ++b)
+            for (int b = 0; b < numTo; ++b)
             {
                 const float e = emission (i, b);
                 float best = inf;
                 int arg = 0;
-                for (int a = 0; a < (int) from.size(); ++a)
+                for (int a = 0; a < numFrom; ++a)
                 {
                     float tr = 0.0f;
-                    const bool same = sameKey ? a == b : (from[(size_t) a].root == to[(size_t) b].root && from[(size_t) a].mask() == to[(size_t) b].mask());
-                    if (! same)
+                    if (! sameChord (from[a], to[b]))
                     {
                         tr = (phraseStart ? 0.15f : 0.5f * (dur < 0.15f ? 1.5f : 1.0f)) * changeCost;
                         if (sameKey)
-                            tr -= progressionBonus (from[(size_t) a], to[(size_t) b], scaleAt (i).isMinorFamily()) * 1.5f;
+                            tr -= progressionBonus (from[a], to[b], scaleAt (i).isMinorFamily()) * 1.5f;
                     }
                     const float v = cost[(size_t) (i - 1) * (size_t) numChords + (size_t) a] + tr;
                     if (v < best) { best = v; arg = a; }
@@ -516,7 +617,7 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         req.scale = scaleAt (i);
         const auto& vocab = vocabAt (i);
         if (chordModes)
-            req.chord = vocab[(size_t) chordOf[(size_t) i]];
+            req.chord = candidates (i)[chordOf[(size_t) i]];
         else if (scale.type == ScaleType::Chromatic)
         {
             const int tones[] = { q[(size_t) i] - 7, q[(size_t) i] - 3, q[(size_t) i] };
@@ -524,13 +625,16 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         }
         else
             req.chord = vocab.empty() ? chordFromPitchClasses (&req.scale.tonic, 1) : vocab.front();
-        if (band)
+        const BandChord* bc = band ? bandChordFor (note) : nullptr;
+        if (locked[(size_t) i])
         {
-            if (const BandChord* bc = bandChordFor (note))
-            {
-                req.chord = bc->chord();
-                req.bassPc = bc->bass;
-            }
+            req.chord = lockedChord[(size_t) i];
+            req.bassPc = bc != nullptr && req.chord.contains (bc->bass) ? bc->bass : -1;
+        }
+        else if (bc != nullptr)
+        {
+            req.chord = bc->chord();
+            req.bassPc = bc->bass;
         }
         req.melody = q[(size_t) i];
         req.sopranoOctaveShift = phraseShift[(size_t) note.phrase];
@@ -547,10 +651,188 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
         ev.voicing = voiceChord (req);
         ev.melody = q[(size_t) i];
         ev.sopShift = req.sopranoOctaveShift;
+        ev.locked = locked[(size_t) i] != 0;
+        ev.fromBand = ! ev.locked && bc != nullptr;
         prev = ev.voicing;
         score.events.push_back (std::move (ev));
     }
     return score;
+}
+
+//==============================================================================
+std::vector<ChordOption> chordAlternatives (const TakeAnalysis& take, const LearnedScore& score,
+                                            const HarmonySettings& hs, int64_t start, int64_t end, int maxOptions)
+{
+    std::vector<ChordOption> out;
+    if (end <= start || score.events.empty() || maxOptions <= 0)
+        return out;
+
+    // The sung notes in the span (by their middle), as the harmony hears them.
+    struct Sung { int pc; float secs; bool cadence; };
+    std::vector<Sung> sung;
+    for (size_t i = 0; i < take.notes.size(); ++i)
+    {
+        const auto& note = take.notes[i];
+        const int64_t mid = note.start + (note.end - note.start) / 2;
+        if (mid < start || mid >= end)
+            continue;
+        const bool last = note.phrase < (int) take.phrases.size() && take.phrases[(size_t) note.phrase].lastNote == (int) i;
+        sung.push_back ({ wrapPc (score.scaleAt (mid).quantise (note.pitch)),
+                          (float) ((double) (note.end - note.start) / take.sampleRate), last });
+    }
+    if (sung.empty())
+        return out;
+
+    const Scale& key = score.scaleAt (start + (end - start) / 2);
+    const bool flats = keyPrefersFlats (key);
+    const bool minor = key.isMinorFamily();
+
+    // The chords either side, and what plays here now.
+    const LearnedEvent* before = nullptr;
+    const LearnedEvent* after = nullptr;
+    const LearnedEvent* now = nullptr;
+    for (const auto& e : score.events)
+    {
+        if (e.end <= start || e.start < start) { if (e.start < start) before = &e; continue; }
+        if (e.start >= end) { after = &e; break; }
+        if (now == nullptr) now = &e;
+    }
+    if (now == nullptr)
+        return out;
+
+    // Candidates: the key's chords, their colours (sevenths, sus4), common borrowed chords, the
+    // band's chord and the current one.
+    std::vector<Chord> cands = buildChordVocabulary (key, hs.style);
+    auto add = [&cands] (Chord c, int degree, float prior)
+    {
+        for (const auto& x : cands)
+            if (sameChord (x, c))
+                return;
+        c.degree = degree;
+        c.prior = prior;
+        cands.push_back (std::move (c));
+    };
+    const auto dia = key.diatonic();
+    if (key.type != ScaleType::Chromatic)
+    {
+        for (int d = 0; d < 7; ++d)
+        {
+            const int root = dia[(size_t) d];
+            const int third = wrapPc (dia[(size_t) ((d + 2) % 7)] - root);
+            const int fifth = wrapPc (dia[(size_t) ((d + 4) % 7)] - root);
+            const int seventh = wrapPc (dia[(size_t) ((d + 6) % 7)] - root);
+            if (fifth != 7)
+                continue;
+            const int triad[] = { 0, third, fifth };
+            const int sev[] = { 0, third, fifth, seventh };
+            const int sus[] = { 0, 5, 7 };
+            add (makeChordFromIntervals (root, triad, 3, flats), d, 0.4f);
+            add (makeChordFromIntervals (root, sev, 4, flats), d, 0.35f);
+            if (d == 0 || d == 3 || d == 4)
+                add (makeChordFromIntervals (root, sus, 3, flats), d, 0.3f);
+        }
+        const int t = key.tonic;
+        auto borrowed = [&] (int offset, ChordQuality q, int degree, bool flat = false)
+        {
+            add (makeChordOfQuality (t + offset, q, flats || flat), degree, 0.15f);
+        };
+        if (! minor)
+        {
+            borrowed (5, ChordQuality::Minor, 10);           // iv
+            borrowed (2, ChordQuality::Major, 11);           // II (V of V)
+            borrowed (10, ChordQuality::Major, 12, true);    // bVII
+            borrowed (8, ChordQuality::Major, 20, true);     // bVI
+            borrowed (4, ChordQuality::Major, 20);           // III (V of vi)
+        }
+        else
+        {
+            borrowed (7, ChordQuality::Major, 16);           // V
+            borrowed (5, ChordQuality::Major, 17);           // IV
+            borrowed (0, ChordQuality::Major, 20);           // a major I to end on
+        }
+    }
+    const BandChord* bandHere = nullptr;
+    if (hs.followBand && ! take.bandChords.empty())
+    {
+        int64_t bestOverlap = 0;
+        for (const auto& bc : take.bandChords)
+        {
+            const int64_t overlap = std::min (end, bc.end) - std::max (start, bc.start);
+            if (overlap > bestOverlap) { bestOverlap = overlap; bandHere = &bc; }
+        }
+        if (bandHere != nullptr && bestOverlap * 2 < end - start)
+            bandHere = nullptr;
+        if (bandHere != nullptr)
+            add (bandHere->chord(), degreeInKey (bandHere->chord(), key), 0.5f);
+    }
+    add (now->chord, degreeInKey (now->chord, key), 0.5f);
+
+    // Rank: melody notes on chord tones (roots best), the chord's place in the key, how it leads
+    // from the chord before and into the one after, and what the band plays.
+    struct Ranked { size_t index; float cost, fit; };
+    std::vector<Ranked> ranked;
+    float total = 0.0f;
+    for (const auto& n : sung) total += n.secs;
+    auto inKey = [&key, &score] (const LearnedEvent* e)
+    {
+        return e != nullptr && score.scaleAt (e->start).tonic == key.tonic && score.scaleAt (e->start).type == key.type;
+    };
+    const bool sameKeyBefore = inKey (before);
+    const bool sameKeyAfter = inKey (after);
+    for (size_t c = 0; c < cands.size(); ++c)
+    {
+        const Chord& ch = cands[c];
+        static const float roleCost[] = { 0.0f, 0.05f, 0.15f, 0.35f };
+        float cost = 0.0f, on = 0.0f;
+        for (const auto& n : sung)
+        {
+            const float w = clampv (n.secs / 0.25f, 0.3f, 2.0f);
+            const int role = ch.roleOf (n.pc);
+            cost += role < 0 ? 2.5f * w : roleCost[role];
+            cost += (1.0f - ch.prior) * 0.8f;
+            if (role >= 0) on += n.secs;
+            if (n.cadence && ch.degree == 0) cost -= 0.6f;
+        }
+        if (sameKeyBefore && ! sameChord (before->chord, ch))
+            cost -= progressionBonus (before->chord, ch, minor);
+        if (sameKeyAfter && ! sameChord (after->chord, ch))
+            cost -= progressionBonus (ch, after->chord, minor);
+        if (bandHere != nullptr)
+            cost += sameChord (bandHere->chord(), ch) ? -1.0f * (float) sung.size() : 0.0f;
+        ranked.push_back ({ c, cost, total > 0.0f ? on / total : 0.0f });
+    }
+    std::stable_sort (ranked.begin(), ranked.end(), [] (const Ranked& a, const Ranked& b) { return a.cost < b.cost; });
+
+    // Best first, but varied: each further chord on a root already offered (G7 after G) moves
+    // down, so the first few choices are different chords rather than colours of one.
+    std::vector<char> taken (ranked.size(), 0);
+    while ((int) out.size() < maxOptions)
+    {
+        int bestK = -1;
+        float bestCost = 0.0f;
+        for (size_t k = 0; k < ranked.size(); ++k)
+        {
+            if (taken[k])
+                continue;
+            float c = ranked[k].cost;
+            for (const auto& o : out)
+                if (o.chord.root == cands[ranked[k].index].root)
+                    c += 0.6f;
+            if (bestK < 0 || c < bestCost) { bestK = (int) k; bestCost = c; }
+        }
+        if (bestK < 0)
+            break;
+        taken[(size_t) bestK] = 1;
+        const auto& r = ranked[(size_t) bestK];
+        out.push_back ({ cands[r.index], r.fit, sameChord (cands[r.index], now->chord) });
+    }
+    if (std::none_of (out.begin(), out.end(), [] (const ChordOption& o) { return o.current; }))
+    {
+        for (const auto& r : ranked)
+            if (sameChord (cands[r.index], now->chord))
+                out.back() = { cands[r.index], r.fit, true };
+    }
+    return out;
 }
 
 //==============================================================================
@@ -654,12 +936,9 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
     return true;
 }
 
-std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& paramsIn,
-                                                bool roomOnly, float tailSeconds)
+bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParams& paramsIn, bool roomOnly,
+                            float tailSeconds, const StemFill& fill, const MixOut& out)
 {
-    std::array<std::vector<float>, 2> result;
-    if (stems.isEmpty())
-        return result;
     ScopedFlushDenormals noDenormals;
 
     EngineParams params = paramsIn;
@@ -672,33 +951,60 @@ std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, cons
 
     const int block = 512;
     ChoirEngine engine;
-    engine.prepare (stems.sampleRate, block);
+    engine.prepare (sampleRate, block);
     engine.setParams (params);
 
-    const int64_t total = stems.length + (int64_t) (tailSeconds * stems.sampleRate);
-    result[0].assign ((size_t) total, 0.0f);
-    result[1].assign ((size_t) total, 0.0f);
-
-    std::vector<float> zeros ((size_t) block, 0.0f);
+    const int64_t total = length + (int64_t) (tailSeconds * sampleRate);
+    std::vector<float> zeros ((size_t) block, 0.0f), left ((size_t) block), right ((size_t) block);
     std::array<std::vector<float>, NumSections * 2> chunk;
-    for (auto& c : chunk) c.assign ((size_t) block, 0.0f);
+    std::array<float*, NumSections * 2> ptrs {};
+    for (size_t ch = 0; ch < chunk.size(); ++ch)
+    {
+        chunk[ch].assign ((size_t) block, 0.0f);
+        ptrs[ch] = chunk[ch].data();
+    }
 
     for (int64_t pos = 0; pos < total; pos += block)
     {
         const int len = (int) std::min<int64_t> (block, total - pos);
-        StemPlayback pb;
-        for (int ch = 0; ch < NumSections * 2; ++ch)
-        {
-            auto& c = chunk[(size_t) ch];
+        for (auto& c : chunk)
             std::fill (c.begin(), c.end(), 0.0f);
-            const auto& src = stems.channels[(size_t) ch];
-            for (int i = 0; i < len; ++i)
-                if (pos + i < (int64_t) src.size())
-                    c[(size_t) i] = src[(size_t) (pos + i)];
-            pb.sections[(size_t) ch] = c.data();
-        }
-        engine.process (zeros.data(), nullptr, result[0].data() + pos, result[1].data() + pos, len, &pb);
+        if (pos < length)
+            fill (pos, (int) std::min<int64_t> (len, length - pos), ptrs.data());
+        StemPlayback pb;
+        for (size_t ch = 0; ch < chunk.size(); ++ch)
+            pb.sections[ch] = ptrs[ch];
+        engine.process (zeros.data(), nullptr, left.data(), right.data(), len, &pb);
+        if (! out (left.data(), right.data(), len))
+            return false;
     }
+    return true;
+}
+
+std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& params,
+                                                bool roomOnly, float tailSeconds)
+{
+    std::array<std::vector<float>, 2> result;
+    if (stems.isEmpty())
+        return result;
+    result[0].reserve ((size_t) (stems.length + (int64_t) (tailSeconds * stems.sampleRate)));
+    result[1].reserve (result[0].capacity());
+    mixdownStemsStreaming (stems.sampleRate, stems.length, params, roomOnly, tailSeconds,
+        [&stems] (int64_t pos, int len, float* const* channels)
+        {
+            for (int ch = 0; ch < NumSections * 2; ++ch)
+            {
+                const auto& src = stems.channels[(size_t) ch];
+                for (int i = 0; i < len; ++i)
+                    channels[ch][i] = pos + i < (int64_t) src.size() ? src[(size_t) (pos + i)] : 0.0f;
+            }
+        },
+        [&result] (const float* l, const float* r, int len)
+        {
+            result[0].insert (result[0].end(), l, l + len);
+            result[1].insert (result[1].end(), r, r + len);
+            return true;
+        });
     return result;
 }
 } // namespace sc
