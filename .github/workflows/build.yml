@@ -79,7 +79,7 @@ jobs:
           esac
           curl -sSfL -o pv.zip "https://github.com/Tracktion/pluginval/releases/latest/download/$PV"
           mkdir -p pv && (cd pv && cmake -E tar xf ../pv.zip)
-          VST3=$(find build -type d -name "Sanctuary Choir.vst3" -path "*VST3*" | head -n 1)
+          VST3="build/plugin/SanctuaryChoir_artefacts/Release/VST3/Sanctuary Choir.vst3"
           case "$RUNNER_OS" in
             Linux)   xvfb-run -a ./pv/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --validate "$VST3" ;;
             macOS)   ./pv/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --validate "$VST3" ;;
@@ -90,7 +90,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          ART=$(find build -type d -name "SanctuaryChoir_artefacts" | head -n 1)
+          ART=build/plugin/SanctuaryChoir_artefacts
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           cp -R "$ART/Release/AU/Sanctuary Choir.component" ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar 2>/dev/null || true
@@ -104,7 +104,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF#refs/tags/v}"; fi
           OUT="Sanctuary-Choir-${{ matrix.name }}"
           mkdir -p "dist/$OUT"
-          ART=$(find build -type d -name "SanctuaryChoir_artefacts" | head -n 1)
+          ART=build/plugin/SanctuaryChoir_artefacts
           REL="$ART/Release"
           cp -R "$REL/VST3/Sanctuary Choir.vst3" "dist/$OUT/"
           cp packaging/INSTALL-${{ matrix.name }}.txt "dist/$OUT/INSTALL.txt"
