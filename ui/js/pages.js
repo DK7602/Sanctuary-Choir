@@ -73,8 +73,17 @@
     });
 
     const bottom = el("div", "group", page);
-    bottom.style.cssText = "margin-top:10px;padding:8px 14px 2px";
+    bottom.style.cssText = "margin-top:10px;padding:8px 14px 2px;position:relative";
     el("h3", "", bottom, "PERFORMANCE · HOW THE CHOIR SINGS");
+    const resp = el("div", "pill-row", bottom);
+    resp.style.cssText = "position:absolute;right:14px;top:6px;align-items:center";
+    el("span", "", resp, "RESPONSE").style.cssText = "font-family:Montserrat,sans-serif;font-weight:600;font-size:10.5px;letter-spacing:2px;color:#a8977c;margin-right:4px";
+    [["WITH ME", 0, "The choir sings along with you"], ["ECHO", 1, "Call & response: the choir answers each phrase right after you sing it"]].forEach(([label, v, tip]) => {
+      const b = el("button", "pill", resp, label);
+      b.title = tip;
+      b.addEventListener("click", () => Params.set("response", v));
+      Params.on("response", (x) => b.classList.toggle("on", Math.round(x) === v));
+    });
     const knobs = el("div", "knob-row", bottom);
     [["humanize", "HUMANIZE"], ["vibrato", "VIBRATO"], ["glide", "GLIDE"], ["formant", "FORMANT"], ["pitchCorrection", "PITCH LOCK"], ["breath", "BREATH"]]
       .forEach(([id, label]) => new MiniKnob(knobs, id, label, { bipolar: id === "formant" }));
@@ -164,6 +173,7 @@
       "<b>Learn</b>: press it, play your track and press it again. Sanctuary studies the whole melody for smarter, phrase-aware harmony.",
       "<b>Render</b> sings every voice at the highest quality. It plays back in sync with your song, and you can export stems.",
       "<b>Freeze</b> holds the current chord forever, for pads and endings.",
+      "<b>Response: Echo</b> (MIX page) makes the choir answer each phrase right after you sing it.",
       "<b>Vocal Type</b>: Words keeps your lyrics; Ah, Oh, Oo and Mm sing pure vowels.",
     ].forEach((html) => { const li = el("li", "", ol); li.innerHTML = html; });
     const foot = el("p", "", right);

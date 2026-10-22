@@ -232,7 +232,7 @@ const sc::StemPlayback* LearnSession::preparePlayback (const BlockInfo& info, in
         return nullptr;
 
     const int64_t takePos = info.hostPosition - timelineStart;   // take time of the input at block start
-    const int64_t len = d->length();
+    const int64_t len = std::max (d->length(), d->stems != nullptr ? d->stems->length : (int64_t) 0);
     if (takePos + n < -(int64_t) (d->sampleRate * 0.5) || takePos - info.latency > len + (int64_t) (d->sampleRate * 1.0))
         return nullptr;
 

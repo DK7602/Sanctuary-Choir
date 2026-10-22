@@ -10,6 +10,14 @@ static constexpr int kChunk = 64;
 static constexpr float kMinInputHz = 75.0f;
 static constexpr float kMaxInputHz = 1150.0f;
 
+static constexpr double kMaxEchoSeconds = 10.0;
+
+const char* const* getResponseNames()
+{
+    static const char* names[] = { "With Me", "Echo (Right After)" };
+    return names;
+}
+
 int singersForChoirSize (float percent)
 {
     return clampv ((int) std::lround (clampv (percent, 0.0f, 100.0f) / 100.0f * (float) kMaxSingers), 0, kMaxSingers);
@@ -78,7 +86,8 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
               + maxPeriod / 2 + kChunk + 16;
 
     const int maxSingerDelay = (int) (sr * 0.075);
-    analyzer.prepare (sr, maxPeriod, latency + maxSingerDelay + kChunk * 2);
+    const int echoHistory = (int) (sr * (kMaxEchoSeconds + 1.0));
+    analyzer.prepare (sr, maxPeriod, latency + maxSingerDelay + kChunk * 2 + echoHistory);
 
     glottal.prepare (sr);
 
@@ -96,8 +105,8 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
         }
     }
 
-    control.assign (1024, ControlFrame{});
-    controlMask = 1023;
+    control.assign (4096, ControlFrame{});   // ~20 s of control history (echo replays read the past)
+    controlMask = 4095;
 
     leadDelayL.assign ((size_t) latency, 0.0f);
     leadDelayR.assign ((size_t) latency, 0.0f);
@@ -174,6 +183,40 @@ void ChoirEngine::reset()
     wasFrozen = false;
     stemTapOffset = 0;
     chunkCounter = 0;
+    replayCount = 0;
+    phraseStart = -1;
+    lastVoicedTime = 0;
+    activeEchoOffset = 0;
+}
+
+void ChoirEngine::scheduleReplay (int64_t start, int64_t end)
+{
+    const int64_t maxLen = (int64_t) (kMaxEchoSeconds * sr);
+    end += (int64_t) (0.12 * sr);                // keep the last consonant
+    start = std::max (start - (int64_t) (0.05 * sr), end - maxLen);
+    const int64_t gap = (int64_t) (0.12 * sr);
+    int64_t offset = end - start + gap;
+    if (replayCount > 0)
+    {
+        const Replay& prev = replays[(size_t) ((replayCount - 1) % (int) replays.size())];
+        offset = std::max (offset, prev.srcEnd + prev.offset + (int64_t) (0.05 * sr) - start);
+    }
+    // Never echo further back than the history we keep.
+    offset = std::min (offset, maxLen);
+    replays[(size_t) (replayCount % (int) replays.size())] = { start, end, offset };
+    ++replayCount;
+}
+
+const ChoirEngine::Replay* ChoirEngine::findReplay (int64_t t) const
+{
+    const int64_t tail = (int64_t) (1.5 * sr);
+    for (int i = std::max (0, replayCount - (int) replays.size()); i < replayCount; ++i)
+    {
+        const Replay& r = replays[(size_t) (i % (int) replays.size())];
+        if (t >= r.srcStart + r.offset && t <= r.srcEnd + r.offset + tail)
+            return &r;
+    }
+    return nullptr;
 }
 
 //==============================================================================
@@ -447,6 +490,20 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     cf.sounding = unvoicedTime < 0.15f;
     cf.level = cf.sounding ? (g.voiced ? lastLevel : std::max (level, lastLevel * 0.8f)) : 0.0f;
 
+    // Phrase boundaries (for echo / call & response).
+    if (g.voiced)
+    {
+        if (phraseStart < 0)
+            phraseStart = f.centre;
+        lastVoicedTime = f.centre;
+    }
+    else if (phraseStart >= 0 && unvoicedTime > 0.35f)
+    {
+        if (params.response == 1)
+            scheduleReplay (phraseStart, lastVoicedTime);
+        phraseStart = -1;
+    }
+
     // MIDI on its own plays the choir like an instrument.
     if (params.midiEnabled && ! midiHeld.empty() && unvoicedTime > 0.15f)
     {
@@ -702,6 +759,26 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         const float relC = onePoleCoeff (style.releaseS, sr);
         const float gateAtt = onePoleCoeff (0.01f, sr), gateRel = onePoleCoeff (0.12f, sr);
 
+        // Echo: singers perform a phrase from the past, right after it was sung.
+        bool silent = false;
+        int64_t echoOffset = 0;
+        if (params.response == 1 && ! params.freeze)
+        {
+            if (const Replay* r = findReplay (tOut))
+                echoOffset = r->offset;
+            else if (! (controlCount > 0 && control[(size_t) ((controlCount - 1) & controlMask)].midiInstrument))
+                silent = true;
+        }
+        if (echoOffset != activeEchoOffset)
+        {
+            activeEchoOffset = echoOffset;
+            for (auto& sp : singers)
+            {
+                sp->psola.reset ((double) (tOut - echoOffset - sp->delay));
+                sp->amp = sp->gate = 0.0f;
+            }
+        }
+
         std::array<float, NumSections> norm {};
         for (int s = 0; s < NumSections; ++s)
             norm[(size_t) s] = sectionCount[(size_t) s] > 0 ? 0.8f / std::sqrt ((float) sectionCount[(size_t) s]) : 0.5f;
@@ -712,7 +789,8 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             if ((! s.active && s.fade <= 0.0f) || ((renderMask >> s.section) & 1) == 0)
                 continue;
 
-            const ControlFrame& cf = controlAt (tOut - s.delay);
+            const int64_t tSinger = tOut - echoOffset - s.delay;
+            const ControlFrame& cf = controlAt (tSinger);
             const float fadeStart = s.fade;
             updateSingerControl (s, cf, dt);
             const float fadeEnd = s.fade;
@@ -720,8 +798,8 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             std::fill (scratch.begin(), scratch.begin() + c, 0.0f);
             if (words && ! cf.midiInstrument)
             {
-                s.psola.render (analyzer, tOut - s.delay, c, scratch.data(), s.pctl, s.rng);
-                const float gateTarget = cf.sounding ? 1.0f : 0.0f;
+                s.psola.render (analyzer, tSinger, c, scratch.data(), s.pctl, s.rng);
+                const float gateTarget = cf.sounding && ! silent ? 1.0f : 0.0f;
                 for (int i = 0; i < c; ++i)
                 {
                     s.gate = gateTarget + (s.gate - gateTarget) * (gateTarget > s.gate ? gateAtt : gateRel);
@@ -736,7 +814,8 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 float peakAmp = 0.0f;
                 for (int i = 0; i < c; ++i)
                 {
-                    s.amp = s.ampTarget + (s.amp - s.ampTarget) * (s.ampTarget > s.amp ? att : relC);
+                    const float target = silent ? 0.0f : s.ampTarget;
+                    s.amp = target + (s.amp - target) * (target > s.amp ? att : relC);
                     ampBuf[i] = s.amp;
                     peakAmp = std::max (peakAmp, s.amp);
                 }
@@ -835,7 +914,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 //==============================================================================
 void ChoirEngine::publishSnapshot()
 {
-    const int64_t tOut = analyzer.getWritten() - latency;
+    const int64_t tOut = analyzer.getWritten() - latency - activeEchoOffset;
     const ControlFrame& cf = controlAt (tOut);
 
     snap.totalSingers = 0;

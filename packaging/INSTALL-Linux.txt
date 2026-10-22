@@ -1,7 +1,7 @@
 Sanctuary Choir for Linux (x86_64)
 ==================================
 
-Copy "Sanctuary Choir.vst3" to ~/.vst3/ and "Sanctuary Choir.lv2" to ~/.lv2/
+Copy "Sanctuary Choir.vst3" to ~/.vst3/
 "Sanctuary Choir" is a standalone version.
 
 Requires libwebkit2gtk-4.1 (sudo apt install libwebkit2gtk-4.1-0) for the interface.

@@ -298,6 +298,35 @@ TEST (midiPlaysTheChoir)
     }
 }
 
+TEST (echoAnswersAfterThePhrase)
+{
+    // Response = Echo: the choir stays quiet while you sing, then sings the phrase back.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 60.0f, 1.2f, 0.0f }, { 64.0f, 0.8f, 3.0f } }, sr, Tenor, 15.0f);
+    for (VocalType vt : { VocalType::Words, VocalType::Ah })
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (vt, HarmonyMode::FullChoir);
+        p.response = 1;
+        eng.setParams (p);
+        auto y = runEngine (eng, x, sr);
+        auto rms = [&] (double t0, double t1)
+        {
+            double e = 0; size_t n = 0;
+            for (size_t i = (size_t) (t0 * sr); i < (size_t) (t1 * sr) && i < y.size(); ++i, ++n) e += (double) y[i] * y[i];
+            return n ? std::sqrt (e / (double) n) : 0.0;
+        };
+        const double during = rms (0.3, 2.0), after = rms (2.7, 4.2);
+        std::printf ("  echo (%s): during phrase %.4f, after %.4f\n", vt == VocalType::Words ? "words" : "ah", during, after);
+        CHECK (during < 0.01);
+        CHECK (after > 0.03);
+        // The echo carries the melody: its pitch follows the phrase (C then E in some octave).
+        const float pitch = medianPitch (y, sr, 2.8, 3.6);
+        CHECK (pitch > 0.0f);
+    }
+}
+
 TEST (leadLatencyAlignment)
 {
     const double sr = 48000.0;

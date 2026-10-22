@@ -43,6 +43,7 @@
       choice("style", "Style", ["Sacred", "Gospel", "Gregorian", "Cinematic", "Worship", "Chamber", "Spiritual"]),
       choice("vocalType", "Vocal Type", ["Ah (Vowels)", "Oh (Vowels)", "Oo (Vowels)", "Ee (Vowels)", "Eh (Vowels)", "Mm (Hum)", "Words (Your Voice)"]),
       bool("freeze", "Freeze"),
+      choice("response", "Response", ["With Me", "Echo (Right After)"]),
     ];
     const ranges = [[60, 81], [53, 74], [48, 69], [40, 64]];
     ["sop", "alt", "ten", "bas"].forEach((p, i) => {
@@ -71,7 +72,7 @@
     defs.forEach((d) => { values[d.id] = d.default; d.value = d.default; });
 
     const presets = ["Heavenly Praise", "Cathedral Hymn", "Sunday Gospel", "Gregorian Chant", "Angelic Voices", "Men of Praise",
-      "Epic Cinematic", "Worship Night", "Christmas Carols", "Chamber Choir", "Midnight Hum", "Spiritual Echoes", "Unison Anthem", "Heavenly Drone"]
+      "Epic Cinematic", "Worship Night", "Christmas Carols", "Chamber Choir", "Midnight Hum", "Spiritual Echoes", "Unison Anthem", "Heavenly Drone", "Call & Response"]
       .map((name) => ({ name, factory: true }));
     let presetIndex = 0;
     const learn = { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", progress: 0, hasTake: false, hasStems: false, stale: false, previewing: false };

@@ -365,10 +365,13 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
         probe.prepare (sampleRate, block);
         latency = probe.getLatencySamples();
     }
-    const int64_t total = n + latency + block;
+    // Echo mode answers each phrase after it ends, so leave room for the last answer.
+    const int64_t tail = params.response == 1 ? (int64_t) (sampleRate * 11.5) : 0;
+    const int64_t outLength = n + tail;
+    const int64_t total = outLength + latency + block;
 
     out.sampleRate = sampleRate;
-    out.length = n;
+    out.length = outLength;
     std::array<std::vector<float>, NumSections * 2> raw;
     for (auto& ch : raw)
         ch.assign ((size_t) total, 0.0f);
@@ -432,8 +435,8 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
     for (int ch = 0; ch < NumSections * 2; ++ch)
     {
         auto& dst = out.channels[(size_t) ch];
-        dst.assign ((size_t) n, 0.0f);
-        std::memcpy (dst.data(), raw[(size_t) ch].data() + latency, sizeof (float) * (size_t) n);
+        dst.assign ((size_t) outLength, 0.0f);
+        std::memcpy (dst.data(), raw[(size_t) ch].data() + latency, sizeof (float) * (size_t) outLength);
     }
     if (progress) progress (1.0f);
     return true;

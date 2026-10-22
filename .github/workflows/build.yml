@@ -121,7 +121,6 @@ jobs:
             "$ISCC" //Q "//DAppVersion=$VERSION" "//DSourceDir=$(cygpath -w "$PWD/dist/$OUT")" "//O$(cygpath -w "$PWD/dist/$OUT")" packaging/windows/SanctuaryChoir.iss
           else
             cp "$REL/Standalone/Sanctuary Choir" "dist/$OUT/"
-            if [ -d "$REL/LV2/Sanctuary Choir.lv2" ]; then cp -R "$REL/LV2/Sanctuary Choir.lv2" "dist/$OUT/"; fi
           fi
           ls -la "dist/$OUT"
           cd dist && cmake -E tar cf "$OUT.zip" --format=zip "$OUT"

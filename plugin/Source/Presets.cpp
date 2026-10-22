@@ -34,6 +34,7 @@ namespace
             p ("Spiritual Echoes",  { { harmonyMode, Thirds }, { style, Spiritual }, { vocalType, Oh }, { choirSize, 40 }, { space, 60 }, { reverb, 62 }, { venue, Abbey } }),
             p ("Unison Anthem",     { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Words }, { choirSize, 80 }, { space, 85 }, { reverb, 60 }, { glue, 40 }, { venue, Cathedral } }),
             p ("Heavenly Drone",    { { harmonyMode, Drone }, { style, Sacred }, { vocalType, Oo }, { choirSize, 55 }, { space, 80 }, { reverb, 85 }, { decay, 150 }, { venue, Cathedral } }),
+            p ("Call & Response",   { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { response, 1 }, { choirSize, 40 }, { space, 60 }, { reverb, 38 }, { presence, 45 }, { glue, 40 }, { venue, GospelChurch } }),
         };
     }
 

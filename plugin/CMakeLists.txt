@@ -4,9 +4,6 @@ set(SANCTUARY_FORMATS VST3 Standalone)
 if(APPLE)
     list(APPEND SANCTUARY_FORMATS AU)
 endif()
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND SANCTUARY_FORMATS LV2)
-endif()
 
 juce_add_plugin(SanctuaryChoir
     PRODUCT_NAME "Sanctuary Choir"
@@ -25,7 +22,6 @@ juce_add_plugin(SanctuaryChoir
     COPY_PLUGIN_AFTER_BUILD FALSE
     AU_MAIN_TYPE kAudioUnitType_MusicEffect
     VST3_CATEGORIES Fx Vocals
-    LV2URI "https://github.com/DK7602/Sanctuary-Choir"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "Sanctuary Choir listens to your voice to turn it into a choir."
     NEEDS_WEB_BROWSER TRUE

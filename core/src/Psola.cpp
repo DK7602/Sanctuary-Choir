@@ -21,8 +21,8 @@ void PsolaAnalyzer::prepare (double sampleRate, int maxPer, int historySamples)
     ring.assign ((size_t) ringSize, 0.0f);
     ringMask = ringSize - 1;
 
-    marks.assign (4096, PsolaMark{});
-    markMask = 4095;
+    marks.assign (16384, PsolaMark{});
+    markMask = 16383;
     frames.assign (1024, PitchFrame{});
     frameMask = 1023;
 

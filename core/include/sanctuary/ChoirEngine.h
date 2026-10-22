@@ -46,6 +46,7 @@ struct EngineParams
     Style style = Style::Sacred;
     VocalType vocalType = VocalType::Ah;
     bool freeze = false;
+    int response = 0;            // 0 = sing with me, 1 = echo each phrase right after it
     std::array<SectionParams, NumSections> sections;
 
     // Mix page
@@ -109,6 +110,8 @@ public:
     /** Voicing in force at input-timeline sample t; returns false if none (silence). */
     virtual bool voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopShift) const = 0;
 };
+
+const char* const* getResponseNames(); // 2 entries
 
 /** Number of singers for a Choir Size percentage. */
 int singersForChoirSize (float percent);
@@ -211,6 +214,15 @@ private:
     std::atomic_flag snapLock = ATOMIC_FLAG_INIT;
     std::array<float, NumSections> peakAccum {};
     float inPeakAccum = 0.0f, outPeakAccum = 0.0f;
+
+    // Echo (call & response): phrases replayed right after they are sung
+    struct Replay { int64_t srcStart = 0, srcEnd = 0, offset = 0; };
+    std::array<Replay, 16> replays {};
+    int replayCount = 0;
+    int64_t phraseStart = -1, lastVoicedTime = 0;
+    int64_t activeEchoOffset = 0;
+    void scheduleReplay (int64_t start, int64_t end);
+    const Replay* findReplay (int64_t t) const;
 
     // Envelope / gate state used when building control frames
     float lastLevel = 0.0f, unvoicedTime = 10.0f, frozenLevel = 0.0f;

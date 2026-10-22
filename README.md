@@ -39,6 +39,7 @@
 - **FREEZE** holds the current chord forever, for pads, endings and transitions. In Words mode it sustains your own vowel.
 
 **Beyond the original idea**
+- **Response: Echo** (call & response). The choir waits while you sing a phrase, then answers it right back in harmony, gospel style. Switch it on in the MIX page or load the *Call & Response* preset.
 - **MIX page**:
   - Per-section fader, pan, mute/solo and singing range.
   - Lead vocal and choir levels.
@@ -50,7 +51,7 @@
   - Low/high cut, Warmth and a Glue compressor on the choir bus.
 - **MIDI**: hold chords on a keyboard to dictate the harmony. With no voice coming in, the choir becomes a playable instrument.
 - **Stem export**: Sopranos, Altos, Tenors, Basses, Room and Full Choir as 24-bit WAVs.
-- **14 factory presets** (Heavenly Praise, Cathedral Hymn, Sunday Gospel, Gregorian Chant, Angelic Voices, Epic Cinematic…) plus your own.
+- **15 factory presets** (Heavenly Praise, Cathedral Hymn, Sunday Gospel, Gregorian Chant, Angelic Voices, Epic Cinematic…) plus your own.
 
 ## Download
 

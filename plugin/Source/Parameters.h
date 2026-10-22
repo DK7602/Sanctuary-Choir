@@ -21,6 +21,7 @@ namespace ParamIDs
     inline constexpr const char* style = "style";
     inline constexpr const char* vocalType = "vocalType";
     inline constexpr const char* freeze = "freeze";
+    inline constexpr const char* response = "response";
     // Mix
     inline constexpr const char* leadLevel = "leadLevel";
     inline constexpr const char* choirLevel = "choirLevel";
