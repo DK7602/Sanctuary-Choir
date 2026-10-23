@@ -39,7 +39,7 @@
       pct("presence", "Presence", 30),
       choice("harmonyMode", "Harmony Mode", ["Full Choir", "Gospel Stack", "Open Voicing", "Unison & Octaves", "Thirds & Sixths", "Organum", "Upper Voices", "Lower Voices", "Drone Pad", "MIDI Chords"]),
       choice("key", "Key", ["Auto", "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]),
-      choice("scale", "Scale", ["Major", "Minor", "Harmonic Minor", "Dorian", "Mixolydian", "Lydian", "Phrygian", "Gospel (Blues)", "Chromatic"]),
+      choice("scale", "Scale", ["Major", "Minor", "Harmonic Minor", "Dorian", "Mixolydian", "Lydian", "Phrygian", "Gospel (Blues)", "Chromatic", "Auto"], 9),
       choice("style", "Style", ["Sacred", "Gospel", "Gregorian", "Cinematic", "Worship", "Chamber", "Spiritual"]),
       choice("vocalType", "Vocal Type", ["Ah (Vowels)", "Oh (Vowels)", "Oo (Vowels)", "Ee (Vowels)", "Eh (Vowels)", "Mm (Hum)", "Words (Your Voice)"]),
       bool("freeze", "Freeze"),
@@ -47,6 +47,9 @@
       choice("ensemble", "Ensemble", ["Choir", "Children", "Gang Vocals", "Congregation"]),
       choice("scene", "Scene", ["None", "Scene 1", "Scene 2", "Scene 3", "Scene 4", "Scene 5", "Scene 6", "Scene 7", "Scene 8"]),
       db("micClose", "Close Mics", -60, -60, 6), db("micTree", "Tree Mics", 0, -60, 6), db("micRoom", "Room Mics", -60, -60, 6),
+      bool("leadOnStage", "Lead on Stage"),
+      { id: "leadPan", name: "Lead Position", type: "float", min: -1, max: 1, interval: 0.01, skew: 1, default: 0 },
+      { id: "leadDepth", name: "Lead Depth", type: "float", min: 0, max: 100, interval: 1, skew: 1, default: 0 },
     ];
     const ranges = [[60, 81], [53, 74], [48, 69], [40, 64]];
     const home = [[-0.55, 42, 25], [0.55, 42, 25], [-0.42, 40, 75], [0.42, 40, 75]];
@@ -64,6 +67,7 @@
       { id: "formant", name: "Formant", type: "float", min: -100, max: 100, interval: 1, skew: 1, default: 0 },
       pct("pitchCorrection", "Pitch Correction", 60), pct("breath", "Breath", 100, 200), pct("harmonySpeed", "Chord Speed", 50),
       choice("singing", "Singing", ["Natural", "Breathy", "Belt"]), pct("realVoices", "Real Voices", 100, 150),
+      pct("energy", "Energy", 50), pct("subOctave", "Sub-Octave", 0),
       choice("venue", "Venue", ["Grand Cathedral", "Stone Abbey", "Wooden Chapel", "Concert Hall", "Gospel Church", "Studio Room"]),
       { id: "decay", name: "Decay", type: "float", min: 30, max: 250, interval: 1, skew: 1, default: 100, label: "%" },
       { id: "preDelay", name: "Pre-Delay", type: "float", min: 0, max: 150, interval: 0.1, skew: 1, default: 30, label: "ms" },
@@ -182,8 +186,12 @@
       if (!learn.hasTake || !laneSpans) { emit("lane", null); return; }
       const melody = [];
       laneMelody.forEach((pair, i) => pair.forEach((p, k) => melody.push({ s: (i * 2 + k) * RATE + 2400, e: (i * 2 + k + 1) * RATE - 4800, p })));
+      // The four parts: sopranos on the melody an octave up, the others on the hymn's voicing.
+      const parts = [0, 1, 2, 3].map((sec) => sec === 0
+        ? melody.map((n) => ({ s: n.s, e: n.e, p: n.p + 12 }))
+        : progression.map((v, i) => ({ s: i * 2 * RATE + 2400, e: (i + 1) * 2 * RATE - 4800, p: v[sec] })));
       emit("lane", { version: laneVersion, rate: RATE, length: 16 * RATE, key: "C MAJOR", band: false, editable: true, songStart: 8, bar: 5, beat: 1,
-        spans: laneSpans.map((sp) => ({ s: sp.s, e: sp.e, name: sp.name, root: sp.root, iv: sp.iv, locked: sp.locked, band: sp.band })), melody });
+        spans: laneSpans.map((sp) => ({ s: sp.s, e: sp.e, name: sp.name, root: sp.root, iv: sp.iv, locked: sp.locked, band: sp.band })), melody, parts });
     }
     function chordOptions(s, e) {
       const i = Math.round(s / (2 * RATE));
@@ -241,6 +249,7 @@
       emit("meters", {
         sections, singers: total, leadVoiced: singing, leadMidi: progression[beat][0] - 12, leadNote: progression[beat][0] - 12,
         keyTonic: values.key > 0 ? values.key - 1 : (demoLevel !== undefined ? 7 : 0), keyMinor: [1, 2, 3, 6].includes(values.scale), keyConfidence: 0.8,
+        scaleType: values.scale === 9 ? 0 : values.scale,   // Auto hears the demo's hymn in major
         chord: singing ? (demoLevel !== undefined ? chordNamesG : chordNames)[beat] : "", in: env * 0.6, out: env * 0.8, frozen: !!values.freeze,
         bpm: window.SC_DEMO_BEAT !== undefined ? 120 : 0, beat: window.SC_DEMO_BEAT,
         // The preview pretends a band is on the side-chain, playing the same progression.
@@ -313,7 +322,7 @@
         setInterval(meters, 33);
       } else if (msg.type === "set") {
         setParam(msg.id, msg.value);
-        if (learn.hasStems && ["harmonyMode", "key", "scale", "style", "vocalType", "choirSize"].includes(msg.id)) {
+        if (learn.hasStems && ["harmonyMode", "key", "scale", "style", "vocalType", "choirSize", "energy", "subOctave"].includes(msg.id)) {
           learn.stale = true; if (learn.phase === "rendered") learn.phase = "learned";
           learn.text = learnedText() + "  \u00b7  RENDER TO UPDATE";
           status();

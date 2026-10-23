@@ -26,6 +26,7 @@ Pro Tools (AAX) isn't supported yet.
 
 - **Turn up Choir Size** to add singers. You'll see each one walk into the loft. While your song plays, the singers move with its beat (each a touch loose, like real people); when the transport stops they sway on their own.
 - **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note. Once Auto has found it, click the small **lock** next to *Auto · E♭* to keep it.
+- **Scale** is *Auto* by default too: Sanctuary hears whether your song is major or minor, and in a minor song whether you sing the raised seventh (harmonic minor) or not (natural minor). The field shows what it heard, e.g. *Auto · Minor*. With the key set by hand, Auto still decides major or minor for it. Locking the key also locks the scale it heard. Choose a scale yourself for the modes (Dorian, Mixolydian...), Gospel (blues) or Chromatic.
 - **Harmony Mode** chooses the arrangement. *Full Choir* is the classic four-part hymn sound.
 - **Style** changes how the choir performs. *Gospel* adds 7th chords, scoops and more vibrato; *Gregorian* gives pure, still voices.
 - **Vocal Type**:
@@ -36,6 +37,8 @@ Pro Tools (AAX) isn't supported yet.
   - The vowel modes are sung by **real recorded singers** (Sanctuary Voices, installed with the plug-in). *Settings → Choir Voices* switches between **SANCTUARY** (recorded), **YOUR OWN…** (your singers; see [Recording your own choir voices](RECORDING_YOUR_CHOIR.md)) and **SYNTH** (the synthesised voices). *Mm* (humming) is always synthesised.
   - The recorded singers sing like singers, not like a keyboard. When the melody steps to the next note they **slide into it the way they were recorded sliding**, so legato lines join up. A note that starts from silence, such as a short or detached note, begins with a **real sung onset**.
   - **Singing** (top left of the MIX page) sets how they sing: **Natural**, **Breathy** (airy and soft) or **Belt** (bright and pressed, sung out). With Sanctuary Voices the singers switch to takes recorded that way. The synthesised voices change their tone to match. You can automate it, for example breathy verses and a belted last chorus.
+- **Energy** (MIX page) is how hard the choir sings, in one knob: *Hushed* and *Soft* sing quieter, airier and slower to speak; *Powerful* and *Massive* sing louder, brighter and pressed, and at the very top push the choir a little harder. The middle (*Natural*) leaves the style as it is. With Singing on Natural, the recorded voices also switch to their breathy takes at the bottom and their belted takes at the top. Automate it to build a song from a hushed verse to a massive last chorus.
+- **Sub-Octave** (MIX page) adds oktavists: basses singing the bass part an octave lower, the deep weight under a Russian or a gospel mass choir. One joins for every two basses. Turn it up from *Off* to bring them in; they sing everything the basses sing, so it works with every harmony mode (a children's choir has none). Sub-Octave opens the choir's **Low Cut** (FX page) in proportion, so the low notes come through. The *Requiem* and *Epic Cinematic* presets use it.
 
 ### Latency: Studio or Live
 
@@ -87,7 +90,7 @@ The passes are saved with the project, and taking them away or adding one makes 
 
 ### Chords & Stems: change a chord, drag the parts into your DAW
 
-Click the plaque after LEARN (*LEARNED 0:43 · ...*), or **Settings → Chords & Stems**. The page shows the take's chords in a lane, with your melody underneath and where the take starts in the song (e.g. *starts at bar 17*).
+Click the plaque after LEARN (*LEARNED 0:43 · ...*), or **Settings → Chords & Stems**. The page shows the take's chords in a lane, and under them your melody and the four parts the choir sings (soprano pink, alto gold, tenor blue, bass green), plus where the take starts in the song (e.g. *starts at bar 17*). Click **MELODY**, **SOPRANO**, **ALTO**, **TENOR** or **BASS** above the lane to hide or show a line.
 
 **Change a chord**
 
@@ -101,14 +104,19 @@ Your chords are saved with the project and win over everything else, including t
 
 Press on a chip, hold the mouse button, and drag it onto a track or an empty part of your DAW's arrangement:
 
-- **MIDI · Parts & Chords**: one MIDI file, ready right after LEARN with no render needed. It has soprano, alto, tenor and bass on MIDI channels 1–4 (so *Parts on ch. 1–4* plays them back), your melody on channel 5, and the chords on channel 6 with their names. It uses your song's tempo. Use it with another choir or orchestra library, print a lead sheet, or edit the parts and send them back to Sanctuary.
-- **Full Choir**, **Sopranos**, **Altos**, **Tenors**, **Basses** and **All Stems**: 24-bit WAV files of the rendered choir, so they need a RENDER first. Each section file is that section where it stands on the stage, through the microphones, without the hall; Full Choir is the whole choir as you hear it, with the hall. The page gets them ready in the background the first time it opens after a render ("Getting the audio ready…").
+- **MIDI**: one MIDI file, ready right after LEARN with no render needed. It has soprano, alto, tenor and bass on MIDI channels 1–4 (so *Parts on ch. 1–4* plays them back), your melody on channel 5, and the chords on channel 6 with their names. It uses your song's tempo. Use it with another choir or orchestra library, print a lead sheet, or edit the parts and send them back to Sanctuary.
+- **Full Choir**, **Sopranos**, **Altos**, **Tenors**, **Basses**, **Room**, **Lead on Stage** and **All Stems**: 24-bit WAV files of the rendered choir, so they need a RENDER first. The page gets them ready in the background the first time it opens after a render ("Getting the audio ready…").
+  - Each **section** file is that section where it stands on the stage, through the microphones, without the hall.
+  - **Room** is the hall alone: the choir's reverb, to put under the sections and mix yourself.
+  - **Lead on Stage** is your own voice where it stands (at the microphones, or on the stage: see [The stage](#6-the-stage-and-the-microphones)), with its reverb.
+  - **Full Choir** is the whole choir as you hear it, with the hall.
+  - **All Stems** is all of them at once.
 
 When the take was learned with your DAW playing, the files start at the very beginning of your song. **Drop them at bar 1** and they line up with your take. A take loaded from a file starts at its own beginning; drop those files where the take starts.
 
 Files are kept in *Documents/Sanctuary Choir/Exports*, one folder per take. A new render or mix gets new files, and files your DAW already uses are never overwritten. Delete old folders there when you no longer need them.
 
-**Save to folder** writes everything (MIDI, sections, Full Choir and Room) and opens the folder, if you would rather drag from there. If your DAW doesn't accept the drag, Sanctuary opens the folder for you.
+**Save to folder** writes everything (MIDI, sections, Room, Lead on Stage and Full Choir) and opens the folder, if you would rather drag from there. If your DAW doesn't accept the drag, Sanctuary opens the folder for you.
 
 ## 5. Follow the band
 
@@ -143,6 +151,15 @@ Click the choir loft on the main page, or **MIX → Stage & Mics**, to see the c
   - **Men Centre**: women on the sides, men in the middle at the back.
   - **Mixed**: everyone spread across the whole stage, the most blended sound.
 - **Space** on the main page makes the whole stage wider or narrower. The **PAN** knobs on the MIX page move the sections left and right too.
+
+**Put yourself on the stage**
+
+**YOU** (the gold marker beside the tree) is your own voice. It starts at the microphones: dry and up front, like a lead vocal, with its own **Lead Reverb** (FX page).
+
+- **Drag YOU onto the stage** to sing from there: in front of the choir, among the altos, at the back wall. You are then placed and heard by the microphones like a section, and you are in the hall with the choir: further back sounds further away and more in the room. You are never late: the front of the choir stays in time with you.
+- **Double-click YOU**, or drag it off the front of the stage, to go back to the microphones. Double-clicking at the microphones puts you at the front centre of the stage.
+- **Lead on Stage**, **Lead Position** and **Lead Depth** can be automated, for a soloist who walks to the front for the last chorus.
+- Where you stand belongs to your song: presets don't move you.
 
 **Choose the microphones**
 

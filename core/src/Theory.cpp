@@ -863,6 +863,23 @@ float keyFitness (const std::array<float, 12>& h, int tonic, bool minor)
     return correlateKey (h, minor ? minorProfile : majorProfile, tonic) - coveragePenalty (h, tonic, minor);
 }
 
+float keyCorrelation (const std::array<float, 12>& h, int tonic, bool minor)
+{
+    return correlateKey (h, minor ? minorProfile : majorProfile, wrapPc (tonic));
+}
+
+ScaleType autoScaleType (const std::array<float, 12>& h, int tonic, bool minor, ScaleType current)
+{
+    if (! minor)
+        return ScaleType::Major;
+    const float raised = h[(size_t) wrapPc (tonic + 11)], lowered = h[(size_t) wrapPc (tonic + 10)];
+    if (raised > 1.3f * lowered + 1.0e-6f)
+        return ScaleType::HarmonicMinor;
+    if (lowered > 1.3f * raised + 1.0e-6f || current != ScaleType::HarmonicMinor)
+        return ScaleType::NaturalMinor;
+    return ScaleType::HarmonicMinor;
+}
+
 KeyEstimate estimateKey (const std::array<float, 12>& h, bool restrictToMinor, bool restrictToMajor)
 {
     KeyEstimate best;

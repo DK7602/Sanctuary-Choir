@@ -298,17 +298,17 @@ void KeyTracker::reset()
     pendingCount = 0;
 }
 
-void KeyTracker::seed (int tonicIn, bool minor, float weight)
+void KeyTracker::seed (int tonicIn, bool minorIn, float weight)
 {
     static const int majorSteps[] = { 0, 2, 4, 5, 7, 9, 11 };
     static const int minorSteps[] = { 0, 2, 3, 5, 7, 8, 10 };
     static const float stepWeight[] = { 1.6f, 0.8f, 1.2f, 0.9f, 1.4f, 0.8f, 0.6f };
     hist.fill (0.0f);
     for (int i = 0; i < 7; ++i)
-        hist[(size_t) wrapPc (tonicIn + (minor ? minorSteps[i] : majorSteps[i]))] = stepWeight[i] * weight / 7.3f;
+        hist[(size_t) wrapPc (tonicIn + (minorIn ? minorSteps[i] : majorSteps[i]))] = stepWeight[i] * weight / 7.3f;
     totalWeight = weight;
     tonic = wrapPc (tonicIn);
-    lastFamilyMinor = minor;
+    minor = minorIn;
     pending = -1;
     pendingCount = 0;
     sinceEstimate = 0.0f;
@@ -321,25 +321,46 @@ void KeyTracker::addNote (int midiNote, float seconds, float weight)
     totalWeight += w;
 }
 
-int KeyTracker::update (float seconds, bool minorFamily)
+int KeyTracker::update (float seconds, KeyFamily family, int fixedTonic)
 {
     // Slow forgetting so the key can follow a song that modulates.
     const float decay = std::exp (-seconds / 45.0f);
     for (auto& h : hist) h *= decay;
     totalWeight *= decay;
 
+    // A family asked for by hand is the answer straight away.
+    if (family != KeyFamily::Either)
+        minor = family == KeyFamily::Minor;
+    if (fixedTonic >= 0)
+        tonic = wrapPc (fixedTonic);
+
     sinceEstimate += seconds;
-    if (sinceEstimate < 0.4f && minorFamily == lastFamilyMinor)
+    if (sinceEstimate < 0.4f && family == lastFamily && fixedTonic == lastFixed)
         return tonic;
     sinceEstimate = 0.0f;
-    lastFamilyMinor = minorFamily;
+    lastFamily = family;
+    lastFixed = fixedTonic;
 
     if (totalWeight < 0.25f)
         return tonic;
 
-    const KeyEstimate est = estimateKey (hist, minorFamily, ! minorFamily);
+    KeyEstimate est;
+    if (fixedTonic >= 0)
+    {
+        // The key is set: only whether it is major or minor is open.
+        const bool m = family == KeyFamily::Either ? keyFitness (hist, tonic, true) > keyFitness (hist, tonic, false)
+                                                   : family == KeyFamily::Minor;
+        est = { tonic, m, keyCorrelation (hist, tonic, m) };
+    }
+    else
+    {
+        est = estimateKey (hist, family == KeyFamily::Minor, family == KeyFamily::Major);
+    }
     confidence = clampv (est.score, 0.0f, 1.0f) * clampv (totalWeight / 6.0f, 0.0f, 1.0f);
-    if (est.tonic == tonic)
+    // Keys counted 0..23: tonic, + 12 when minor.
+    const int estKey = est.tonic + (est.minor ? 12 : 0);
+    const int curKey = tonic + (minor ? 12 : 0);
+    if (estKey == curKey)
     {
         pending = -1;
         pendingCount = 0;
@@ -348,24 +369,26 @@ int KeyTracker::update (float seconds, bool minorFamily)
     if (totalWeight < 2.5f)
     {
         tonic = est.tonic; // early on, follow the evidence quickly
+        minor = est.minor;
         return tonic;
     }
-    if (est.tonic == pending) ++pendingCount;
-    else { pending = est.tonic; pendingCount = 1; }
+    if (estKey == pending) ++pendingCount;
+    else { pending = estKey; pendingCount = 1; }
 
     // Switch sooner when the current key leaves out notes the singer keeps using.
     float outside = 0.0f, total = 0.0f;
-    const Scale current { tonic, minorFamily ? ScaleType::HarmonicMinor : ScaleType::Major };
+    const Scale current { tonic, minor ? ScaleType::HarmonicMinor : ScaleType::Major };
     for (int pc = 0; pc < 12; ++pc)
     {
         total += hist[(size_t) pc];
-        if (! current.contains (pc) && ! (minorFamily && pc == wrapPc (tonic + 10)))
+        if (! current.contains (pc) && ! (minor && pc == wrapPc (tonic + 10)))
             outside += hist[(size_t) pc];
     }
     const int needed = (total > 0.0f && outside / total > 0.15f) ? 2 : 4;
     if (pendingCount >= needed)
     {
         tonic = est.tonic;
+        minor = est.minor;
         pending = -1;
         pendingCount = 0;
     }

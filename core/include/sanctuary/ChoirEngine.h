@@ -4,7 +4,7 @@
 //   input -> pitch tracker -> harmoniser (live or learned score) -> control timeline
 //   input -> PSOLA analyser -> per-singer PSOLA voices ("Words") or vowel synths ("Ah", "Oh"...)
 //   singers -> section buses (S/A/T/B) -> level -> stage & mics (Close/Tree/Room) -> tone/glue
-//          -> + reverb -> + lead -> limiter
+//          -> + reverb -> + lead (at the mics, or on the stage and in the hall) -> limiter
 #pragma once
 
 #include "ChordDetector.h"
@@ -71,6 +71,7 @@ struct EngineParams
     HarmonyMode harmonyMode = HarmonyMode::FullChoir;
     int key = 0;                 // 0 = auto, 1..12 = C..B
     ScaleType scale = ScaleType::Major;
+    bool scaleAuto = false;      // Scale "Auto": listen for major or minor (scale is then not used)
     Style style = Style::Sacred;
     VocalType vocalType = VocalType::Ah;
     Singing singing = Singing::Natural;   // breathy or belted vowels (recorded voices, and the synth's tone)
@@ -83,6 +84,10 @@ struct EngineParams
     float micCloseDb = -60.0f;
     float micTreeDb = 0.0f;
     float micRoomDb = -60.0f;
+    // ... and where your own voice stands: at the microphones (dry, up front) or on the stage
+    bool leadOnStage = false;
+    float leadPan = 0.0f;        // -1 stage left .. 1 stage right (audience view)
+    float leadDepth = 0.0f;      // 0 front edge .. 1 back wall
 
     // Mix page
     float leadDb = 0.0f;
@@ -95,6 +100,8 @@ struct EngineParams
     float breath = 100.0f;       // % breath noise in vowel modes
     float realVoices = 100.0f;   // % Words mode: how far each singer takes on a real singer's voice (0 = all your own)
     float harmonySpeed = 50.0f;  // % how readily the choir changes chord (0 holds chords, 100 follows every note)
+    float energy = 50.0f;        // % how hard the choir sings: 0 hushed, 50 as the style sings, 100 massive
+    float subOctave = 0.0f;      // % basses doubled an octave below (oktavists); 0 = off
 
     // FX page
     Venue venue = Venue::GrandCathedral;
@@ -135,6 +142,7 @@ struct EngineSnapshot
     int leadNote = -1;
     int keyTonic = 0;
     bool keyMinor = false;
+    int scaleType = 0;             // the scale sung (with Scale Auto, the one heard)
     float keyConfidence = 0.0f;
     char chordName[16] {};
     float inputPeak = 0.0f, outputPeak = 0.0f;
@@ -248,6 +256,9 @@ private:
     void updateSingerControl (Singer& s, const ControlFrame& cf, float dt);
     void refreshVowelFormants();
     void setSingerVowel (Singer& s, VocalType vt);
+    /** Which recorded takes the voices sing from: the Singing choice, or breathy and belted
+        takes at the ends of the Energy range when Singing is Natural. */
+    Singing singingLayer() const noexcept;
     /** The PSOLA analyser a singer sings from (the input's or a pass's), and how far behind the
         input's that one's timeline runs. */
     const PsolaAnalyzer& sourceOf (const Singer& s, int64_t& base) const noexcept;
@@ -310,6 +321,10 @@ private:
     float lastSpace = -1.0f;
     std::array<float, NumSections> sectionNorm { -1.0f, -1.0f, -1.0f, -1.0f };   // smoothed 1/sqrt(singers)
     Style lastStyle = Style::Count;
+    float lastEnergy = -1.0f;
+    bool lastSubOn = false;
+    float energyGain = 1.0f;          // Energy's level change on the choir
+    float subLevel = 0.0f;            // the oktavists' gain, eased a chunk at a time
     bool wasFrozen = false;
 
     NoteSet midiHeld;
@@ -351,6 +366,10 @@ private:
     // Lead (dry) delay so it lines up with the choir (bypassed in Live mode).
     std::vector<float> leadDelayL, leadDelayR;
     int leadDelayPos = 0;
+    // Your voice on the stage: placed and heard by the mics like a section.
+    ChoirStage leadStage;
+    Smoothed leadPlace;               // 0 at the microphones .. 1 on the stage
+    std::vector<float> leadPlacedL, leadPlacedR;
 
     // Buses
     std::vector<float> mono, sectionBuf, choirL, choirR, revInL, revInR, revOutL, revOutR, scratch;
@@ -378,6 +397,7 @@ private:
 
     // Analysis state
     int keyTonic = 0;
+    ScaleType autoScale = ScaleType::Major;   // Scale Auto: what the choir hears the song in
     std::atomic<int> pendingKeySeed { -1 }, detectedKey { -1 };
     float lastInputMidi = 0.0f;
     uint64_t chunkCounter = 0;

@@ -2180,6 +2180,231 @@ TEST (passesSingInTheChoir)
     }
 }
 
+//==============================================================================
+/** A tune in A minor (a tenor's octave); the harmonic one sings G sharp, the natural one G. */
+static std::vector<test::SungNote> minorTune (bool harmonic)
+{
+    const float g = harmonic ? 68.0f : 67.0f, lowG = harmonic ? 56.0f : 55.0f;
+    const float b = 0.45f;
+    return {
+        { 57, b * 2, 0.04f }, { 60, b, 0.0f }, { 64, b, 0.0f }, { 62, b, 0.0f }, { 60, b, 0.0f }, { 59, b, 0.0f }, { 57, b * 2, 0.4f },
+        { 64, b, 0.0f }, { 65, b, 0.0f }, { 64, b, 0.0f }, { 62, b, 0.0f }, { 60, b, 0.0f }, { lowG, b, 0.0f }, { 57, b * 2, 0.4f },
+        { 69, b * 2, 0.0f }, { g, b, 0.0f }, { 65, b, 0.0f }, { 64, b * 2, 0.0f }, { 62, b, 0.0f }, { 60, b, 0.0f }, { 59, b, 0.0f }, { 57, b * 2, 0.4f },
+        { 64, b, 0.0f }, { 60, b, 0.0f }, { lowG, b, 0.0f }, { 57, b * 3, 0.3f },
+    };
+}
+
+TEST (scaleAutoHearsMajorOrMinor)
+{
+    // The scale for a key heard as major or minor: harmonic minor once the leading tone is sung.
+    std::array<float, 12> h {};
+    for (int pc : { 9, 11, 0, 2, 4, 5, 7 }) h[(size_t) pc] = 1.0f;
+    CHECK (autoScaleType (h, 9, true) == ScaleType::NaturalMinor);
+    CHECK (autoScaleType (h, 0, false) == ScaleType::Major);
+    h[8] = 2.0f;
+    CHECK (autoScaleType (h, 9, true) == ScaleType::HarmonicMinor);
+    h[8] = 1.1f;   // close: whichever is in use stays
+    CHECK (autoScaleType (h, 9, true, ScaleType::HarmonicMinor) == ScaleType::HarmonicMinor);
+    CHECK (autoScaleType (h, 9, true, ScaleType::NaturalMinor) == ScaleType::NaturalMinor);
+
+    const double sr = 48000.0;
+    struct Case { const char* name; std::vector<test::SungNote> tune; int tonic; bool minor; ScaleType type; };
+    const Case cases[] = {
+        { "Amazing Grace", test::amazingGrace(), 7, false, ScaleType::Major },
+        { "A minor tune", minorTune (false), 9, true, ScaleType::NaturalMinor },
+        { "A harmonic minor tune", minorTune (true), 9, true, ScaleType::HarmonicMinor },
+    };
+    for (const auto& c : cases)
+    {
+        const auto x = test::singMelody (c.tune, sr, Tenor, 20.0f);
+        // LEARN: from the whole take, with the key found as well or set by hand.
+        const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+        HarmonySettings hs;
+        hs.scaleAuto = true;
+        hs.scale = c.minor ? ScaleType::Major : ScaleType::NaturalMinor;   // not used
+        const auto score = harmoniseTake (take, hs);
+        hs.key = c.tonic + 1;
+        const auto fixed = harmoniseTake (take, hs);
+        std::printf ("  %s: learned %s (key set by hand: %s)\n", c.name, score.keyName().c_str(), fixed.keyName().c_str());
+        CHECK (score.scale.tonic == c.tonic && score.scale.type == c.type);
+        CHECK (fixed.scale.tonic == c.tonic && fixed.scale.type == c.type);
+
+        // Live: the engine settles on the key, and the choir sings in it.
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.key = 0;
+        p.scaleAuto = true;
+        eng.setParams (p);
+        EngineSnapshot last;
+        int outside = 0, sung = 0;
+        const Scale key { c.tonic, c.type };
+        runEngine (eng, x, sr, nullptr, [&] (int64_t pos)
+        {
+            last = eng.takeSnapshot();
+            if (pos < (int64_t) (x.size() / 2))
+                return;   // once it has settled
+            for (int sec = 0; sec < NumSections; ++sec)
+                if (const int nn = last.sectionNotes[(size_t) sec][0]; nn >= 0)
+                {
+                    ++sung;
+                    // (minor keys borrow the major dominant: its leading tone is in the key)
+                    if (! key.contains (nn) && ! (c.minor && wrapPc (nn - c.tonic) == 11))
+                        ++outside;
+                }
+        });
+        std::printf ("    live: %s %s, %d of %d notes outside it\n", getPitchClassName (last.keyTonic, true),
+                     last.keyMinor ? "minor" : "major", outside, sung);
+        CHECK (last.keyTonic == c.tonic && last.keyMinor == c.minor);
+        CHECK (eng.getDetectedKey() == c.tonic + (c.minor ? 12 : 0));
+        CHECK (sung > 0 && outside <= sung / 20);
+    }
+}
+
+TEST (energyShapesTheChoir)
+{
+    // Low energy sings softer and darker, high energy louder and brighter; 50 % changes nothing.
+    const double sr = 48000.0;
+    const auto x = test::singMelody (test::cMajorScale (60.0f, 0.5f), sr, Tenor, 20.0f);
+    const float levels[] = { 0.0f, 50.0f, 100.0f };
+    double rms[3] {}, bright[3] {};
+    std::vector<float> neutral, plain;
+    for (int k = 0; k < 3; ++k)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.energy = levels[k];
+        eng.setParams (p);
+        std::vector<float> r;
+        auto l = runEngine (eng, x, sr, &r);
+        for (size_t i = 0; i < l.size(); ++i) l[i] = 0.5f * (l[i] + r[i]);
+        rms[k] = std::sqrt (energy (l, 4800) / (double) l.size());
+        bright[k] = brightness (l, sr);
+        if (k == 1) neutral = l;
+    }
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        eng.setParams (dryParams (VocalType::Ah, HarmonyMode::FullChoir));
+        std::vector<float> r;
+        plain = runEngine (eng, x, sr, &r);
+        for (size_t i = 0; i < plain.size(); ++i) plain[i] = 0.5f * (plain[i] + r[i]);
+    }
+    std::printf ("  energy 0/50/100: level %.1f / %.1f / %.1f dB, brightness %.4f / %.4f / %.4f\n",
+                 20.0 * std::log10 (rms[0]), 20.0 * std::log10 (rms[1]), 20.0 * std::log10 (rms[2]), bright[0], bright[1], bright[2]);
+    CHECK (rms[0] < rms[1] * 0.6 && rms[2] > rms[1] * 1.15);
+    CHECK (bright[0] < bright[1] && bright[2] > bright[1]);
+    double diff = 0.0;
+    for (size_t i = 0; i < plain.size(); ++i) diff = std::max (diff, (double) std::abs (plain[i] - neutral[i]));
+    CHECK (diff == 0.0);
+}
+
+TEST (subOctaveDoublesTheBasses)
+{
+    // Unison on C4: the basses sing C3. The oktavists add C2 under them, at the Sub-Octave
+    // level; they leave the basses' own note and head count alone. A children's choir has none.
+    const double sr = 48000.0;
+    const auto x = test::singMelody ({ { 60.0f, 2.0f, 0.3f } }, sr, Tenor, 0.0f);
+    struct Result { float c2, c3; int singers; };
+    auto run = [&] (float sub, Ensemble ens)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::Unison);
+        p.choirSize = 100.0f;
+        p.sections[Bass].solo = true;
+        p.subOctave = sub;
+        p.ensemble = ens;
+        eng.setParams (p);
+        Result res {};
+        std::vector<float> r;
+        auto l = runEngine (eng, x, sr, &r, [&] (int64_t) { res.singers = eng.takeSnapshot().sectionSingers[Bass]; });
+        for (size_t i = 0; i < l.size(); ++i) l[i] = 0.5f * (l[i] + r[i]);
+        res.c2 = bandDb (l, sr, 0.7, 1.9, 58.0f, 73.0f);    // C2 = 65.4 Hz
+        res.c3 = bandDb (l, sr, 0.7, 1.9, 120.0f, 142.0f);  // C3 = 130.8 Hz
+        return res;
+    };
+    const auto off = run (0.0f, Ensemble::Choir), half = run (50.0f, Ensemble::Choir), full = run (100.0f, Ensemble::Choir);
+    const auto kids = run (100.0f, Ensemble::Children), kidsOff = run (0.0f, Ensemble::Children);
+    std::printf ("  C2 band: off %.1f, 50%% %.1f, 100%% %.1f dB; C3 band: off %.1f, 100%% %.1f dB; basses %d / %d\n",
+                 off.c2, half.c2, full.c2, off.c3, full.c3, off.singers, full.singers);
+    std::printf ("  children: C2 band %.1f dB with sub-octave, %.1f without\n", kids.c2, kidsOff.c2);
+    CHECK (full.c2 > off.c2 + 15.0f);
+    CHECK (half.c2 > off.c2 + 9.0f && half.c2 < full.c2 - 3.0f);
+    // The basses still sing C3 as loud (the oktavists' own second harmonic adds to it), and
+    // the oktavists come up to around the basses' level (the synthesised vowels a little above
+    // it, the recorded voices a little under).
+    CHECK (full.c3 >= off.c3 - 1.0f);
+    CHECK (full.c2 > off.c3 - 8.0f && full.c2 < off.c3 + 6.0f);
+    CHECK (full.singers == off.singers);
+    CHECK (std::abs (kids.c2 - kidsOff.c2) < 1.0f);
+}
+
+TEST (leadStandsOnTheStage)
+{
+    // Your voice at the microphones is the dry input; on the stage it sits where it was put,
+    // further back sounds darker and more in the hall, and it is never late.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 60.0f, 1.5f, 0.2f } }, sr, Tenor, 20.0f);
+    const size_t noteEnd = x.size();
+    x.resize (x.size() + (size_t) (1.5 * sr), 0.0f);   // room for the hall's tail
+    auto run = [&] (bool onStage, float pan, float depth, float reverb)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        EngineParams p;
+        p.choirDb = -60.0f;
+        p.reverb = reverb;
+        p.glue = 0.0f;
+        p.leadOnStage = onStage;
+        p.leadPan = pan;
+        p.leadDepth = depth;
+        eng.setParams (p);
+        StageResult res;
+        res.l = runEngine (eng, x, sr, &res.r);
+        return res;
+    };
+    const auto atMics = run (false, 0.0f, 0.0f, 0.0f);
+    double err = 0.0;
+    for (size_t i = 0; i < x.size(); ++i)
+        err = std::max (err, (double) std::max (std::abs (atMics.l[i] - x[i]), std::abs (atMics.r[i] - x[i])));
+    CHECK (err < 1.0e-4);
+
+    const auto left = run (true, -0.8f, 0.1f, 0.0f), front = run (true, 0.0f, 0.0f, 0.0f), back = run (true, 0.0f, 0.9f, 0.0f);
+    const double pos = stereoPosition (left);
+    const int lag = lagOf (x, front.l, 200);
+    std::printf ("  on the stage: left %.2f, lag %d samples, brightness front %.4f back %.4f\n", pos, lag, brightness (front.l, sr), brightness (back.l, sr));
+    CHECK (pos < -0.4);
+    CHECK (lag == 0);
+    CHECK (brightness (back.l, sr) < brightness (front.l, sr));
+    CHECK (energy (back.l) < 0.7 * energy (front.l));
+
+    // In the hall: far more reverb than the lead's own send at the mics.
+    const auto dryHall = run (false, 0.0f, 0.0f, 65.0f), onHall = run (true, 0.0f, 0.5f, 65.0f);
+    const size_t tail = noteEnd + (size_t) (0.1 * sr);
+    const double tailMics = energy (dryHall.l, tail) + energy (dryHall.r, tail), tailStage = energy (onHall.l, tail) + energy (onHall.r, tail);
+    std::printf ("  hall tail: at the mics %.3g, on the stage %.3g\n", tailMics, tailStage);
+    CHECK (tailStage > 3.0 * tailMics);
+
+    // The LEAD ON STAGE stem: the take mixed alone, in time and in its place.
+    EngineParams p;
+    p.choirDb = -60.0f;
+    p.reverb = 0.0f;
+    p.glue = 0.0f;
+    p.leadOnStage = true;
+    p.leadPan = -0.8f;
+    p.leadDepth = 0.1f;
+    StageResult stem;
+    mixdownStemsStreaming (sr, (int64_t) x.size(), p, false, 0.5f,
+                           [] (int64_t, int len, float* const* ch) { for (int c = 0; c < NumSections * 2; ++c) std::fill (ch[c], ch[c] + len, 0.0f); },
+                           [&] (const float* l, const float* r, int len) { stem.l.insert (stem.l.end(), l, l + len); stem.r.insert (stem.r.end(), r, r + len); return true; },
+                           x.data(), (int64_t) x.size());
+    std::printf ("  lead stem: left %.2f, lag %d samples\n", stereoPosition (stem), lagOf (x, stem.l, 200));
+    CHECK (stereoPosition (stem) < -0.4);
+    CHECK (lagOf (x, stem.l, 200) == 0);
+}
+
 TEST (performanceBudget)
 {
     const double sr = 48000.0;

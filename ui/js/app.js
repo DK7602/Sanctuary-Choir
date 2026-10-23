@@ -36,7 +36,10 @@
     { icon: [1005, 888], level: [1055, 912, 139], wave: [987, 930, 207, 26], keys: [979, 960, 238, 49], range: [1095, 1012] },
   ];
 
-  const state = { info: {}, tab: "perform", meters: null, status: null, detectedKey: 0, detectedMinor: false, keyConfidence: 0, sections: [], built: false, lastSizeChange: 0, lastActivity: 0 };
+  const state = { info: {}, tab: "perform", meters: null, status: null, detectedKey: 0, detectedMinor: false, scaleType: 0, keyConfidence: 0, sections: [], built: false, lastSizeChange: 0, lastActivity: 0 };
+  // The Scale parameter's last choice is Auto (listen for major or minor); it is listed first.
+  const scaleAuto = () => { const d = Params.def("scale"); return !!d && Math.round(Params.get("scale")) === d.choices.length - 1; };
+  const scaleName = (type) => { const d = Params.def("scale"); return (d && d.choices[type]) || ""; };
 
   //==========================================================================
   // Stage scaling
@@ -407,6 +410,7 @@
         const canLock = () => Math.round(Params.get("key")) === 0 && state.keyConfidence >= 0.3;
         const lockKey = () => {
           Params.set("key", state.detectedKey + 1);
+          if (scaleAuto()) Params.set("scale", state.scaleType);   // and the scale it heard
           toast("Key locked to " + KEY_NAMES[state.detectedKey] + " " + (Params.format("scale") || "") + ". Choose Auto to let Sanctuary listen again.");
         };
         opts.action = () => ({ visible: canLock(), title: "Lock the detected key (" + KEY_NAMES[state.detectedKey] + ")", onClick: lockKey });
@@ -414,8 +418,13 @@
           if (canLock()) Menu.item(m, "LOCK TO " + KEY_NAMES[state.detectedKey] + " (DETECTED)", false, lockKey, "action");
         };
       }
+      if (el.dataset.param === "scale") {
+        opts.label = () => scaleAuto() ? { main: "Auto", extra: "\u00b7 " + (state.scaleType === 0 ? "Major" : scaleName(state.scaleType)) } : Params.format("scale");
+        opts.order = (() => { const n = Params.def("scale").choices.length; return [n - 1, ...Array.from({ length: n - 1 }, (_, i) => i)]; })();
+      }
       const dd = new Dropdown(el, opts);
       if (el.dataset.param === "key") state.keyDropdown = dd;
+      if (el.dataset.param === "scale") state.scaleDropdown = dd;
     });
     state.sections = SECTIONS.map((_, i) => new SectionPanel(i));
 
@@ -511,15 +520,17 @@
     $("medallion").style.setProperty("--glow", out.toFixed(3));
     $("sceneGlow").style.opacity = (out * 0.8).toFixed(3);
     const confident = (m.keyConfidence || 0) >= 0.3;
-    if (m.keyTonic !== state.detectedKey || m.keyMinor !== state.detectedMinor || confident !== (state.keyConfidence >= 0.3)) {
+    const scaleType = m.scaleType || 0;
+    if (m.keyTonic !== state.detectedKey || m.keyMinor !== state.detectedMinor || scaleType !== state.scaleType || confident !== (state.keyConfidence >= 0.3)) {
       state.detectedKey = m.keyTonic;
       state.detectedMinor = m.keyMinor;
+      state.scaleType = scaleType;
       state.keyConfidence = m.keyConfidence || 0;
       if (state.keyDropdown) state.keyDropdown.render();
+      if (state.scaleDropdown) state.scaleDropdown.render();
     }
     state.keyConfidence = m.keyConfidence || 0;
-    const scaleName = (Params.format("scale") || "").toUpperCase();
-    $("keyReadout").textContent = "KEY " + KEY_NAMES[m.keyTonic] + " " + scaleName;
+    $("keyReadout").textContent = "KEY " + KEY_NAMES[m.keyTonic] + " " + scaleName(scaleType).toUpperCase();
     // Following the band: its chord (with the bass note), marked BAND.
     const band = !!m.followingBand && !!m.bandChord;
     $("chordReadout").textContent = band ? "\u00b7  " + m.bandChord : (m.chord ? "\u00b7  " + m.chord : "");
@@ -578,11 +589,11 @@
   function buildDemoPlayer() {
     if (SC.isPlugin || $("previewPanel")) return;
     // [file, label, beats per second, Choir Size while it plays]
-    const demos = [["demo-input.mp3", "Solo voice", 2], ["demo-ah.mp3", "Recorded choir \u00b7 Ah", 2, 70], ["demo-gospel.mp3", "Gospel choir \u00b7 Words", 2, 45],
+    const demos = [["demo-input.mp3", "Solo voice", 2], ["demo-ah.mp3", "Recorded choir \u00b7 Ah", 2, 70], ["demo-massive.mp3", "Massive \u00b7 oktavists", 2, 70], ["demo-gospel.mp3", "Gospel choir \u00b7 Words", 2, 45],
                    ["demo-passes.mp3", "Words \u00b7 four passes", 2, 45], ["demo-gospel-plain.mp3", "Words \u00b7 your voice only", 2, 45], ["demo-kyrie.mp3", "Sung words \u00b7 Kyrie", 1.25, 80]];
     const panel = document.createElement("div");
     panel.id = "previewPanel";
-    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. "Four passes" is the same choir singing from the take and three more passes of it. "Your voice only" is the gospel choir with Real Voices at 0, every singer your own voice. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
+    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. "Four passes" is the same choir singing from the take and three more passes of it. "Your voice only" is the gospel choir with Real Voices at 0, every singer your own voice. "Massive" is the recorded choir with Energy at 90 and Sub-Octave at 80. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
     const row = panel.querySelector(".pp-demos");
     const audio = new Audio();
     audio.preload = "none";

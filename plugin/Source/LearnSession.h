@@ -99,15 +99,16 @@ public:
     //==============================================================================
     // Files to drag into the DAW (message thread)
 
-    enum class ExportItem { Midi, FullChoir, Sopranos, Altos, Tenors, Basses, AllStems };
+    enum class ExportItem { Midi, FullChoir, Sopranos, Altos, Tenors, Basses, AllStems, Room, LeadOnStage };
     /** The item's files, ready to drag. MIDI is written there and then; audio is empty while it
         still has to be written (prepareExport starts that) or the render is out of date. */
     juce::StringArray getExportFiles (ExportItem item);
-    /** Writes the audio files that are missing or out of date in the background (the room as
-        well, for saving to a folder). onDone gets the folder (also when nothing was needed), or
-        an invalid File if writing failed. automatic: asked by the page rather than the user, so
-        a write that failed (disk full) is not tried again until the user asks. */
-    void prepareExport (bool withRoom = false, std::function<void (juce::File)> onDone = {}, bool automatic = false);
+    /** Writes the audio files that are missing or out of date in the background: the sections,
+        the full choir, the room and your lead on the stage. onDone gets the folder (also when
+        nothing was needed), or an invalid File if writing failed. automatic: asked by the page
+        rather than the user, so a write that failed (disk full) is not tried again until the
+        user asks. */
+    void prepareExport (std::function<void (juce::File)> onDone = {}, bool automatic = false);
     /** Changes whenever the sound of the mix does (set by the processor). */
     std::function<juce::String()> getMixSignature;
     /** The tempo the song plays at now, for takes loaded from a file (set by the processor). */
@@ -227,8 +228,8 @@ private:
         int takeId = 0;
         juce::File folder;
         juce::StringArray sections;
-        juce::String sectionsSignature, fullSignature, roomSignature;   // the render and mix each was written with
-        juce::File full, room;
+        juce::String sectionsSignature, fullSignature, roomSignature, leadSignature;   // the render and mix each was written with
+        juce::File full, room, lead;
     };
     ExportFiles exported;
     juce::String exportFailedSignature;

@@ -536,3 +536,8 @@ html, body {
 .passes-canvas { display: block; margin-top: 8px; }
 .passes-how { flex: 1; padding: 10px 14px !important; }
 .passes-how p { font-size: 14.5px !important; line-height: 1.32 !important; margin: 0 !important; color: #b9a98d; }
+/* CHORDS & STEMS: which lines the lane shows */
+.lane-legend { display: flex; gap: 4px; margin-left: auto; }
+.lane-legend button { background: none; border: none; cursor: pointer; padding: 2px 6px; font: 700 10px Montserrat, sans-serif; letter-spacing: 1.6px; color: var(--c); text-shadow: 0 0 8px rgba(255, 210, 140, 0.25); }
+.lane-legend button.off { opacity: 0.32; text-decoration: line-through; }
+.lane-legend button:hover { filter: brightness(1.15); }

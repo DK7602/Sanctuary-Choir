@@ -44,7 +44,8 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--real-voices 100] [--pass FILE] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--real-voices 100] [--energy 50] [--sub 0] [--lead-stage X,D] [--pass FILE] [--synth-demo]\n"
+                              "  --scale also takes auto (major or minor, heard); --lead-stage puts your voice on the stage (X -1..1, D 0..1)\n", argv[0]);
         return 2;
     }
 
@@ -71,7 +72,19 @@ int main (int argc, char** argv)
         else if (a == "--harmony") p.harmonyMode = (HarmonyMode) indexOf (modes, next(), 0);
         else if (a == "--style") p.style = (Style) indexOf (styles, next(), 0);
         else if (a == "--key") p.key = indexOf (keys, next(), 0);
-        else if (a == "--scale") p.scale = (ScaleType) indexOf (scales, next(), 0);
+        else if (a == "--scale")
+        {
+            const std::string v = next();
+            p.scaleAuto = v == "auto";
+            p.scale = (ScaleType) indexOf (scales, v, 0);
+        }
+        else if (a == "--energy") p.energy = std::stof (next());
+        else if (a == "--sub") p.subOctave = std::stof (next());
+        else if (a == "--lead-stage")
+        {
+            float x = 0.0f, d = 0.0f;
+            if (std::sscanf (next().c_str(), "%f,%f", &x, &d) == 2) { p.leadOnStage = true; p.leadPan = x; p.leadDepth = d; }
+        }
         else if (a == "--size") p.choirSize = std::stof (next());
         else if (a == "--reverb") p.reverb = std::stof (next());
         else if (a == "--lead") p.leadDb = std::stof (next());
@@ -177,6 +190,7 @@ int main (int argc, char** argv)
         HarmonySettings hs;
         hs.key = p.key;
         hs.scale = p.scale;
+        hs.scaleAuto = p.scaleAuto;
         hs.mode = p.harmonyMode;
         hs.style = p.style;
         hs.wordsMode = p.vocalType == VocalType::Words;
@@ -227,8 +241,10 @@ int main (int argc, char** argv)
             return 1;
         }
         std::printf ("\n");
-        auto mix = mixdownStems (stems, p, false);
-        const float lead = p.leadDb <= -59.5f ? 0.0f : dbToGain (p.leadDb);
+        // On the stage your voice goes through the engine with the choir, in its place;
+        // otherwise it is added dry, as it was recorded.
+        auto mix = mixdownStems (stems, p, false, 4.0f, p.leadOnStage ? mono.data() : nullptr, p.leadOnStage ? n : 0);
+        const float lead = p.leadOnStage || p.leadDb <= -59.5f ? 0.0f : dbToGain (p.leadDb);
         for (int c = 0; c < 2; ++c)
             for (int64_t i = 0; i < n && i < (int64_t) mix[(size_t) c].size(); ++i)
                 mix[(size_t) c][(size_t) i] += lead * in.channels[(size_t) std::min<int> (c, (int) in.channels.size() - 1)][(size_t) i];

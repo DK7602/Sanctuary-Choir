@@ -80,6 +80,7 @@ static sc::HarmonySettings harmonySettingsFor (const sc::EngineParams& p)
     sc::HarmonySettings hs;
     hs.key = p.key;
     hs.scale = p.scale;
+    hs.scaleAuto = p.scaleAuto;
     hs.mode = p.harmonyMode;
     hs.style = p.style;
     for (int s = 0; s < sc::NumSections; ++s)
@@ -1009,6 +1010,51 @@ var LearnSession::getChordLane() const
         melody.add (var (no.release()));
     }
     o->setProperty ("melody", melody);
+
+    // The four parts as the choir sings them, a note held across events joined into one.
+    Array<var> parts;
+    for (int s = 0; s < sc::NumSections; ++s)
+    {
+        struct Held { int64_t start, end; int pitch; };
+        Array<var> list;
+        std::vector<Held> holding;
+        auto add = [&list] (const Held& h)
+        {
+            auto no = std::make_unique<DynamicObject>();
+            no->setProperty ("s", (int64) h.start);
+            no->setProperty ("e", (int64) h.end);
+            no->setProperty ("p", h.pitch);
+            list.add (var (no.release()));
+        };
+        const int64_t join = (int64_t) (0.03 * score.sampleRate);
+        for (const auto& e : score.events)
+        {
+            std::vector<Held> next;
+            for (int k = 0; k < e.voicing.count[(size_t) s]; ++k)
+            {
+                const int pitch = e.voicing.notes[(size_t) s][(size_t) k];
+                if (pitch < 0 || std::any_of (next.begin(), next.end(), [pitch] (const Held& h) { return h.pitch == pitch; }))
+                    continue;
+                auto it = std::find_if (holding.begin(), holding.end(), [&] (const Held& h) { return h.pitch == pitch && e.start - h.end <= join; });
+                if (it != holding.end())
+                {
+                    next.push_back ({ it->start, e.end, pitch });
+                    holding.erase (it);
+                }
+                else
+                {
+                    next.push_back ({ e.start, e.end, pitch });
+                }
+            }
+            for (const auto& h : holding)
+                add (h);
+            holding = std::move (next);
+        }
+        for (const auto& h : holding)
+            add (h);
+        parts.add (var (list));
+    }
+    o->setProperty ("parts", parts);
     return var (o.release());
 }
 
@@ -1109,10 +1155,18 @@ StringArray LearnSession::getExportFiles (ExportItem item)
     const String signature = String (owned->stems->id) + "|" + (getMixSignature ? getMixSignature() : String());
     const bool fullReady = exported.fullSignature == signature && exported.full.existsAsFile();
     const bool sectionsReady = exported.sectionsSignature == signature;
+    const bool roomReady = exported.roomSignature == signature && exported.room.existsAsFile();
+    const bool leadReady = exported.leadSignature == signature && exported.lead.existsAsFile();
     switch (item)
     {
         case ExportItem::FullChoir:
             if (fullReady) files.add (exported.full.getFullPathName());
+            break;
+        case ExportItem::Room:
+            if (roomReady) files.add (exported.room.getFullPathName());
+            break;
+        case ExportItem::LeadOnStage:
+            if (leadReady) files.add (exported.lead.getFullPathName());
             break;
         case ExportItem::Sopranos:
         case ExportItem::Altos:
@@ -1125,7 +1179,7 @@ StringArray LearnSession::getExportFiles (ExportItem item)
             break;
         }
         case ExportItem::AllStems:
-            if (! fullReady || ! sectionsReady)
+            if (! fullReady || ! sectionsReady || ! roomReady || ! leadReady)
                 break;
             for (const auto& f : exported.sections)
                 if (File (f).existsAsFile())
@@ -1133,7 +1187,7 @@ StringArray LearnSession::getExportFiles (ExportItem item)
             if (files.size() != sc::NumSections)
                 files.clear();
             else
-                files.add (exported.full.getFullPathName());
+                files.addArray ({ exported.room.getFullPathName(), exported.lead.getFullPathName(), exported.full.getFullPathName() });
             break;
         case ExportItem::Midi:
         default:
@@ -1142,7 +1196,7 @@ StringArray LearnSession::getExportFiles (ExportItem item)
     return files;
 }
 
-void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDone, bool automatic)
+void LearnSession::prepareExport (std::function<void (File)> onDone, bool automatic)
 {
     const bool fresh = owned != nullptr && owned->stems != nullptr && ! owned->stale.load();
     if (! fresh)
@@ -1154,10 +1208,10 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
     {
         // Busy: once this finishes, see what is still missing.
         auto previous = std::move (onExportDone);
-        onExportDone = [this, previous, withRoom, onDone, automatic]
+        onExportDone = [this, previous, onDone, automatic]
         {
             if (previous) previous();
-            prepareExport (withRoom, onDone, automatic);
+            prepareExport (onDone, automatic);
         };
         return;
     }
@@ -1172,8 +1226,9 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
     for (const auto& f : exported.sections)
         needSections = needSections || ! File (f).existsAsFile();
     const bool needFull = exported.fullSignature != signature || ! exported.full.existsAsFile();
-    const bool needRoom = withRoom && (exported.roomSignature != signature || ! exported.room.existsAsFile());
-    if (! needSections && ! needFull && ! needRoom)
+    const bool needRoom = exported.roomSignature != signature || ! exported.room.existsAsFile();
+    const bool needLead = exported.leadSignature != signature || ! exported.lead.existsAsFile();
+    if (! needSections && ! needFull && ! needRoom && ! needLead)
     {
         if (onDone) onDone (folder);
         return;
@@ -1198,6 +1253,12 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
         plan->roomSignature = signature;
         plan->room = folder.getNonexistentChildFile ("Sanctuary Choir - Room", ".wav", true);
     }
+    if (needLead)
+    {
+        plan->leadSignature = signature;
+        plan->lead = folder.getNonexistentChildFile ("Sanctuary Choir - Lead on Stage", ".wav", true);
+    }
+    const auto take = owned->take;
 
     const sc::EngineParams params = getParams ? getParams() : sc::EngineParams{};
     const double rate = owned->sampleRate;
@@ -1207,7 +1268,7 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
     auto ok = std::make_shared<bool> (true);
     exportCancel = false;
     exportDone = false;
-    exportWorker = std::make_unique<std::thread> ([this, plan, stems, params, rate, offset, ok, needSections, needFull, needRoom]
+    exportWorker = std::make_unique<std::thread> ([this, plan, stems, take, params, rate, offset, ok, needSections, needFull, needRoom, needLead]
     {
         const StemSet& st = *stems;
         auto readStems = [&st] (int64_t pos, int len, float* const* channels)
@@ -1216,12 +1277,13 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
                 for (int i = 0; i < len; ++i)
                     channels[ch][i] = pos + i < (int64_t) st.data[ch].size() ? (float) st.data[ch][(size_t) (pos + i)] * st.scale[ch] : 0.0f;
         };
-        auto mix = [&] (const File& file, const sc::EngineParams& p, bool roomOnly, float tail)
+        auto mix = [&] (const File& file, const sc::EngineParams& p, bool roomOnly, float tail, const std::vector<float>* lead = nullptr)
         {
             StereoWavWriter w;
             *ok = w.open (file, rate) && w.writeSilence (offset)
                   && sc::mixdownStemsStreaming (rate, st.length, p, roomOnly, tail, readStems,
-                                                [&] (const float* l, const float* r, int len) { return ! exportCancel.load() && w.write (l, r, len); })
+                                                [&] (const float* l, const float* r, int len) { return ! exportCancel.load() && w.write (l, r, len); },
+                                                lead != nullptr ? lead->data() : nullptr, lead != nullptr ? (int64_t) lead->size() : 0)
                   && w.close();
         };
         // Each section where it stands on the stage, through the mics, without the hall.
@@ -1240,6 +1302,14 @@ void LearnSession::prepareExport (bool withRoom, std::function<void (File)> onDo
             mix (plan->full, params, false, 4.0f);
         if (needRoom && *ok)
             mix (plan->room, params, true, 4.0f);
+        // Your voice alone, where it stands (at the mics or on the stage) and in the hall.
+        if (needLead && *ok && take != nullptr)
+        {
+            sc::EngineParams solo = params;
+            solo.choirDb = -60.0f;
+            solo.leadDb = 0.0f;
+            mix (plan->lead, solo, false, 4.0f, take.get());
+        }
         exportDone = true;
     });
 
@@ -1421,7 +1491,9 @@ String LearnSession::exportStateName() const
     if (signature == exportFailedSignature)
         return "failed";
     bool ready = exported.takeId == owned->takeId && exported.sectionsSignature == signature
-                 && exported.fullSignature == signature && exported.full.existsAsFile() && exported.sections.size() == sc::NumSections;
+                 && exported.fullSignature == signature && exported.full.existsAsFile() && exported.sections.size() == sc::NumSections
+                 && exported.roomSignature == signature && exported.room.existsAsFile()
+                 && exported.leadSignature == signature && exported.lead.existsAsFile();
     for (const auto& f : exported.sections)
         ready = ready && File (f).existsAsFile();
     return ready ? "ready" : "stale";

@@ -57,7 +57,9 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     perform->addChild (std::make_unique<APF> (pid (ParamIDs::presence), "Presence", NormalisableRange<float> (0.0f, 100.0f, 0.1f), 30.0f, percentAttrs()));
     perform->addChild (std::make_unique<APC> (pid (ParamIDs::harmonyMode), "Harmony Mode", toStringArray (sc::getHarmonyModeNames(), (int) sc::HarmonyMode::Count), 0));
     perform->addChild (std::make_unique<APC> (pid (ParamIDs::key), "Key", toStringArray (sc::getKeyNames(), 13), 0));
-    perform->addChild (std::make_unique<APC> (pid (ParamIDs::scale), "Scale", toStringArray (sc::getScaleNames(), (int) sc::ScaleType::Count), 0));
+    auto scales = toStringArray (sc::getScaleNames(), (int) sc::ScaleType::Count);
+    scales.add ("Auto");
+    perform->addChild (std::make_unique<APC> (pid (ParamIDs::scale), "Scale", scales, kScaleAuto));
     perform->addChild (std::make_unique<APC> (pid (ParamIDs::style), "Style", toStringArray (sc::getStyleNames(), (int) sc::Style::Count), 0));
     perform->addChild (std::make_unique<APC> (pid (ParamIDs::vocalType), "Vocal Type", toStringArray (sc::getVocalTypeNames(), (int) sc::VocalType::Count), 0));
     perform->addChild (std::make_unique<APB> (pid (ParamIDs::freeze), "Freeze", false));
@@ -99,6 +101,18 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     perform->addChild (std::make_unique<APF> (pid (ParamIDs::micClose), "Close Mics", NormalisableRange<float> (-60.0f, 6.0f, 0.1f, 2.2f), -60.0f, dbAttrs()));
     perform->addChild (std::make_unique<APF> (pid (ParamIDs::micTree), "Tree Mics", NormalisableRange<float> (-60.0f, 6.0f, 0.1f, 2.2f), 0.0f, dbAttrs()));
     perform->addChild (std::make_unique<APF> (pid (ParamIDs::micRoom), "Room Mics", NormalisableRange<float> (-60.0f, 6.0f, 0.1f, 2.2f), -60.0f, dbAttrs()));
+    perform->addChild (std::make_unique<APB> (pid (ParamIDs::leadOnStage), "Lead on Stage", false));
+    perform->addChild (std::make_unique<APF> (pid (ParamIDs::leadPan), "Lead Position", NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f,
+                                              AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+                                              {
+                                                  const int pct = roundToInt (std::abs (v) * 100.0f);
+                                                  return pct == 0 ? String ("C") : (v < 0.0f ? "L" : "R") + String (pct);
+                                              })));
+    perform->addChild (std::make_unique<APF> (pid (ParamIDs::leadDepth), "Lead Depth", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 0.0f,
+                                              AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+                                              {
+                                                  return v < 33.0f ? String ("Front") : (v < 67.0f ? String ("Middle") : String ("Back"));
+                                              })));
     layout.add (std::move (perform));
 
     // Mix -----------------------------------------------------------------
@@ -118,6 +132,17 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     mix->addChild (std::make_unique<APC> (pid (ParamIDs::singing), "Singing", toStringArray (sc::getSingingNames(), (int) sc::Singing::Count), 0));
     mix->addChild (std::make_unique<APF> (pid (ParamIDs::realVoices), "Real Voices", NormalisableRange<float> (0.0f, 150.0f, 1.0f), 100.0f, percentAttrs()));
     mix->addChild (std::make_unique<APF> (pid (ParamIDs::breath), "Breath", NormalisableRange<float> (0.0f, 200.0f, 1.0f), 100.0f, percentAttrs()));
+    mix->addChild (std::make_unique<APF> (pid (ParamIDs::energy), "Energy", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 50.0f,
+                                          AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction ([] (float v, int)
+                                          {
+                                              return v < 15.0f ? String ("Hushed") : v < 38.0f ? String ("Soft") : v < 63.0f ? String ("Natural")
+                                                   : v < 85.0f ? String ("Powerful") : String ("Massive");
+                                          })));
+    mix->addChild (std::make_unique<APF> (pid (ParamIDs::subOctave), "Sub-Octave", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 0.0f,
+                                          AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction ([] (float v, int)
+                                          {
+                                              return v < 0.5f ? String ("Off") : String (roundToInt (v)) + " %";
+                                          })));
     layout.add (std::move (mix));
 
     // FX ------------------------------------------------------------------
@@ -166,7 +191,7 @@ struct ParameterCache::Ptrs
 {
     std::atomic<float>* volume, *choirSize, *space, *reverb, *tone, *presence, *harmonyMode, *key, *scale, *style, *vocalType, *freeze, *response;
     std::atomic<float>* leadLevel, *choirLevel, *humanize, *vibrato, *glide, *formant, *pitchCorrection, *breath, *harmonySpeed, *singing, *realVoices;
-    std::atomic<float>* ensemble, *micClose, *micTree, *micRoom;
+    std::atomic<float>* ensemble, *micClose, *micTree, *micRoom, *leadOnStage, *leadPan, *leadDepth, *energy, *subOctave;
     std::atomic<float>* venue, *decay, *preDelay, *brightness, *leadReverb, *lowCut, *highCut, *warmth, *glue;
     std::atomic<float>* rhythmPattern, *rhythmRate, *rhythmLength, *rhythmDepth, *rhythmSections;
     std::atomic<float>* midiEnabled, *midiParts, *followBand, *tuning, *latencyMode;
@@ -189,6 +214,8 @@ ParameterCache::ParameterCache (AudioProcessorValueTreeState& state) : ptrs (std
     p.response = get (ParamIDs::response);
     p.ensemble = get (ParamIDs::ensemble);
     p.micClose = get (ParamIDs::micClose); p.micTree = get (ParamIDs::micTree); p.micRoom = get (ParamIDs::micRoom);
+    p.leadOnStage = get (ParamIDs::leadOnStage); p.leadPan = get (ParamIDs::leadPan); p.leadDepth = get (ParamIDs::leadDepth);
+    p.energy = get (ParamIDs::energy); p.subOctave = get (ParamIDs::subOctave);
     p.leadLevel = get (ParamIDs::leadLevel); p.choirLevel = get (ParamIDs::choirLevel); p.humanize = get (ParamIDs::humanize);
     p.vibrato = get (ParamIDs::vibrato); p.glide = get (ParamIDs::glide); p.formant = get (ParamIDs::formant);
     p.pitchCorrection = get (ParamIDs::pitchCorrection); p.breath = get (ParamIDs::breath);
@@ -228,7 +255,9 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.presence = f (p.presence);
     e.harmonyMode = (sc::HarmonyMode) jlimit (0, (int) sc::HarmonyMode::Count - 1, i (p.harmonyMode));
     e.key = jlimit (0, 12, i (p.key));
-    e.scale = (sc::ScaleType) jlimit (0, (int) sc::ScaleType::Count - 1, i (p.scale));
+    const int scale = jlimit (0, kScaleAuto, i (p.scale));
+    e.scaleAuto = scale == kScaleAuto;
+    e.scale = e.scaleAuto ? sc::ScaleType::Major : (sc::ScaleType) scale;
     e.style = (sc::Style) jlimit (0, (int) sc::Style::Count - 1, i (p.style));
     e.vocalType = (sc::VocalType) jlimit (0, (int) sc::VocalType::Count - 1, i (p.vocalType));
     e.freeze = f (p.freeze) > 0.5f;
@@ -239,6 +268,9 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.micCloseDb = f (p.micClose);
     e.micTreeDb = f (p.micTree);
     e.micRoomDb = f (p.micRoom);
+    e.leadOnStage = f (p.leadOnStage) > 0.5f;
+    e.leadPan = f (p.leadPan);
+    e.leadDepth = f (p.leadDepth) / 100.0f;
 
     for (int s = 0; s < sc::NumSections; ++s)
     {
@@ -263,6 +295,8 @@ void ParameterCache::fill (sc::EngineParams& e) const
     e.pitchCorrection = f (p.pitchCorrection);
     e.harmonySpeed = f (p.harmonySpeed);
     e.breath = f (p.breath);
+    e.energy = f (p.energy);
+    e.subOctave = f (p.subOctave);
 
     e.venue = (sc::Venue) jlimit (0, (int) sc::Venue::Count - 1, i (p.venue));
     e.decay = f (p.decay);
@@ -297,6 +331,6 @@ bool affectsRender (const String& id)
 {
     return affectsHarmony (id) || id == ParamIDs::response || id == ParamIDs::humanize || id == ParamIDs::vibrato || id == ParamIDs::glide
         || id == ParamIDs::formant || id == ParamIDs::pitchCorrection || id == ParamIDs::breath || id == ParamIDs::singing
-        || id == ParamIDs::realVoices;
+        || id == ParamIDs::realVoices || id == ParamIDs::energy || id == ParamIDs::subOctave;
 }
 } // namespace sanctuary

@@ -331,6 +331,31 @@ static void chordLaneAndDragOut()
         const auto* spans = lane.getProperty ("spans", {}).getArray();
         check (spans != nullptr && spans->size() >= 3, "the lane shows the chords");
         check (lane.getProperty ("melody", {}).getArray() != nullptr && lane.getProperty ("melody", {}).getArray()->size() >= 10, "and the melody");
+        // The four parts, each in order and in its range, sopranos above the basses.
+        {
+            const auto* parts = lane.getProperty ("parts", {}).getArray();
+            check (parts != nullptr && parts->size() == 4, "and the four parts");
+            bool ordered = parts != nullptr;
+            double top = 0, bottom = 0;
+            for (int s = 0; parts != nullptr && s < parts->size(); ++s)
+            {
+                const auto* notes = (*parts)[s].getArray();
+                ordered = ordered && notes != nullptr && notes->size() >= 4;
+                double sum = 0;
+                for (int k = 0; notes != nullptr && k < notes->size(); ++k)
+                {
+                    const auto& n = (*notes)[k];
+                    ordered = ordered && (int64) n.getProperty ("e", 0) > (int64) n.getProperty ("s", 0)
+                              && (k == 0 || (int64) n.getProperty ("s", 0) >= (int64) (*notes)[k - 1].getProperty ("s", 0));
+                    sum += (double) (int) n.getProperty ("p", 0);
+                }
+                const double mean = notes != nullptr && notes->size() > 0 ? sum / notes->size() : 0;
+                if (s == 0) top = mean;
+                if (s == 3) bottom = mean;
+            }
+            std::printf ("  parts: sopranos around %.1f, basses around %.1f\n", top, bottom);
+            check (ordered && top > bottom + 12.0, "each part's notes in order, the sopranos above the basses");
+        }
         check (std::abs ((double) lane.getProperty ("songStart", 0.0) - 2.0) < 0.02, "the take starts 2 s into the song");
         check ((int) lane.getProperty ("bar", 0) == 2 && (int) lane.getProperty ("beat", 0) == 1, "at bar 2");
         check ((bool) lane.getProperty ("editable", false), "chords can be chosen");
@@ -400,15 +425,27 @@ static void chordLaneAndDragOut()
         rig.session.prepareExport();
         check (waitFor (rig.session, [&] { return rig.session.getStatus().getProperty ("export", "").toString() == "ready"; }), "audio files ready");
         const auto all = rig.session.getExportFiles (LearnSession::ExportItem::AllStems);
-        check (all.size() == 5, "four sections and the full choir");
+        check (all.size() == 7, "four sections, the room, the lead on the stage and the full choir");
         bool silent = false;
-        const int64_t len = all.size() == 5 ? wavLength (File (all[0]), silent, songStart) : -1;
+        const int64_t len = all.size() == 7 ? wavLength (File (all[0]), silent, songStart) : -1;
         std::printf ("  %s: %lld samples\n", all.isEmpty() ? "-" : File (all[0]).getFileName().toRawUTF8(), (long long) len);
         check (len > songStart + (int64_t) (rate * 4.0), "a section file covers the song up to the end of the take");
         check (silent, "silent before the take, so it lines up when dropped at the song's start");
+        const auto room = rig.session.getExportFiles (LearnSession::ExportItem::Room);
+        const auto lead = rig.session.getExportFiles (LearnSession::ExportItem::LeadOnStage);
+        check (room.size() == 1 && lead.size() == 1, "the room and your lead on the stage, a file each");
+        bool leadSilent = false, roomSilent = false;
+        const int64_t leadLen = lead.size() == 1 ? wavLength (File (lead[0]), leadSilent, songStart) : -1;
+        const int64_t roomLen = room.size() == 1 ? wavLength (File (room[0]), roomSilent, songStart) : -1;
+        bool fullSilent = false;
+        const int64_t fullLen = all.size() == 7 ? wavLength (File (all[6]), fullSilent, songStart) : -1;
+        std::printf ("  lead %lld samples (silent before the take: %d), room %lld (%d), full choir %lld\n",
+                     (long long) leadLen, (int) leadSilent, (long long) roomLen, (int) roomSilent, (long long) fullLen);
+        check (leadLen == fullLen && leadSilent, "the lead lines up with the song like the choir");
+        check (roomLen == fullLen && roomSilent, "so does the room");
 
         // A mix change: a new full choir file; the files a DAW may already play stay as they were.
-        const File firstFull (all.size() == 5 ? all[4] : String());
+        const File firstFull (all.size() == 7 ? all[6] : String());
         rig.mixSignature = "mix 2";
         check (rig.session.getStatus().getProperty ("export", "").toString() == "stale", "the full choir is out of date after a mix change");
         check (rig.session.getExportFiles (LearnSession::ExportItem::Sopranos).isEmpty(), "the sections follow the mix too (they stand on the stage)");

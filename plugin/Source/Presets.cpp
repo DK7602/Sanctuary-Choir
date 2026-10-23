@@ -44,7 +44,7 @@ namespace
             p ("Christmas Carols",  { { harmonyMode, Full }, { style, Sacred }, { vocalType, Words }, { choirSize, 40 }, { space, 50 }, { reverb, 55 }, { presence, 30 }, { venue, Chapel } }),
             p ("Chamber Choir",     { { harmonyMode, Full }, { style, Chamber }, { vocalType, Words }, { choirSize, 25 }, { space, 45 }, { reverb, 40 }, { humanize, 70 }, { venue, Hall } }),
             p ("Evensong",          { { harmonyMode, Full }, { style, Sacred }, { vocalType, Oh }, { choirSize, 40 }, { space, 65 }, { reverb, 75 }, { vibrato, 70 }, { presence, 22 }, { venue, Abbey } }),
-            p ("Requiem",           { { harmonyMode, Full }, { style, Sacred }, { vocalType, Ah }, { choirSize, 85 }, { space, 80 }, { reverb, 80 }, { decay, 140 }, { tone, -3 }, { harmonySpeed, 30 }, { venue, Cathedral } }),
+            p ("Requiem",           { { harmonyMode, Full }, { style, Sacred }, { vocalType, Ah }, { choirSize, 85 }, { space, 80 }, { reverb, 80 }, { decay, 140 }, { tone, -3 }, { harmonySpeed, 30 }, { subOctave, 50 }, { venue, Cathedral } }),
             p ("Renaissance Motet", { { harmonyMode, Open }, { style, Chamber }, { vocalType, Oh }, { choirSize, 25 }, { space, 55 }, { reverb, 58 }, { humanize, 60 }, { vibrato, 40 }, { venue, Chapel } }),
             p ("Psalm Tone",        { { harmonyMode, Organum }, { style, Gregorian }, { vocalType, Ah }, { choirSize, 20 }, { space, 60 }, { reverb, 78 }, { decay, 120 }, { vibrato, 20 }, { venue, Abbey } }),
             // The stage and its microphones.
@@ -63,7 +63,7 @@ namespace
             p ("Unison Anthem",     { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Words }, { choirSize, 80 }, { space, 85 }, { reverb, 60 }, { glue, 40 }, { venue, Cathedral } }),
             p ("Big Room Worship",  { { harmonyMode, Full }, { style, Worship }, { vocalType, Words }, { choirSize, 80 }, { space, 85 }, { reverb, 55 }, { glue, 45 }, { harmonySpeed, 40 }, { venue, Hall } }),
             p ("Altar Call",        { { harmonyMode, Thirds }, { style, Worship }, { vocalType, Words }, { choirSize, 25 }, { space, 45 }, { reverb, 40 }, { presence, 45 }, { humanize, 80 }, { venue, Chapel } }),
-            p ("Prayer Room",       { { harmonyMode, Upper }, { style, Worship }, { vocalType, Mm }, { choirSize, 30 }, { space, 60 }, { reverb, 65 }, { presence, 15 }, { tone, -2 }, { venue, Chapel } }),
+            p ("Prayer Room",       { { harmonyMode, Upper }, { style, Worship }, { vocalType, Mm }, { choirSize, 30 }, { space, 60 }, { reverb, 65 }, { presence, 15 }, { tone, -2 }, { energy, 30 }, { venue, Chapel } }),
             p ("Worship Pad",       { { harmonyMode, Full }, { style, Worship }, { vocalType, Oo }, { choirSize, 45 }, { space, 70 }, { reverb, 70 }, { presence, 25 }, { harmonySpeed, 30 }, { venue, Hall } }),
             p ("Bridge Swell",      { { harmonyMode, Open }, { style, Worship }, { vocalType, Oh }, { choirSize, 70 }, { space, 80 }, { reverb, 68 }, { harmonySpeed, 35 }, { warmth, 20 }, { glue, 40 }, { venue, Hall } }),
         });
@@ -73,8 +73,8 @@ namespace
             p ("Sunday Gospel",     { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 45 }, { space, 55 }, { reverb, 32 }, { presence, 48 }, { glue, 45 }, { venue, GospelChurch } }),
             p ("Call & Response",   { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { response, 1 }, { choirSize, 40 }, { space, 60 }, { reverb, 38 }, { presence, 45 }, { glue, 40 }, { venue, GospelChurch } }),
             p ("Spiritual Echoes",  { { harmonyMode, Thirds }, { style, Spiritual }, { vocalType, Oh }, { choirSize, 40 }, { space, 60 }, { reverb, 62 }, { venue, Abbey } }),
-            p ("Mass Choir",        { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 100 }, { space, 70 }, { reverb, 40 }, { presence, 50 }, { glue, 50 }, { venue, GospelChurch } }),
-            p ("Praise Break",      { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 60 }, { space, 55 }, { reverb, 30 }, { presence, 55 }, { glue, 55 }, { harmonySpeed, 70 }, { warmth, 15 }, { venue, GospelChurch } }),
+            p ("Mass Choir",        { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 100 }, { space, 70 }, { reverb, 40 }, { presence, 50 }, { glue, 50 }, { energy, 80 }, { venue, GospelChurch } }),
+            p ("Praise Break",      { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 60 }, { space, 55 }, { reverb, 30 }, { presence, 55 }, { glue, 55 }, { harmonySpeed, 70 }, { warmth, 15 }, { energy, 90 }, { venue, GospelChurch } }),
             p ("Gospel Quartet",    { { harmonyMode, Full }, { style, Gospel }, { vocalType, Words }, { choirSize, 10 }, { space, 30 }, { reverb, 25 }, { presence, 50 }, { venue, Studio } }),
             p ("Sweet Hour",        { { harmonyMode, Thirds }, { style, Gospel }, { vocalType, Oo }, { choirSize, 35 }, { space, 50 }, { reverb, 45 }, { warmth, 20 }, { singing, Breathy }, { venue, GospelChurch } }),
             p ("Lining Out",        { { harmonyMode, Unison }, { style, Spiritual }, { vocalType, Words }, { response, 1 }, { ensemble, Congregation }, { choirSize, 60 }, { space, 60 }, { reverb, 42 }, { venue, Chapel } }),
@@ -82,7 +82,7 @@ namespace
 
         category = "Cinematic";
         add ({
-            p ("Epic Cinematic",    { { harmonyMode, Open }, { style, Cinematic }, { vocalType, Ah }, { choirSize, 100 }, { space, 90 }, { reverb, 72 }, { decay, 140 }, { tone, -2 }, { warmth, 25 }, { glue, 45 }, { venue, Cathedral } }),
+            p ("Epic Cinematic",    { { harmonyMode, Open }, { style, Cinematic }, { vocalType, Ah }, { choirSize, 100 }, { space, 90 }, { reverb, 72 }, { decay, 140 }, { tone, -2 }, { warmth, 25 }, { glue, 45 }, { energy, 80 }, { subOctave, 60 }, { venue, Cathedral } }),
             p ("Dark Ritual",       { { harmonyMode, Lower }, { style, Cinematic }, { vocalType, Oh }, { choirSize, 80 }, { space, 80 }, { reverb, 75 }, { decay, 160 }, { tone, -5 }, { presence, 20 }, { warmth, 30 }, { venue, Cathedral } }),
             p ("Ethereal Rise",     { { harmonyMode, Upper }, { style, Cinematic }, { vocalType, Oo }, { choirSize, 50 }, { space, 90 }, { reverb, 85 }, { brightness, 75 }, { singing, Breathy }, { venue, Cathedral } }),
             p ("Battle Hymn",       { { harmonyMode, Open }, { style, Cinematic }, { vocalType, Words }, { choirSize, 100 }, { space, 85 }, { reverb, 60 }, { presence, 50 }, { warmth, 30 }, { glue, 55 }, { venue, Hall } }),
@@ -142,9 +142,11 @@ namespace
 
     bool isPresetParam (const String& id)
     {
-        // Settings are global preferences, and the key belongs to the song: neither is part of a sound.
+        // Settings are global preferences, and the key and your own voice belong to the song:
+        // none of them is part of a sound.
         return id != ParamIDs::midiEnabled && id != ParamIDs::midiParts && id != ParamIDs::followBand && id != ParamIDs::tuning && id != ParamIDs::freeze
-            && id != ParamIDs::latencyMode && id != ParamIDs::key && id != ParamIDs::scale && id != ParamIDs::scene;
+            && id != ParamIDs::latencyMode && id != ParamIDs::key && id != ParamIDs::scale && id != ParamIDs::scene
+            && id != ParamIDs::leadOnStage && id != ParamIDs::leadPan && id != ParamIDs::leadDepth;
     }
 }
 

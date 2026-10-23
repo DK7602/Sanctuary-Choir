@@ -147,5 +147,12 @@ struct KeyEstimate { int tonic = 0; bool minor = false; float score = 0.0f; };
 KeyEstimate estimateKey (const std::array<float, 12>& histogram, bool restrictToMinor, bool restrictToMajor);
 /** How well a pitch-class histogram fits one key (higher is better; what estimateKey ranks by). */
 float keyFitness (const std::array<float, 12>& histogram, int tonic, bool minor);
+/** Correlation of a histogram with the major or minor key profile at a tonic (-1..1). */
+float keyCorrelation (const std::array<float, 12>& histogram, int tonic, bool minor);
+/** Scale Auto: the scale of a key heard as major or minor. A minor key is harmonic minor when
+    the raised seventh is sung clearly more than the lowered one, natural minor otherwise;
+    `current` (the scale in use) is kept when the two are close, so it doesn't flicker. */
+ScaleType autoScaleType (const std::array<float, 12>& histogram, int tonic, bool minor,
+                         ScaleType current = ScaleType::NaturalMinor);
 
 } // namespace sc

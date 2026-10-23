@@ -28,6 +28,10 @@ namespace ParamIDs
     inline constexpr const char* micClose = "micClose";
     inline constexpr const char* micTree = "micTree";
     inline constexpr const char* micRoom = "micRoom";
+    // ... and where your own voice stands
+    inline constexpr const char* leadOnStage = "leadOnStage";
+    inline constexpr const char* leadPan = "leadPan";
+    inline constexpr const char* leadDepth = "leadDepth";
     // Mix
     inline constexpr const char* leadLevel = "leadLevel";
     inline constexpr const char* choirLevel = "choirLevel";
@@ -40,6 +44,8 @@ namespace ParamIDs
     inline constexpr const char* breath = "breath";
     inline constexpr const char* singing = "singing";
     inline constexpr const char* realVoices = "realVoices";
+    inline constexpr const char* energy = "energy";
+    inline constexpr const char* subOctave = "subOctave";
     // FX
     inline constexpr const char* venue = "venue";
     inline constexpr const char* decay = "decay";
@@ -71,6 +77,9 @@ const char* sectionPrefix (int section);   // "sop", "alt", "ten", "bas"
 const char* sectionName (int section);     // "Soprano", ...
 
 juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+/** The Scale parameter's last choice, "Auto": listen for major or minor. It comes after the
+    scales so saved projects keep their scale. */
+constexpr int kScaleAuto = (int) sc::ScaleType::Count;
 
 /** Fast access to the raw parameter values for the audio thread. */
 class ParameterCache

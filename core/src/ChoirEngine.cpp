@@ -6,6 +6,9 @@
 namespace sc
 {
 static constexpr int kSingersPerSection = 20;
+// Sub-octave: the oktavists, basses an octave below the bass part, take the top bass places
+// (a full choir has at most 12 basses, and they get one oktavist for every two).
+static constexpr int kSubFirst = 14;
 static constexpr int kChunk = 64;
 static constexpr float kSampleGain = 1.37f;  // recorded notes are levelled to 0.1 RMS; this matches the synth choir
 static constexpr float kMinInputHz = 75.0f;
@@ -195,6 +198,7 @@ struct ChoirEngine::ControlFrame
 struct ChoirEngine::Singer
 {
     int section = 0, index = 0;
+    bool sub = false;            // an oktavist: sings the bass part an octave down
     bool active = false;
     float fade = 0.0f;
 
@@ -286,6 +290,7 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
             auto singer = std::make_unique<Singer>();
             singer->section = s;
             singer->index = i;
+            singer->sub = s == Bass && i >= kSubFirst;
             singer->psola.prepare (sr, kChunk, maxPeriod);
             singer->vowel.prepare (sr);
             singers.push_back (std::move (singer));
@@ -327,6 +332,10 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     for (int s = 0; s < NumSections; ++s)
         sectionGain[(size_t) s].prepare (sr, smoothS, 1.0f);
     stage.prepare (sr, kChunk);
+    leadStage.prepare (sr, kChunk);
+    leadPlace.prepare (sr, 0.05f, params.leadOnStage ? 1.0f : 0.0f);
+    leadPlacedL.assign (kChunk, 0.0f);
+    leadPlacedR.assign (kChunk, 0.0f);
 
     prepared = true;
     lastSingerTarget = -1;
@@ -379,6 +388,8 @@ void ChoirEngine::reset()
     lastSingerTarget = -1;
     tone.reset();
     stage.reset();
+    leadStage.reset();
+    subLevel = 0.0f;
     glue.reset();
     reverb.reset();
     limiter.reset();
@@ -497,10 +508,18 @@ int ChoirEngine::choirLatency() const noexcept
     return params.lowLatency && params.vocalType != VocalType::Words ? liveLatency : latency;
 }
 
+Singing ChoirEngine::singingLayer() const noexcept
+{
+    if (params.singing != Singing::Natural)
+        return params.singing;
+    const float energy = (params.energy - 50.0f) / 50.0f;
+    return energy >= 0.6f ? Singing::Belt : (energy <= -0.6f ? Singing::Breathy : Singing::Natural);
+}
+
 Scale ChoirEngine::currentScale() const
 {
     Scale s;
-    s.type = params.scale;
+    s.type = params.scaleAuto ? autoScale : params.scale;
     s.tonic = params.key > 0 ? (params.key - 1) % 12 : keyTonic;
     return s;
 }
@@ -519,6 +538,10 @@ void ChoirEngine::setParams (const EngineParams& in)
         fix (p.pitchCorrection, d.pitchCorrection); fix (p.breath, d.breath); fix (p.harmonySpeed, d.harmonySpeed);
         fix (p.realVoices, d.realVoices);
         p.realVoices = clampv (p.realVoices, 0.0f, 150.0f);
+        fix (p.energy, d.energy); fix (p.subOctave, d.subOctave);
+        p.energy = clampv (p.energy, 0.0f, 100.0f);
+        p.subOctave = clampv (p.subOctave, 0.0f, 100.0f);
+        fix (p.leadPan, d.leadPan); fix (p.leadDepth, d.leadDepth);
         fix (p.decay, d.decay); fix (p.preDelayMs, d.preDelayMs); fix (p.brightness, d.brightness);
         fix (p.leadReverb, d.leadReverb); fix (p.lowCutHz, d.lowCutHz); fix (p.highCutHz, d.highCutHz);
         fix (p.warmth, d.warmth); fix (p.glue, d.glue); fix (p.a4, d.a4);
@@ -585,10 +608,24 @@ void ChoirEngine::setParams (const EngineParams& in)
         default:
             break;
     }
+    // And how hard it sings (50 % leaves the style as it is): softer, airier and slower to
+    // speak below; pressed, brighter and louder above, pushing the choir bus at the very top.
+    const float energy = (p.energy - 50.0f) / 50.0f;
+    const float up = std::max (energy, 0.0f), down = std::max (-energy, 0.0f);
+    if (energy != 0.0f)
+    {
+        style.softness = clampv (style.softness + 0.25f * down - 0.3f * up, 0.0f, 1.0f);
+        style.breath *= 1.0f + 0.8f * down - 0.4f * up;
+        style.vibratoCents *= 1.0f + 0.25f * energy;
+        style.attackS *= 1.0f + 0.5f * down - 0.35f * up;
+        style.scoopCents *= 1.0f + 0.4f * up;
+        ens.drive = std::max (ens.drive, 0.35f * std::max (0.0f, 2.0f * up - 1.0f));
+    }
+    energyGain = dbToGain (3.0f * up - 7.0f * down);
 
     volume.setTarget (dbToGain (p.volumeDb));
     leadGain.setTarget (p.leadDb <= -59.5f ? 0.0f : dbToGain (p.leadDb));
-    choirGain.setTarget (p.choirDb <= -59.5f ? 0.0f : dbToGain (p.choirDb));
+    choirGain.setTarget (p.choirDb <= -59.5f ? 0.0f : dbToGain (p.choirDb) * energyGain);
     const float r = clampv (p.reverb / 100.0f, 0.0f, 1.0f);
     wetGain.setTarget (1.15f * std::pow (r, 1.2f));
     dryChoirGain.setTarget (p.wetOnly ? 0.0f : 1.0f - 0.45f * r);
@@ -615,6 +652,15 @@ void ChoirEngine::setParams (const EngineParams& in)
     stageSettings.room = mic (p.micRoomDb);
     stage.setSettings (stageSettings);
 
+    // Your voice on the stage: a narrow "section" of one, heard by the same mics. The other
+    // places stand at the back wall, so the lead itself is never delayed.
+    ChoirStage::Settings leadSettings = stageSettings;
+    for (auto& place : leadSettings.sections)
+        place = { 0.0f, 0.0f, 1.0f };
+    leadSettings.sections[0] = { clampv (p.leadPan, -1.0f, 1.0f), 0.04f, clampv (p.leadDepth, 0.0f, 1.0f) };
+    leadStage.setSettings (leadSettings);
+    leadPlace.setTarget (p.leadOnStage ? 1.0f : 0.0f);
+
     ChoirReverb::Settings rs;
     rs.venue = p.venue;
     rs.decayScale = clampv (p.decay / 100.0f, 0.3f, 2.5f);
@@ -625,7 +671,9 @@ void ChoirEngine::setParams (const EngineParams& in)
     if (prepared)
     {
         reverb.setSettings (rs);
-        tone.set (p.lowCutHz, p.highCutHz, p.toneDb, clampv (p.presence / 100.0f, 0.0f, 1.0f));
+        // Sub-Octave opens the Low Cut in proportion, or it would take the oktavists' notes away.
+        const float lowCut = p.lowCutHz * (1.0f - (ens.trebles ? 0.0f : 0.6f * clampv (p.subOctave / 100.0f, 0.0f, 1.0f)));
+        tone.set (lowCut, p.highCutHz, p.toneDb, clampv (p.presence / 100.0f + 0.2f * energy, 0.0f, 1.0f));
     }
 }
 
@@ -693,6 +741,7 @@ int ChoirEngine::formantSection (int section) const noexcept
 //==============================================================================
 void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
 {
+    s.sub = section == Bass && index >= kSubFirst;
     s.rng.reseed ((uint32_t) (section * 1000 + index * 7 + 17));
     s.rDetune = s.rng.gauss();
     s.rVibDepth = 0.6f + 0.8f * s.rng.uni();
@@ -741,10 +790,12 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
 void ChoirEngine::allocateSingers()
 {
     const int target = singersForChoirSize (params.choirSize);
-    if (target == lastSingerTarget && params.harmonyMode == lastAllocMode)
+    const bool subOn = params.subOctave > 0.0f && ! ens.trebles;
+    if (target == lastSingerTarget && params.harmonyMode == lastAllocMode && subOn == lastSubOn)
         return;
     lastSingerTarget = target;
     lastAllocMode = params.harmonyMode;
+    lastSubOn = subOn;
 
     std::array<bool, NumSections> activeSec { true, true, true, true };
     if (params.harmonyMode == HarmonyMode::UpperVoices) activeSec = { true, true, false, false };
@@ -786,12 +837,15 @@ void ChoirEngine::allocateSingers()
 
     for (int s = 0; s < NumSections; ++s)
     {
-        counts[(size_t) s] = std::min (counts[(size_t) s], kSingersPerSection);
+        counts[(size_t) s] = std::min (counts[(size_t) s], s == Bass ? kSubFirst : kSingersPerSection);
         sectionCount[(size_t) s] = counts[(size_t) s];
+        // The oktavists stand with the basses: one for every two (at least one).
+        const int subs = s == Bass && subOn && counts[(size_t) s] > 0
+                             ? std::min (kSingersPerSection - kSubFirst, std::max (1, (counts[(size_t) s] + 1) / 2)) : 0;
         for (int i = 0; i < kSingersPerSection; ++i)
         {
             Singer& singer = *singers[(size_t) (s * kSingersPerSection + i)];
-            const bool should = i < counts[(size_t) s];
+            const bool should = i < counts[(size_t) s] || (i >= kSubFirst && i < kSubFirst + subs);
             if (should && ! singer.active)
             {
                 if (singer.fade <= 0.0f)
@@ -799,7 +853,7 @@ void ChoirEngine::allocateSingers()
                     configureSinger (singer, s, i, counts[(size_t) s]);
                     singer.vowel.setFormants (getFormants (vowelForVocalType (params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType), formantSection (s)),
                                               singerFormant (singer) * ens.tract * std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f));
-                    singer.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s].range.centre(), params.a4), style.softness);
+                    singer.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s].range.centre() - (singer.sub ? 12 : 0), params.a4), style.softness);
                     singer.vowelOverride = -1;
                     const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f;
                     singer.delay = singer.pendingDelay = (int) (delayMs * 0.001f * (float) sr);
@@ -934,7 +988,7 @@ void ChoirEngine::setSingerVowel (Singer& s, VocalType vt)
 {
     const float shift = std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f);
     s.vowel.setFormants (getFormants (vowelForVocalType (vt), formantSection (s.section)), singerFormant (s) * ens.tract * shift);
-    s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre(), params.a4), style.softness);
+    s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre() - (s.sub ? 12 : 0), params.a4), style.softness);
 }
 
 void ChoirEngine::refreshVowelFormants()
@@ -946,7 +1000,7 @@ void ChoirEngine::refreshVowelFormants()
     {
         Singer& s = *sp;
         s.vowel.setFormants (getFormants (v, formantSection (s.section)), singerFormant (s) * ens.tract * shift);
-        s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre(), params.a4), style.softness);
+        s.vowel.normalise (glottal, midiToHz (params.sections[(size_t) s.section].range.centre() - (s.sub ? 12 : 0), params.a4), style.softness);
         s.vowelOverride = -1;
     }
 }
@@ -964,17 +1018,23 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     // The band's chord, if the choir follows it.
     const Chord* band = params.followBand && bandDetector.hearing() ? bandDetector.chord() : nullptr;
 
-    if (params.key == 0)
+    if (params.key == 0 || params.scaleAuto)
     {
         if (g.voiced)
             keyTracker.addNote ((int) std::lround (g.midi), hop, g.clarity);
         if (band != nullptr)   // the band's chords say a lot about the key too
             for (int i = 0; i < band->numTones; ++i)
                 keyTracker.addNote (band->tones[(size_t) i], hop, i == 0 ? 0.5f : 0.3f);
-        const bool minorFamily = Scale { 0, params.scale }.isMinorFamily();
-        keyTonic = keyTracker.update (hop, minorFamily);
+        // Scale Auto listens for major or minor too (only that, when the key is set by hand).
+        const KeyFamily family = params.scaleAuto ? KeyFamily::Either
+                                 : (Scale { 0, params.scale }.isMinorFamily() ? KeyFamily::Minor : KeyFamily::Major);
+        const int tonic = keyTracker.update (hop, family, params.key > 0 ? (params.key - 1) % 12 : -1);
+        if (params.key == 0)
+            keyTonic = tonic;
+        if (params.scaleAuto)
+            autoScale = autoScaleType (keyTracker.getHistogram(), tonic, keyTracker.isMinor(), autoScale);
         if (keyTracker.getConfidence() >= 0.35f)
-            detectedKey.store (keyTonic + (minorFamily ? 12 : 0), std::memory_order_relaxed);
+            detectedKey.store (tonic + (keyTracker.isMinor() ? 12 : 0), std::memory_order_relaxed);
     }
 
     const Scale scale = currentScale();
@@ -1164,7 +1224,9 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
 
     const int sec = s.section;
     const int cnt = cf.voicing.count[(size_t) sec];
-    const int note = cnt > 0 ? cf.voicing.notes[(size_t) sec][(size_t) (s.index % cnt)] : -1;
+    int note = cnt > 0 ? cf.voicing.notes[(size_t) sec][(size_t) (s.index % cnt)] : -1;
+    if (s.sub && note >= 0)
+        note -= 12;
     const bool singing = cf.sounding && note >= 0;
 
     if (note >= 0 && (float) note != s.targetMidi)
@@ -1312,6 +1374,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
     {
         keyTracker.seed (seed % 12, seed >= 12, 3.0f);
         keyTonic = seed % 12;
+        autoScale = seed >= 12 ? ScaleType::NaturalMinor : ScaleType::Major;
     }
 
     // Passes added or taken away: start the new ones from here, and spread the singers again.
@@ -1332,7 +1395,8 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
 
     // Reconfigure on parameter changes that affect the singers.
     allocateSingers();
-    const bool styleChanged = params.style != lastStyle || params.ensemble != lastEnsemble || params.singing != lastSinging;
+    const bool styleChanged = params.style != lastStyle || params.ensemble != lastEnsemble || params.singing != lastSinging
+                              || params.energy != lastEnergy;
     if (params.vocalType != lastVocal || params.formant != lastFormantParam || styleChanged)
     {
         lastVocal = params.vocalType;
@@ -1355,6 +1419,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         lastStyle = params.style;
         lastEnsemble = params.ensemble;
         lastSinging = params.singing;
+        lastEnergy = params.energy;
         for (auto& sp : singers)
         {
             const float delayMs = sp->rDelay * style.timingMs * params.humanize / 100.0f;
@@ -1545,7 +1610,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         {
             const VocalType vt = words ? VocalType::Ah : params.vocalType;
             for (int s = 0; s < NumSections; ++s)
-                sampleLayers[(size_t) s] = sampleSet->layerFor (formantSection (s), vt, params.singing);
+                sampleLayers[(size_t) s] = sampleSet->layerFor (formantSection (s), vt, singingLayer());
         }
 
         // Section level by head count, eased so singers joining or leaving don't step the level
@@ -1566,6 +1631,11 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             cur += (target - cur) * normK;
             normTo[(size_t) s] = cur;
         }
+        // The oktavists' level (Sub-Octave), eased the same way: at the top of the knob a few dB
+        // under the basses they sing under (an octave down, the ear hears them less).
+        const float subFrom = subLevel;
+        subLevel += (1.8f * clampv (params.subOctave / 100.0f, 0.0f, 1.0f) - subLevel) * normK;
+        const float subTo = subLevel;
 
         // Into the section bus: fade (joining/leaving), section level and echo hand-over, each
         // ramped over the chunk, and the singer's place in the section.
@@ -1660,7 +1730,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                     a0 = LyricScript::at (*entry, age, s.ending);
                     a1 = LyricScript::at (*entry, age + dt, s.ending);
                     if (sampleSet != nullptr)
-                        layer = sampleSet->layerFor (formantSection (s.section), entry->vowel, params.singing);
+                        layer = sampleSet->layerFor (formantSection (s.section), entry->vowel, singingLayer());
                     if (s.vowelOverride != (int) entry->vowel)
                     {
                         setSingerVowel (s, entry->vowel);
@@ -1693,8 +1763,8 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 s.gate = 0.0f;
             }
 
-            const float gFrom = normFrom[(size_t) s.section] * fadeStart * duckFrom;
-            const float gTo = normTo[(size_t) s.section] * fadeEnd * duckTo;
+            const float gFrom = normFrom[(size_t) s.section] * fadeStart * duckFrom * (s.sub ? subFrom : 1.0f);
+            const float gTo = normTo[(size_t) s.section] * fadeEnd * duckTo * (s.sub ? subTo : 1.0f);
             if (printed)
             {
                 std::copy (scratch.begin(), scratch.begin() + c, waitBuf[numWaiting]);
@@ -1778,19 +1848,40 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
     // much of the hall comes back (the room pair far more than the spot mics).
     const float wet = wetGain.advance (c) * stage.reverbAmount();
     const float revScale = stage.reverbInputScale();
+
+    // Your voice: at the microphones it stays dry and up front with its own reverb send; on
+    // the stage it stands where it was put, heard by the mics and in the hall like the choir.
+    const float placeFrom = leadPlace.current, placeTo = leadPlace.advance (c);
+    const bool placed = placeFrom > 1.0e-4f || placeTo > 1.0e-4f;
+    if (placed)
+    {
+        leadStage.begin (c);
+        leadStage.addSection (0, leadL, leadR, c);
+        leadStage.mix (leadPlacedL.data(), leadPlacedR.data(), c);
+    }
+    const float placeInc = (placeTo - placeFrom) / (float) c;
     for (int i = 0; i < c; ++i)
     {
         choirL[(size_t) i] *= cg;
         choirR[(size_t) i] *= cg;
-        revInL[(size_t) i] = choirL[(size_t) i] * revScale + leadL[i] * ls;
-        revInR[(size_t) i] = choirR[(size_t) i] * revScale + leadR[i] * ls;
+        revInL[(size_t) i] = choirL[(size_t) i] * revScale;
+        revInR[(size_t) i] = choirR[(size_t) i] * revScale;
+        const float on = placed ? placeFrom + placeInc * (float) (i + 1) : 0.0f;
+        const float pl = placed ? leadPlacedL[(size_t) i] * lg * on : 0.0f, pr = placed ? leadPlacedR[(size_t) i] * lg * on : 0.0f;
+        leadL[i] *= 1.0f - on;
+        leadR[i] *= 1.0f - on;
+        revInL[(size_t) i] += leadL[i] * ls + pl * revScale;
+        revInR[(size_t) i] += leadR[i] * ls + pr * revScale;
+        leadPlacedL[(size_t) i] = pl;
+        leadPlacedR[(size_t) i] = pr;
     }
     reverb.process (revInL.data(), revInR.data(), revOutL.data(), revOutR.data(), c);
 
     for (int i = 0; i < c; ++i)
     {
-        float l = (leadL[i] * lg + choirL[(size_t) i] * dry + revOutL[(size_t) i] * wet) * vol;
-        float r = (leadR[i] * lg + choirR[(size_t) i] * dry + revOutR[(size_t) i] * wet) * vol;
+        const float pl = placed ? leadPlacedL[(size_t) i] * dry : 0.0f, pr = placed ? leadPlacedR[(size_t) i] * dry : 0.0f;
+        float l = (leadL[i] * lg + pl + choirL[(size_t) i] * dry + revOutL[(size_t) i] * wet) * vol;
+        float r = (leadR[i] * lg + pr + choirR[(size_t) i] * dry + revOutR[(size_t) i] * wet) * vol;
         outL[i] = l;
         if (outR != nullptr) outR[i] = r;
         else outL[i] = 0.5f * (l + r);
@@ -1865,6 +1956,7 @@ void ChoirEngine::publishSnapshot()
     snap.leadNote = cf.leadNote;
     const Scale scale = currentScale();
     snap.keyTonic = scale.tonic;
+    snap.scaleType = (int) scale.type;
     snap.keyMinor = scale.isMinorFamily();
     snap.keyConfidence = params.key == 0 ? keyTracker.getConfidence() : 1.0f;
     const std::string& name = harmonizer.getChord().name;

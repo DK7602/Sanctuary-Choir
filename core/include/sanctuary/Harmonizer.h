@@ -93,6 +93,9 @@ private:
     Style vocabStyle = Style::Count;
 };
 
+/** Which keys key detection may choose from: major ones, minor ones, or either (Scale Auto). */
+enum class KeyFamily { Major, Minor, Either };
+
 /** Running key detection from sung notes. */
 class KeyTracker
 {
@@ -101,9 +104,13 @@ public:
     /** Start from a known key (e.g. the one detected last time this project played). */
     void seed (int tonic, bool minor, float weight);
     void addNote (int midiNote, float seconds, float weight);
-    /** Re-estimates occasionally; returns the current tonic for the requested scale family. */
-    int update (float seconds, bool minorFamily);
+    /** Re-estimates occasionally; returns the current tonic. With a fixedTonic (0..11, the key
+        set by hand) only major or minor is decided. */
+    int update (float seconds, KeyFamily family, int fixedTonic = -1);
+    int update (float seconds, bool minorFamily) { return update (seconds, minorFamily ? KeyFamily::Minor : KeyFamily::Major); }
     int getTonic() const noexcept { return tonic; }
+    /** Whether the current key is minor (always the family asked for, unless Either). */
+    bool isMinor() const noexcept { return minor; }
     float getConfidence() const noexcept { return confidence; }
     const std::array<float, 12>& getHistogram() const noexcept { return hist; }
 
@@ -111,6 +118,8 @@ private:
     std::array<float, 12> hist {};
     float sinceEstimate = 0.0f, totalWeight = 0.0f, confidence = 0.0f;
     int tonic = 0, pending = -1, pendingCount = 0;
-    bool lastFamilyMinor = false;
+    bool minor = false;
+    KeyFamily lastFamily = KeyFamily::Major;
+    int lastFixed = -1;
 };
 } // namespace sc

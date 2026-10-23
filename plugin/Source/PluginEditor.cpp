@@ -199,6 +199,7 @@ void SanctuaryEditor::sendMeters()
     o->setProperty ("leadNote", snap.leadNote);
     o->setProperty ("keyTonic", snap.keyTonic);
     o->setProperty ("keyMinor", snap.keyMinor);
+    o->setProperty ("scaleType", snap.scaleType);
     o->setProperty ("keyConfidence", snap.keyConfidence);
     o->setProperty ("chord", String (snap.chordName));
     o->setProperty ("in", snap.inputPeak);
@@ -285,7 +286,7 @@ void SanctuaryEditor::dragOut (const String& itemName)
     using Item = LearnSession::ExportItem;
     static const std::pair<const char*, Item> items[] = {
         { "midi", Item::Midi }, { "full", Item::FullChoir }, { "sop", Item::Sopranos }, { "alt", Item::Altos },
-        { "ten", Item::Tenors }, { "bas", Item::Basses }, { "all", Item::AllStems } };
+        { "ten", Item::Tenors }, { "bas", Item::Basses }, { "all", Item::AllStems }, { "room", Item::Room }, { "lead", Item::LeadOnStage } };
     auto it = std::find_if (std::begin (items), std::end (items), [&] (const auto& p) { return itemName == p.first; });
     SafePointer<SanctuaryEditor> safe (this);
     auto done = [safe] { if (safe != nullptr) safe->web->emitEventIfBrowserIsVisible ("dragDone", var()); };
@@ -446,7 +447,8 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
     }
     else if (name == "export")
     {
-        // Save to a folder: the audio of the rendered choir (and its room) plus the MIDI.
+        // Save to a folder: the audio of the rendered choir (its sections, room and your lead on
+        // the stage too) plus the MIDI.
         if (! learn.hasTake())
         {
             toast ("Learn or load a take first");
@@ -463,7 +465,7 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
         }
         toast ("Saving the stems...");
         SafePointer<SanctuaryEditor> safe (this);
-        learn.prepareExport (true, [safe] (File folder)
+        learn.prepareExport ([safe] (File folder)
         {
             if (folder.isDirectory())
                 folder.revealToUser();
@@ -472,7 +474,7 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
         });
     }
     else if (name == "exportPrepare")
-        learn.prepareExport (false, {}, true);
+        learn.prepareExport ({}, true);
     else if (name == "dragOut")
         dragOut (message.getProperty ("item", "").toString());
     else if (name == "lane")

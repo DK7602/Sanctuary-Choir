@@ -10,6 +10,8 @@
     { prefix: "bas", name: "BASS", color: "#7fe2c6", glow: "rgba(127,226,198,0.55)" },
   ];
 
+  const hexA = (h, a) => { const n = parseInt(h.slice(1), 16); return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; };
+
   const el = (tag, cls, parent, text) => {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -113,10 +115,12 @@
     ]);
     const knobs = el("div", "knob-row", bottom);
     const tips = {
+      energy: "How hard the choir sings: hushed and airy at the bottom, powerful and pressed at the top (the recorded voices switch to their breathy or belted takes at the ends). The middle leaves the style as it is.",
+      subOctave: "Basses doubled an octave below (oktavists): weight under the choir, like a Russian or gospel choir's low basses. Off at 0.",
       harmonySpeed: "How readily the choir changes chord. Low holds chords through passing notes; high gives every note its own chord.",
       realVoices: "Words mode: each singer takes on the voice of one of 19 real singers (vocal tract, tone and vibrato), so the choir sounds like different people. 0: every singer is your own voice.",
     };
-    [["humanize", "HUMANIZE"], ["vibrato", "VIBRATO"], ["glide", "GLIDE"], ["formant", "FORMANT"], ["pitchCorrection", "PITCH LOCK"], ["breath", "BREATH"], ["realVoices", "REAL VOICES"], ["harmonySpeed", "CHORD SPEED"]]
+    [["energy", "ENERGY"], ["subOctave", "SUB-OCTAVE"], ["humanize", "HUMANIZE"], ["vibrato", "VIBRATO"], ["glide", "GLIDE"], ["formant", "FORMANT"], ["pitchCorrection", "PITCH LOCK"], ["breath", "BREATH"], ["realVoices", "REAL VOICES"], ["harmonySpeed", "CHORD SPEED"]]
       .forEach(([id, label]) => {
         const k = new MiniKnob(knobs, id, label, { bipolar: id === "formant" });
         if (tips[id] && k.el) k.el.title = tips[id];
@@ -401,6 +405,15 @@
 
     const head = el("div", "take-head", page);
     const headText = el("p", "", head);
+    // Which lines the lane shows: the melody and the four parts (click one to hide or show it).
+    const legend = el("div", "lane-legend", head);
+    const shown = { melody: true, 0: true, 1: true, 2: true, 3: true };
+    [["melody", "MELODY", "#fff1d2"], ...SECTIONS.map((s, i) => [i, s.name, s.color])].forEach(([key, name, color]) => {
+      const b = el("button", "", legend, name);
+      b.style.setProperty("--c", color);
+      b.title = "Show or hide the " + name.toLowerCase() + (key === "melody" ? " (as you sang it)" : " part");
+      b.addEventListener("click", () => { shown[key] = !shown[key]; b.classList.toggle("off", !shown[key]); drawLane(); });
+    });
     const headBtns = el("div", "pill-row", head);
     const preview = el("button", "pill", headBtns, "▶ PREVIEW");
     preview.title = "Play the take through the choir";
@@ -425,7 +438,7 @@
     el("h3", "", dragHead, "DRAG INTO YOUR DAW").style.margin = "0";
     const dragText = el("p", "drag-text", dragHead);
     const save = el("button", "pill", dragHead, "SAVE TO FOLDER");
-    save.title = "Save the MIDI and the audio (with the room) to a folder";
+    save.title = "Save the MIDI and the audio (the sections, the room and your lead on the stage) to a folder";
     save.addEventListener("click", () => SC.send({ type: "cmd", name: "export" }));
     const chips = el("div", "drag-row", drag);
 
@@ -463,12 +476,14 @@
       if (press) press.chip.classList.remove("dragging");
       press = null;
     });
-    const midiChip = chip("MIDI · PARTS & CHORDS", "midi", "Soprano, alto, tenor and bass (channels 1–4), the melody and the chords with their names", "#e8c98a", false);
+    const midiChip = chip("MIDI", "midi", "MIDI: soprano, alto, tenor and bass (channels 1–4), the melody and the chords with their names", "#e8c98a", false);
     const audioChips = [
       chip("FULL CHOIR", "full", "The whole choir as you hear it, with the room", "#f3e9d7", true),
       ...SECTIONS.map((s, i) => chip(["SOPRANOS", "ALTOS", "TENORS", "BASSES"][i], ["sop", "alt", "ten", "bas"][i],
                                      ["Sopranos", "Altos", "Tenors", "Basses"][i] + " on their own, where they stand on the stage (without the hall)", s.color, true)),
-      chip("ALL STEMS", "all", "The four sections and the full choir at once", "#e8c98a", true),
+      chip("ROOM", "room", "The hall alone: the choir's reverb, to mix under the sections", "#c9b28a", true),
+      chip("LEAD ON STAGE", "lead", "Your own voice where it stands (at the mics or on the stage), with its reverb", "#ffe7b0", true),
+      chip("ALL STEMS", "all", "The four sections, the room, your lead on the stage and the full choir at once", "#e8c98a", true),
     ];
 
     let lane = null, pxPerSec = 40, learn = {}, lastExportAsk = 0;
@@ -526,23 +541,28 @@
         b.addEventListener("click", () => openOptions(sp, b));
       });
 
-      // The melody under the chords.
+      // The melody and the four parts under the chords.
       const h = 92;
       const ctx = hiDpiCanvas(melodyCanvas, width, h);
       melodyCanvas.style.width = width + "px";
       melodyCanvas.style.height = h + "px";
       const notes = lane.melody || [];
-      if (notes.length) {
-        let lo = Math.min(...notes.map((n) => n.p)) - 2, hi = Math.max(...notes.map((n) => n.p)) + 2;
+      const parts = (lane.parts || []).map((list, i) => (shown[i] ? list || [] : []));
+      const all = (shown.melody ? notes : []).concat(...parts);
+      if (all.length) {
+        let lo = Math.min(...all.map((n) => n.p)) - 1, hi = Math.max(...all.map((n) => n.p)) + 1;
         if (hi - lo < 12) { const mid = (hi + lo) / 2; lo = mid - 6; hi = mid + 6; }
-        notes.forEach((n) => {
+        const draw = (n, height, fill, glow) => {
           const x = n.s / lane.rate * pxPerSec, w = Math.max(2, (n.e - n.s) / lane.rate * pxPerSec - 1);
           const y = (1 - (n.p - lo) / (hi - lo)) * (h - 8) + 2;
-          ctx.fillStyle = "rgba(255, 226, 168, 0.85)";
-          ctx.shadowColor = "rgba(255, 200, 120, 0.6)";
+          ctx.fillStyle = fill;
+          ctx.shadowColor = glow;
           ctx.shadowBlur = 4;
-          ctx.fillRect(x, y, w, 4);
-        });
+          ctx.fillRect(x, y, w, height);
+        };
+        parts.forEach((list, i) => list.forEach((n) => draw(n, 3, hexA(SECTIONS[i].color, 0.8), hexA(SECTIONS[i].color, 0.45))));
+        if (shown.melody)
+          notes.forEach((n) => draw(n, 4, "rgba(255, 241, 210, 0.95)", "rgba(255, 200, 120, 0.7)"));
       }
       movePlayhead();
     }
@@ -676,7 +696,7 @@
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
     const hint = el("p", "stage-hint", left);
-    hint.innerHTML = "<b>Drag</b> a section to move it; drag its <b>edges</b> to make it wider or narrower. Further back sounds further away. <b>Space</b> on the main page makes the whole stage wider or narrower.";
+    hint.title = "Space on the main page makes the whole stage wider or narrower.";
 
     // Geometry: a fan-shaped loft seen from above, the conductor (and the tree) at the bottom.
     const cx = W / 2, cy = H + 40, r0 = 125, r1 = 318, thetaMax = 1.02;
@@ -691,6 +711,28 @@
     const ROW = 0.16;   // a section's depth on the risers
     let singers = [0, 0, 0, 0];
     const place = (s) => ({ x: Params.get(pos(s) + "Pan") || 0, w: (Params.get(pos(s) + "Width") || 0) / 100, d: (Params.get(pos(s) + "Depth") || 0) / 100 });
+    // Your own voice: at the microphones (beside the tree) or standing on the stage.
+    const [treeX, treeY] = toXY(0, -0.25);
+    const lead = () => ({ on: Params.get("leadOnStage") > 0.5, x: Params.get("leadPan") || 0, d: (Params.get("leadDepth") || 0) / 100 });
+    const leadXY = () => { const l = lead(); return l.on ? toXY(l.x, l.d) : [treeX + 64, treeY + 2]; };
+    const LEAD_IDS = ["leadOnStage", "leadPan", "leadDepth"];
+    const setLead = (on, x, d) => {
+      LEAD_IDS.forEach((id) => Params.begin(id));
+      Params.set("leadOnStage", on ? 1 : 0);
+      if (x !== undefined) { Params.set("leadPan", x); Params.set("leadDepth", d); }
+      LEAD_IDS.forEach((id) => Params.end(id));
+    };
+    function describeLead() {
+      const l = lead();
+      const sections = "<b>Drag</b> a section to move it, its <b>edges</b> to widen it; further back sounds further away. ";
+      if (!l.on) {
+        hint.innerHTML = sections + "Drag <b>YOU</b> (your own voice) from the mics onto the stage to sing from there, in the hall.";
+        return;
+      }
+      const side = Math.abs(l.x) < 0.15 ? "centre" : l.x < 0 ? "left" : "right";
+      const row = l.d < 0.33 ? "front" : l.d < 0.67 ? "middle" : "back";
+      hint.innerHTML = sections + "<b>YOU</b> sing from the stage, " + row + " " + side + ": <b>double-click</b> to go back to the mics.";
+    }
 
     function sector(c, x0, x1, d0, d1) {
       const a0 = x0 * thetaMax - Math.PI / 2, a1 = x1 * thetaMax - Math.PI / 2;
@@ -772,6 +814,29 @@
       c.fillStyle = room ? "#ffe7b0" : "rgba(216, 200, 168, 0.4)";
       c.fillText("ROOM", 34, H - 12);
       c.fillText("ROOM", W - 34, H - 12);
+
+      // You, in front of everyone.
+      const [lx, ly] = leadXY(), active = dragging && dragging.lead;
+      const glow = c.createRadialGradient(lx, ly, 2, lx, ly, 18);
+      glow.addColorStop(0, "rgba(255, 226, 160, 0.55)");
+      glow.addColorStop(1, "rgba(255, 226, 160, 0)");
+      c.fillStyle = glow;
+      c.beginPath(); c.arc(lx, ly, 18, 0, Math.PI * 2); c.fill();
+      const body = c.createRadialGradient(lx - 2, ly - 3, 1, lx, ly, 8);
+      body.addColorStop(0, "#fff3cf");
+      body.addColorStop(0.6, "#e8c27a");
+      body.addColorStop(1, "#9a6c2c");
+      c.fillStyle = body;
+      c.beginPath(); c.arc(lx, ly, active ? 8 : 7, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = "#1b1209"; c.lineWidth = 1.5; c.stroke();
+      c.font = "700 9.5px Montserrat, sans-serif";
+      c.fillStyle = "rgba(20, 13, 8, 0.85)";
+      c.beginPath();
+      c.roundRect ? c.roundRect(lx - 14, ly + 10, 28, 13, 6) : c.rect(lx - 14, ly + 10, 28, 13);
+      c.fill();
+      c.fillStyle = "#ffe7b0";
+      c.fillText("YOU", lx, ly + 20);
+      describeLead();
     }
 
     function micIcon(c, x, y, r, on) {
@@ -783,7 +848,6 @@
       c.shadowBlur = 0;
     }
 
-    function hexA(h, a) { const n = parseInt(h.slice(1), 16); return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; }
 
     // Pointer: grab a section's body (move) or one of its edges (width).
     let dragging = null;
@@ -792,6 +856,8 @@
       return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
     };
     const hit = (px, py) => {
+      const [lx, ly] = leadXY();
+      if (Math.hypot(px - lx, py - ly) < 12) return { lead: true };
       const order = [0, 1, 2, 3].sort((a, b) => place(a).d - place(b).d);   // front ones win
       for (const s of order) {
         const p = place(s);
@@ -811,6 +877,13 @@
       const [px, py] = local(e);
       const h = hit(px, py);
       if (!h) return;
+      if (h.lead) {
+        dragging = h;
+        canvas.setPointerCapture(e.pointerId);
+        LEAD_IDS.forEach((id) => Params.begin(id));
+        draw();
+        return;
+      }
       const [x, d] = fromXY(px, py), p = place(h.s);
       dragging = Object.assign(h, { grabX: x - p.x, grabD: d - p.d });
       canvas.setPointerCapture(e.pointerId);
@@ -821,10 +894,20 @@
       const [px, py] = local(e);
       if (!dragging) {
         const h = hit(px, py);
-        canvas.style.cursor = !h ? "default" : h.mode === "move" ? "grab" : "ew-resize";
+        canvas.style.cursor = !h ? "default" : h.lead || h.mode === "move" ? "grab" : "ew-resize";
         return;
       }
       const [x, d] = fromXY(px, py);
+      if (dragging.lead) {
+        // On the stage from its front edge back; below it, back at the microphones.
+        const on = d >= -0.1;
+        Params.set("leadOnStage", on ? 1 : 0);
+        if (on) {
+          Params.set("leadPan", Math.max(-1, Math.min(1, x)));
+          Params.set("leadDepth", Math.max(0, Math.min(100, d * 100)));
+        }
+        return;
+      }
       const s = dragging.s;
       if (dragging.mode === "move") {
         Params.set(pos(s) + "Pan", Math.max(-1, Math.min(1, x - dragging.grabX)));
@@ -835,10 +918,17 @@
     });
     const end = () => {
       if (!dragging) return;
-      ["Pan", "Depth", "Width"].forEach((k) => Params.end(pos(dragging.s) + k));
+      if (dragging.lead) LEAD_IDS.forEach((id) => Params.end(id));
+      else ["Pan", "Depth", "Width"].forEach((k) => Params.end(pos(dragging.s) + k));
       dragging = null;
       draw();
     };
+    // Double-click YOU: back to the microphones, or onto the front of the stage.
+    canvas.addEventListener("dblclick", (e) => {
+      const [px, py] = local(e);
+      const h = hit(px, py);
+      if (h && h.lead) lead().on ? setLead(false) : setLead(true, 0, 0);
+    });
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
 
@@ -872,6 +962,7 @@
       setButtons.forEach(({ b, vals }) => b.classList.toggle("on", ["micClose", "micTree", "micRoom"].every((id, i) => Math.abs(Params.get(id) - vals[i]) < 0.6)));
     }
     SECTIONS.forEach((S) => ["Pan", "Width", "Depth"].forEach((k) => Params.on(S.prefix + k, () => { draw(); syncPills(); })));
+    LEAD_IDS.forEach((id) => Params.on(id, () => draw()));
     info.onMeters = (m) => {
       const n = (m.sections || []).map((x) => x.singers || 0);
       if (n.join() !== singers.join()) { singers = n; draw(); }

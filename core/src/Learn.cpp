@@ -403,6 +403,26 @@ LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
 
     Scale scale;
     scale.type = hs.scale;
+    if (hs.scaleAuto)
+    {
+        // Scale Auto: major or minor, heard from the whole take (and the band).
+        auto hist = take.pcHistogram;
+        addBandNotes (take, 0, take.length, hist);
+        int tonic = 0;
+        bool minor = false;
+        if (hs.key > 0)
+        {
+            tonic = (hs.key - 1) % 12;
+            minor = keyFitness (hist, tonic, true) > keyFitness (hist, tonic, false);
+        }
+        else
+        {
+            const auto est = estimateKey (hist, false, false);
+            tonic = est.tonic;
+            minor = est.minor;
+        }
+        scale.type = autoScaleType (hist, tonic, minor);
+    }
     std::vector<int> keyOfPhrase (take.phrases.size(), 0);
     if (hs.key > 0)
     {
@@ -947,7 +967,8 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
 }
 
 bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParams& paramsIn, bool roomOnly,
-                            float tailSeconds, const StemFill& fill, const MixOut& out)
+                            float tailSeconds, const StemFill& fill, const MixOut& out,
+                            const float* lead, int64_t leadLength)
 {
     ScopedFlushDenormals noDenormals;
 
@@ -956,8 +977,11 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
     params.midiEnabled = false;
     params.wetOnly = roomOnly;
     params.rhythmPattern = 0;   // no song position here: exports are without the rhythm effect
-    params.leadDb = -60.0f;
-    params.lowLatency = false;
+    if (lead == nullptr)
+        params.leadDb = -60.0f;
+    // The stems are already in time; Live monitoring passes the lead straight through, so it
+    // stays in time with them.
+    params.lowLatency = lead != nullptr;
 
     const int block = 512;
     ChoirEngine engine;
@@ -965,7 +989,7 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
     engine.setParams (params);
 
     const int64_t total = length + (int64_t) (tailSeconds * sampleRate);
-    std::vector<float> zeros ((size_t) block, 0.0f), left ((size_t) block), right ((size_t) block);
+    std::vector<float> zeros ((size_t) block, 0.0f), left ((size_t) block), right ((size_t) block), leadBlock ((size_t) block, 0.0f);
     std::array<std::vector<float>, NumSections * 2> chunk;
     std::array<float*, NumSections * 2> ptrs {};
     for (size_t ch = 0; ch < chunk.size(); ++ch)
@@ -984,7 +1008,15 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
         StemPlayback pb;
         for (size_t ch = 0; ch < chunk.size(); ++ch)
             pb.sections[ch] = ptrs[ch];
-        engine.process (zeros.data(), nullptr, left.data(), right.data(), len, &pb);
+        const float* in = zeros.data();
+        if (lead != nullptr && pos < leadLength)
+        {
+            const int have = (int) std::min<int64_t> (len, leadLength - pos);
+            std::copy (lead + pos, lead + pos + have, leadBlock.begin());
+            std::fill (leadBlock.begin() + have, leadBlock.end(), 0.0f);
+            in = leadBlock.data();
+        }
+        engine.process (in, nullptr, left.data(), right.data(), len, &pb);
         if (! out (left.data(), right.data(), len))
             return false;
     }
@@ -992,7 +1024,7 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
 }
 
 std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& params,
-                                                bool roomOnly, float tailSeconds)
+                                                bool roomOnly, float tailSeconds, const float* lead, int64_t leadLength)
 {
     std::array<std::vector<float>, 2> result;
     if (stems.isEmpty())
@@ -1014,7 +1046,7 @@ std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, cons
             result[0].insert (result[0].end(), l, l + len);
             result[1].insert (result[1].end(), r, r + len);
             return true;
-        });
+        }, lead, leadLength);
     return result;
 }
 } // namespace sc

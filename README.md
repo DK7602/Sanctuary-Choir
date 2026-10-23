@@ -19,7 +19,7 @@
   - Upper Voices (SSAA) and Lower Voices (TTBB).
   - Drone Pad.
   - MIDI Chords.
-- **Key / Scale**: Auto key detection, or pick from 12 keys and 9 scales:
+- **Key / Scale**: Auto key and scale detection (major, natural or harmonic minor, heard from your melody), or pick from 12 keys and 9 scales:
   - Major, Minor, Harmonic Minor
   - Dorian, Mixolydian, Lydian, Phrygian
   - Gospel/Blues, Chromatic
@@ -44,6 +44,8 @@
   - Per-section fader, pan, mute/solo and singing range.
   - Lead vocal and choir levels.
   - Humanize, Vibrato, Glide, Formant (gender/size), Pitch Lock and Breath.
+  - **Energy**: how hard the choir sings, from hushed to massive, in one knob.
+  - **Sub-Octave**: oktavists, basses doubling the bass part an octave down.
 - **FX page**:
   - Six sacred spaces: Grand Cathedral, Stone Abbey, Wooden Chapel, Concert Hall, Gospel Church, Studio Room. Each one appears on screen with its own choir (monks in the abbey for Gregorian chant), chosen from the picker at the top of the scene.
   - Decay, pre-delay and brightness.
@@ -57,8 +59,8 @@
 - **Real voices in Words mode**: each singer takes on the vocal tract, tone and vibrato of one of 19 real singers (measured from VocalSet), so the choir sounds like different people singing your words. No AI involved.
 - **Multi-take choir**: sing the part two to four times and the Words choir sings from every pass, lined up note by note with your take (dynamic time warping on the voice's sound, then a time-stretch that leaves the pitch alone). Real doubles with their own breaths and timing, not copies of one voice.
 - **Chord Speed** and a one-click **key lock** for the detected key.
-- **Chord lane**: after LEARN, see every chord of the take over your melody. Click one for ranked alternatives (with how well each fits the melody), pick one, and the harmony around it is worked out again. Chosen chords are kept with the project.
-- **Drag-out stems and MIDI**: drag the parts (SATB on channels 1–4, melody, named chords) as MIDI, or the rendered Full Choir and section stems as 24-bit WAVs, straight into your DAW. They line up when dropped at the start of the song. Or save them all to a folder.
+- **Chord lane**: after LEARN, see every chord of the take over your melody and the four parts the choir sings. Click one for ranked alternatives (with how well each fits the melody), pick one, and the harmony around it is worked out again. Chosen chords are kept with the project.
+- **Drag-out stems and MIDI**: drag the parts (SATB on channels 1–4, melody, named chords) as MIDI, or the rendered Full Choir, section stems, the Room (the hall alone) and your Lead on Stage as 24-bit WAVs, straight into your DAW. They line up when dropped at the start of the song. Or save them all to a folder.
 - **Ensemble**: an adult choir, a children's choir (every part sung by trebles), shouted gang vocals, or a whole congregation.
 - **Rhythm** (FX page): tempo-synced gates and section arpeggios that follow your DAW: pulses, offbeats, gallops, trance gates, Arp Up/Down/Bounce and Call & Answer.
 - **Follows the band**: route your band, keys or backing track to the side-chain and the choir sings the chords they play, inversions included. LEARN records the band too and harmonises every note with the chord under it.
@@ -66,7 +68,7 @@
 - **MIDI parts and Program Change**: channels 1–4 sing exactly the soprano, alto, tenor and bass notes you write; Program Change picks a preset.
 - **Sung words for MIDI**: type "Kyrie eleison", "Alleluia" or "Glory to God" and the MIDI choir sings it, a syllable per note, with real vowels and sung consonants (church Latin or English).
 - **Scenes**: 8 stored sounds per song (verse, chorus, bridge), recalled with a click or by automating the Scene parameter.
-- **The stage and its microphones**: drag the sections around the choir loft (left/right, forward/back, wide/narrow) or pick a formation, and mix Close, Tree and Room microphones like a recording engineer. Rendered takes follow without rendering again.
+- **The stage and its microphones**: drag the sections around the choir loft (left/right, forward/back, wide/narrow) or pick a formation, and mix Close, Tree and Room microphones like a recording engineer. Drag yourself onto the stage too, to sing from among the choir and in the hall. Rendered takes follow without rendering again.
 - **67 factory presets** in 8 categories (Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, Kids & Crowds) plus your own.
 
 ## Download

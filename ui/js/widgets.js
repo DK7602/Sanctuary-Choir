@@ -66,6 +66,9 @@
         case "lowCut": case "highCut": return v >= 1000 ? (v / 1000).toFixed(1) + " kHz" : Math.round(v) + " Hz";
         case "tuning": return v.toFixed(1) + " Hz";
         case "formant": return Math.abs(v) < 0.5 ? "Natural" : (v > 0 ? "+" : "") + Math.round(v);
+        case "energy": return v < 15 ? "Hushed" : v < 38 ? "Soft" : v < 63 ? "Natural" : v < 85 ? "Powerful" : "Massive";
+        case "subOctave": return v < 0.5 ? "Off" : Math.round(v) + " %";
+        case "rhythmDepth": return Math.round(v) + " %";
         default: break;
       }
       if (id.endsWith("Depth")) return v < 33 ? "Front" : v < 67 ? "Middle" : "Back";
@@ -432,7 +435,9 @@
       const d = Params.def(this.id);
       Menu.open(stageRect(this.el), (m) => {
         if (this.opts.menuTop) this.opts.menuTop(m);
-        d.choices.forEach((c, i) => Menu.item(m, c, Math.round(Params.get(this.id)) === i, () => Params.set(this.id, i)));
+        // opts.order lists the choices in another order than their values (e.g. Auto first).
+        (this.opts.order || d.choices.map((_, i) => i))
+          .forEach((i) => Menu.item(m, d.choices[i], Math.round(Params.get(this.id)) === i, () => Params.set(this.id, i)));
       });
     }
   }
