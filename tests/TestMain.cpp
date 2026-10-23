@@ -2213,6 +2213,9 @@ TEST (performanceBudget)
 
 int main (int argc, char** argv)
 {
+    // Unbuffered (Windows has no line buffering), so a test that crashes on CI shows how far
+    // it got.
+    std::setvbuf (stdout, nullptr, _IONBF, 0);
     const char* only = argc > 1 ? argv[1] : nullptr;
     for (auto& [name, fn] : registry())
     {
