@@ -167,9 +167,14 @@ The steps:
    and matting are the loft pipeline's. A big figure in front of the choir (the gospel
    director, the cathedral conductor) whose SAM mask comes back far smaller than its
    box is redone with points down the body and its enclosed holes filled.
-   Rooms in `ROOM_FIXES` (the studio) get more: each head is segmented again with a box
-   around it and points on the ears, so headphones belong to their singer; hint points
-   bring back a body seen again below a music stand's desk.
+   Then the empty room helps: unassigned pixels that differ from it (or are near-black,
+   like a hymnal in front of a dark pew), in pieces the singers surround, are a part of a
+   singer: a book goes to the hand holding it, a glimpse between two singers to the singer
+   behind them. Scenery between the singers looks like the empty room and stays out.
+   Rooms in `ROOM_FIXES` get more: in the studio each head is segmented again with a box
+   around it and points on the ears, so headphones belong to their singer, and hint
+   points bring back a body seen again below a music stand's desk; elsewhere hint points
+   name a part SAM left out and whose it is (`parts`).
 4. **Choir onto the empty room.** The two pictures of a room are not drawn identically
    (the abbey's choir picture is 4% larger). SIFT on the architecture outside the
    singers gives the transform, and every sprite is warped with it.

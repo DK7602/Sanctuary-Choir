@@ -51,13 +51,25 @@ OVERLAYS = {"hall": [(190, 104, 505, 182)]}   # the Concert Hall mockup's venue 
 # Rooms whose singers stand behind microphones and music stands, and what SAM misses there:
 # - headgear: headphones (SAM keeps the head and drops the ear cups and headband);
 # - hidden: points (choir picture) on a body seen again below a music stand's desk;
+# - parts: (a point on the singer's head, [points on a part of them SAM left out]), all in
+#   the choir picture: a body under a head SAM kept, a raised hand against the wall;
 # - props: stands, desks and mics in front of the singers are drawn over them (from the
 #   empty room), so the singers sway behind them instead of carrying holes that slide over
 #   the room.
 ROOM_FIXES = {
     "studio": dict(headgear=True, hidden=[(505, 505), (515, 535)], props=True),
+    "gospel": dict(parts=[((1015, 300), [(1012, 300), (1010, 326), (1035, 322), (1058, 322), (1050, 336)]),
+                          ((463, 318), [(452, 268), (447, 285)])]),
+    "abbey-monks": dict(parts=[((903, 339), [(858, 378), (865, 385)])]),
+    "hall": dict(parts=[((1031, 329), [(1030, 440), (1032, 460)])]),
 }
 PROPS_SAME = 16   # max colour difference (choir picture vs empty room) of a prop pixel
+# Unassigned pixels this different from the empty room, in pieces at least this big and at
+# least this much surrounded by singers, are a part of a singer (see missing_parts).
+MISSING_DIFF = 50
+MISSING_MEAN_DIFF = 35
+MISSING_MIN_AREA = 60
+MISSING_SURROUNDED = 0.6
 
 
 def register_to_skin(img, skin):
@@ -274,7 +286,8 @@ def worn_and_hidden(tier, name, people, logits, lab, fix, diff):
     """What SAM leaves out of a singer in a studio: headphones (each head is segmented again
     with a box around it and points on the ears, and what it gains around the head is
     added) and a body seen again below a music stand (segmented from the room's hint
-    points; only pixels that differ from the empty room, so the desk itself stays out)."""
+    points; only pixels that differ from the empty room, so the desk itself stays out).
+    In any room, hint points can name a part of a singer SAM left out ("parts")."""
     cache = WORK / f"worn_{name}.npz"
     done = dict(np.load(cache)) if cache.exists() else {}
     H, W = lab.shape
@@ -347,12 +360,93 @@ def worn_and_hidden(tier, name, people, logits, lab, fix, diff):
             gain = np.isin(cc, keep)
             if gain.any():
                 regions.append((i, gain))
+    for n_, (owner_pt, pts) in enumerate(fix.get("parts", [])):
+        i = int(np.argmin([np.hypot(p["head"][0] - owner_pt[0], p["head"][1] - owner_pt[1]) for p in people]))
+        key = f"p{n_}"
+        xs, ys = [x for x, _ in pts], [y for _, y in pts]
+        if key not in done:
+            c0, c1 = int(max(X0, min(xs) - 60)), int(min(X1, max(xs) + 60))
+            r0, r1 = int(max(Y0, min(ys) - 60)), int(min(Y1, max(ys) + 60))
+            s = get_sam()
+            s.set_crop(tier[r0:r1, c0:c1])
+            box = [min(xs) - c0 - 25, min(ys) - r0 - 25, max(xs) - c0 + 25, max(ys) - r0 + 25]
+            lg, score = s.logits(box, [(x - c0, y - r0) for x, y in pts], others(i, c0, r0, c1, r1))
+            m = np.zeros((H, W), bool)
+            m[r0:r1, c0:c1] = lg > 0
+            done[key] = np.packbits(m)
+            changed = True
+            bs.log(f"  {name}: person {i} part {n_} (score {score:.3f})")
+        m = np.unpackbits(done[key])[: H * W].reshape(H, W).astype(bool)
+        m &= ((lab < 0) | (lab == i)) & (diff >= PROPS_SAME)
+        n, cc, _, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), 8)
+        keep = [cc[int(y), int(x)] for x, y in pts if cc[int(y), int(x)] > 0]
+        gain = np.isin(cc, keep)
+        if gain.any():
+            regions.append((i, gain))
     if changed:
         np.savez_compressed(cache, **done)
     for i, gain in regions:
         logits[i] = bs.merge_logits(logits[i], _region_logits(gain))
         bs.log(f"  {name}: person {i} gains {int(gain.sum())} px")
     return logits
+
+
+def missing_parts(tier, name, people, lab, rows, diff):
+    """What the choir picture shows between and in front of the singers that no singer was
+    given, where the empty room shows something else: a hymnal SAM left out, or a glimpse of
+    a singer standing behind two others. Unassigned pixels that differ from the empty room
+    or are near-black (a hymnal can be as dark as the pew behind it in places), in pieces
+    that differ from the empty room on the whole and that the singers surround (a few
+    pixels out, past the hairline slivers SAM leaves), go to the singer whose wrist is at the
+    piece (a held book), else to the rear-most singer around it (a glimpse of someone
+    behind). Scenery between the singers looks like the empty room and is left alone."""
+    H, W = lab.shape
+    kps = bs.pose_keypoints(tier, name, people)
+    zone = np.zeros((H, W), bool)
+    for p in people:
+        b = np.array(p["box"])
+        zone[int(b[1]):int(b[3]) + 1, int(b[0]):int(b[2]) + 1] = True
+    differs = cv2.GaussianBlur(diff.astype(np.float32), (0, 0), 1.5) > MISSING_DIFF
+    V = tier.max(2).astype(np.int32)
+    dark = (V < 75) & (V - tier.min(2).astype(np.int32) < 45)
+    cand = (lab < 0) & (differs | dark) & zone
+    cand = cv2.morphologyEx(cand.astype(np.uint8), cv2.MORPH_OPEN, bs.disk(1))
+    n, cc, st, _ = cv2.connectedComponentsWithStats(cand, 8)
+    objs, debug = [], []
+    for q in range(1, n):
+        if st[q, cv2.CC_STAT_AREA] < MISSING_MIN_AREA:
+            continue
+        x, y, w, h = st[q, :4]
+        x0, y0, x1, y1 = max(0, x - 8), max(0, y - 8), min(W, x + w + 8), min(H, y + h + 8)
+        R = cc[y0:y1, x0:x1] == q
+        if float(diff[y0:y1, x0:x1][R].mean()) < MISSING_MEAN_DIFF:
+            continue
+        ring = bs.dil(R, 6) & ~bs.dil(R, 3)
+        rl = lab[y0:y1, x0:x1][ring]
+        adjacent = [int(j) for j in np.unique(rl[rl >= 0]) if (rl == j).sum() >= 3]
+        if not adjacent:
+            continue
+        if (rl >= 0).mean() < MISSING_SURROUNDED:
+            continue
+        owner, via = -1, ""
+        near = bs.dil(R, 12)
+        best = 1e9
+        for j in adjacent:   # a hand at the piece: it is what they hold
+            if kps[j] is None:
+                continue
+            for idx in (9, 10):
+                kx, ky, cf = kps[j][idx]
+                if cf >= 0.3 and y0 <= ky < y1 and x0 <= kx < x1 and near[int(ky) - y0, int(kx) - x0]:
+                    ys, xs = np.nonzero(R)
+                    dd = float(np.min((xs + x0 - kx) ** 2 + (ys + y0 - ky) ** 2))
+                    if dd < best:
+                        best, owner, via = dd, j, "hand"
+        if owner < 0:
+            owner, via = max(adjacent, key=lambda j: (rows[j], -people[j]["head"][1])), "behind"
+        l2 = np.where(R, 8.0, -8.0).astype(np.float32)
+        objs.append((l2, (int(x0), int(y0)), owner))
+        debug.append(dict(box=[int(x0), int(y0), int(x1), int(y1)], owner=owner, via=via, area=int(R.sum())))
+    return objs, debug
 
 
 def props_in_front(lab, N, diff):
@@ -389,7 +483,10 @@ def build(keys):
     skin = cv2.imread(str(SKIN), cv2.IMREAD_COLOR)
     _, rooms = load_rooms(keys)
     empties = load_empty(keys, skin)
-    allimgs = list(rooms.values()) + list(empties.values())
+    # The opening comes from every room, also when only some are rebuilt (from fewer
+    # pictures it is ragged, and the frame's own backdrop shows through its holes).
+    _, all_rooms = load_rooms(list(ROOM_FILES))
+    allimgs = list(all_rooms.values()) + list(load_empty(list(ROOM_FILES), skin).values())
     opening = opening_mask(skin, allimgs)
     cv2.imwrite(str(WORK / "opening.png"), (opening * 255).astype(np.uint8))
     H, W = skin.shape[:2]
@@ -413,17 +510,19 @@ def build(keys):
         logits = rescue_sam(tier, name, people, bs.sam_logits(tier, name, people))
         lab = bs.ownership((H, W), logits)
         fix = ROOM_FIXES.get(k, {})
-        diff = empty_difference(tier, base, A) if fix else None
-        if fix.get("headgear") or fix.get("hidden"):
+        diff = empty_difference(tier, base, A)
+        if fix.get("headgear") or fix.get("hidden") or fix.get("parts"):
             logits = worn_and_hidden(tier, name, people, logits, lab, fix, diff)
             lab = bs.ownership((H, W), logits)
-        for stage in ("held", "limbs", "enclosed"):
+        for stage in ("held", "limbs", "enclosed", "missing"):
             if stage == "held":
                 objs, recs = bs.held_objects(tier, name, people, lab)
             elif stage == "limbs":
                 objs, recs = bs.refine_limbs(tier, name, people, lab, logits)
-            else:
+            elif stage == "enclosed":
                 objs, recs = bs.enclosed_gaps(tier, name, people, lab, bs.assign_rows(people, lab, N))
+            else:
+                objs, recs = missing_parts(tier, name, people, lab, bs.assign_rows(people, lab, N), diff)
             for (l2, org, owner) in objs:
                 logits[owner] = bs.merge_logits(logits[owner], (l2, org))
             bs.log(f"  {stage}: attached {len(objs)} region(s)")
