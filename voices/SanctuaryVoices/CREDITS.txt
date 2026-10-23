@@ -10,18 +10,29 @@ Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (2018):
 
 VocalSet is licensed under the Creative Commons Attribution 4.0 International
 licence (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+These recordings remain under that licence: you may use, copy and share them
+on its terms. Nothing in Sanctuary Choir's own terms restricts that. The
+licensors and the singers do not endorse Sanctuary Choir. The recordings are
+provided as is, without warranties of any kind (CC BY 4.0, section 5).
 
 Changes made for Sanctuary Choir: held notes were cut from the singers'
-straight-tone long tones, scales and arpeggios, checked for steady pitch,
-trimmed, sorted into soprano, alto, tenor and bass sections by voice and pitch,
-and re-encoded as Ogg Vorbis. The pitch of each note is written in its file
-name (m6312 = MIDI note 63.12). Alongside them:
+long tones, scales and arpeggios, checked for steady pitch, trimmed, sorted
+into soprano, alto, tenor and bass sections by voice and pitch (the
+countertenor sings with the altos), resampled to 32 kHz and re-encoded as Ogg
+Vorbis. Up to five singers are kept per semitone. The pitch of each note is
+written in its file name (m6312 = MIDI note 63.12). Alongside them:
   short/    the first moments of notes sung from silence (from the long
-            tones, scales, arpeggios and fast scales), so a note starts the
-            way a singer starts it;
+            tones, scales, arpeggios and fast scales and arpeggios), so a
+            note starts the way a singer starts it;
   legato/   the slide from one note to the next, cut from the scales and
             arpeggios (to6500 = the note it arrives at, x100 = when the pitch
             is halfway there, in milliseconds);
   breathy/, belt/   the same from the breathy and belted scales and
-            arpeggios.
+            arpeggios;
+  vibrato/  the same in the singers' own classical voice, with its vibrato,
+            sung softly (slow piano scales and arpeggios, pianissimo long
+            tones);
+  fullvoice/  the classical voice in full voice (slow forte scales and
+            arpeggios, forte long tones).
+Singers are named by VocalSet's anonymous ids (f1-f9, m1-m11).
 Rebuild with tools/voicepack.

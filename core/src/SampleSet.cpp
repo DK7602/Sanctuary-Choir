@@ -154,8 +154,8 @@ int SampleSet::addRecording (int section, int vowel, const float* x, int64_t n, 
 
 void SampleSet::addNote (int section, int vowel, const float* x, int64_t n, double sampleRate, float rootMidi, const NoteInfo& info)
 {
-    const int singing = (int) info.singing;
-    if (section < 0 || section >= NumSections || vowel < 0 || vowel >= kVowels || n <= 0 || singing < 0 || singing >= kSingings)
+    const int take = (int) info.take;
+    if (section < 0 || section >= NumSections || vowel < 0 || vowel >= kVowels || n <= 0 || take < 0 || take >= kTakes)
         return;
     SampleZone z;
     z.sampleRate = sampleRate;
@@ -175,7 +175,7 @@ void SampleSet::addNote (int section, int vowel, const float* x, int64_t n, doub
     z.pcm.resize ((size_t) n);
     for (int64_t i = 0; i < n; ++i)
         z.pcm[(size_t) i] = (int16_t) std::lround (x[i] / peak * 32767.0f);
-    auto& layer = layers[(size_t) section][(size_t) vowel][(size_t) singing];
+    auto& layer = layers[(size_t) section][(size_t) vowel][(size_t) take];
     (kind == Kind::Onset ? layer.onsets : kind == Kind::Move ? layer.moves : layer.zones).push_back (std::move (z));
 }
 
@@ -214,8 +214,9 @@ void SampleSet::finalise()
     for (auto& section : layers)
     for (auto& vowel : section)
     {
-        for (auto& layer : vowel)
+        for (size_t take = 0; take < vowel.size(); ++take)
         {
+            auto& layer = vowel[take];
             // Onsets: levelled by where they settle, so they meet the held note they hand over to.
             std::sort (layer.onsets.begin(), layer.onsets.end(), byPitch);
             for (auto& z : layer.onsets)
@@ -252,7 +253,10 @@ void SampleSet::finalise()
                     z.loopStart = len * 3 / 10;
                     z.loopEnd = len * 9 / 10;
                 }
-                z.crossfade = std::min<int64_t> ((z.loopEnd - z.loopStart) / 3, (int64_t) (0.15 * sr));
+                // With vibrato the two ends of the loop are rarely at the same point of its cycle: a
+                // longer crossfade (more than a cycle) blends them instead of jumping.
+                const double fade = takeHasVibrato ((Take) take) ? 0.26 : 0.15;
+                z.crossfade = std::min<int64_t> ((z.loopEnd - z.loopStart) / 3, (int64_t) (fade * sr));
 
                 // Level: the sustain at a common loudness, so notes and singers blend evenly.
                 level (z, rmsOf (z, z.loopStart, z.loopEnd));
@@ -261,45 +265,47 @@ void SampleSet::finalise()
     }
 }
 
-const SampleLayer* SampleSet::layerFor (int section, VocalType vowel, Singing singing) const noexcept
+const SampleLayer* SampleSet::layerFor (int section, VocalType vowel, Take take) const noexcept
 {
     if (section < 0 || section >= NumSections)
         return nullptr;
     const auto& s = layers[(size_t) section];
-    auto find = [&] (int how) -> const SampleLayer*
+    // Another take only of the same vowel (an "oo" never turns into a breathy "ah"); the full
+    // voice falls back to the soft classical voice before the straight tone.
+    if (take != Take::Natural)
     {
-        const int v = (int) vowel;
-        if (v >= 0 && v < kVowels && ! s[(size_t) v][(size_t) how].empty())
-            return &s[(size_t) v][(size_t) how];
-        if (vowel == VocalType::Mm)
-            return nullptr;   // no recorded humming: the synthesised hum is closer than an open vowel
-        if (! s[0][(size_t) how].empty())
-            return &s[0][(size_t) how];
-        for (const auto& layer : s)
-            if (! layer[(size_t) how].empty())
-                return &layer[(size_t) how];
-        return nullptr;
-    };
-    const int how = clampv ((int) singing, 0, kSingings - 1);
-    if (how != 0)
-        if (const auto* l = find (how))
+        if (const auto* l = exactLayer (section, vowel, take))
             return l;
-    return find (0);
+        if (take == Take::Full)
+            if (const auto* l = exactLayer (section, vowel, Take::Vibrato))
+                return l;
+    }
+    const int v = (int) vowel;
+    if (v >= 0 && v < kVowels && ! s[(size_t) v][0].empty())
+        return &s[(size_t) v][0];
+    if (vowel == VocalType::Mm)
+        return nullptr;   // no recorded humming: the synthesised hum is closer than an open vowel
+    if (! s[0][0].empty())
+        return &s[0][0];
+    for (const auto& layer : s)
+        if (! layer[0].empty())
+            return &layer[0];
+    return nullptr;
 }
 
-const SampleLayer* SampleSet::exactLayer (int section, VocalType vowel, Singing singing) const noexcept
+const SampleLayer* SampleSet::exactLayer (int section, VocalType vowel, Take take) const noexcept
 {
-    const int v = (int) vowel, how = (int) singing;
-    if (section < 0 || section >= NumSections || v < 0 || v >= kVowels || how < 0 || how >= kSingings)
+    const int v = (int) vowel, how = (int) take;
+    if (section < 0 || section >= NumSections || v < 0 || v >= kVowels || how < 0 || how >= kTakes)
         return nullptr;
     const auto& l = layers[(size_t) section][(size_t) v][(size_t) how];
     return l.empty() ? nullptr : &l;
 }
 
-bool SampleSet::has (Singing singing) const noexcept
+bool SampleSet::has (Take take) const noexcept
 {
-    const int how = (int) singing;
-    if (how < 0 || how >= kSingings)
+    const int how = (int) take;
+    if (how < 0 || how >= kTakes)
         return false;
     for (const auto& s : layers)
         for (const auto& v : s)
@@ -370,8 +376,10 @@ SampleSet::NoteInfo SampleSet::infoFromPath (const std::string& path)
     NoteInfo info;
     for (const auto& t : tokens (path))
     {
-        if (t == "breathy") info.singing = Singing::Breathy;
-        else if (t == "belt" || t == "belted") info.singing = Singing::Belt;
+        if (t == "breathy") info.take = Take::Breathy;
+        else if (t == "belt" || t == "belted") info.take = Take::Belt;
+        else if (t == "vibrato") info.take = Take::Vibrato;
+        else if (t == "fullvoice") info.take = Take::Full;
         else if (t == "short" || t == "onset" || t == "onsets") info.kind = Kind::Onset;
         else if (t == "legato" || t == "moves") info.kind = Kind::Move;
         else if ((t.size() == 6 || t.size() == 7) && t[0] == 't' && t[1] == 'o' && digits (t, 2)) info.toMidi = (float) std::atoi (t.c_str() + 2) / 100.0f;

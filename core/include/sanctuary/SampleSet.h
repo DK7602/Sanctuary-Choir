@@ -1,7 +1,8 @@
 // Sanctuary Choir - recorded choir voices.
 //
 // A SampleSet holds sustained notes recorded by real singers, per section (S/A/T/B), vowel and
-// way of singing (natural, breathy, belted). Recordings can be single notes or long takes with
+// take (natural straight tone, breathy, belted, and the classical voice with its vibrato, sung
+// softly or in full voice). Recordings can be single notes or long takes with
 // several held notes separated by breaths: they are sliced, pitched and looped automatically.
 // Next to the held notes a set can hold onsets (notes sung from silence, so a short or detached
 // note starts the way a singer starts it) and moves (one note sliding into the next, so legato
@@ -63,10 +64,21 @@ struct SampleNote
 
 enum class SampleKind { Held, Onset, Move };
 
+/** How a recording was sung. The first three match Singing; the classical voice (vibrato,
+    soft or in full voice) is mixed in by the engine. */
+enum class Take : int
+{
+    Natural = 0, Breathy, Belt, Vibrato, Full, Count
+};
+
+inline Take takeOf (Singing s) noexcept { return (Take) (int) s; }
+/** The recording carries its own vibrato. */
+inline bool takeHasVibrato (Take t) noexcept { return t == Take::Vibrato || t == Take::Full; }
+
 /** What an already-cut recording holds, beyond its pitch. */
 struct SampleNoteInfo
 {
-    Singing singing = Singing::Natural;
+    Take take = Take::Natural;
     SampleKind kind = SampleKind::Held;
     float toMidi = 0.0f;          // a move: the pitch it arrives at
     float crossingSeconds = 0.0f; // a move: when the pitch is halfway there
@@ -77,7 +89,7 @@ class SampleSet
 {
 public:
     static constexpr int kVowels = 6;   // Ah, Oh, Oo, Ee, Eh, Mm (the VocalType order)
-    static constexpr int kSingings = (int) Singing::Count;
+    static constexpr int kTakes = (int) Take::Count;
     using Kind = SampleKind;
     using NoteInfo = SampleNoteInfo;
 
@@ -90,13 +102,13 @@ public:
     void finalise();
 
     /** Notes for a section and vowel (falls back to Ah, then to any vowel; humming falls back
-        to nothing, i.e. the synthesised hum), or nullptr. A way of singing the set has no
-        recordings of falls back to natural singing. */
-    const SampleLayer* layerFor (int section, VocalType vowel, Singing singing = Singing::Natural) const noexcept;
-    /** Notes for exactly this section, vowel and way of singing, or nullptr (no fallback). */
-    const SampleLayer* exactLayer (int section, VocalType vowel, Singing singing) const noexcept;
-    /** True if some section has held notes sung this way. */
-    bool has (Singing singing) const noexcept;
+        to nothing, i.e. the synthesised hum), or nullptr. A take the set has no recordings of
+        falls back to natural singing (the full voice to the soft one first). */
+    const SampleLayer* layerFor (int section, VocalType vowel, Take take = Take::Natural) const noexcept;
+    /** Notes for exactly this section, vowel and take, or nullptr (no fallback). */
+    const SampleLayer* exactLayer (int section, VocalType vowel, Take take) const noexcept;
+    /** True if some section has held notes of this take. */
+    bool has (Take take) const noexcept;
     /** Held notes (onsets and moves are extras on top of them). */
     int numNotes() const noexcept;
     int numSections() const noexcept;
@@ -122,7 +134,7 @@ public:
 
 private:
     static uint64_t nextId() noexcept;
-    std::array<std::array<std::array<SampleLayer, kSingings>, kVowels>, NumSections> layers;
+    std::array<std::array<std::array<SampleLayer, kTakes>, kVowels>, NumSections> layers;
 };
 
 /** One choir member singing recorded notes: pitch by resampling and a crossfaded sustain loop.

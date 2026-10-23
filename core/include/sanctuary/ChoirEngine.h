@@ -258,9 +258,13 @@ private:
     void setSingerVowel (Singer& s, VocalType vt);
     /** Which recorded takes the voices sing from: the Singing choice, or breathy and belted
         takes at the ends of the Energy range when Singing is Natural. */
-    Singing singingLayer() const noexcept;
-    /** The takes this singer sings from: the choir's, or breathy for a child's airy voice. */
-    Singing singingFor (const Singer& s) const noexcept;
+    /** The recorded take this singer sings from: the way of singing chosen, or (Natural) each
+        singer's own: straight tone, or their classical voice with its vibrato (a share of the
+        choir that grows with the style's vibrato), soft or in full voice with the Energy;
+        breathy for a child's airy voice. */
+    Take takeFor (const Singer& s) const noexcept;
+    /** The share of the choir singing in their classical voice (0..1). */
+    float vibratoShare() const noexcept;
     /** The PSOLA analyser a singer sings from (the input's or a pass's), and how far behind the
         input's that one's timeline runs. */
     const PsolaAnalyzer& sourceOf (const Singer& s, int64_t& base) const noexcept;

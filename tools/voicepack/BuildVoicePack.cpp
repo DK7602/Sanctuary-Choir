@@ -3,16 +3,20 @@
 // usage: sanctuary_voicepack <VocalSet FULL folder> <output folder>
 //
 // Cuts every clean, steady held note out of each singer's long tones, scales and arpeggios,
-// sorts it into a choir section by voice and pitch (women: sopranos/altos, men: tenors/basses),
-// keeps the best few takes per semitone with as many different singers as possible, and writes
-// one WAV per note named <singer>_<vowel>_<n>_m<pitch*100>.wav under <Section>/<vowel>/ (the
-// pitch in the name means the plugin need not analyse it again). Next to those held notes:
+// sorts it into a choir section by voice and pitch (women: sopranos/altos, men: tenors/basses,
+// the countertenor: altos), keeps the best takes per semitone with as many different singers as
+// possible, and writes one WAV per note named <singer>_<vowel>_<n>_m<pitch*100>.wav under
+// <Section>/<vowel>/ (the pitch in the name means the plugin need not analyse it again). Next
+// to those held notes:
 //   short/    notes sung from silence, cut with their onset: how a short or detached note
 //             begins (the held notes above start mid-note);
 //   legato/   one note moving to the next, out of the scales and arpeggios, named
 //             <singer>_<vowel>_<n>_m<from*100>_to<to*100>_x<ms>.wav (x: when the pitch is
 //             halfway there);
-//   breathy/, belt/   the same three, sung breathy or belted.
+//   breathy/, belt/   the same three, sung breathy or belted;
+//   vibrato/, fullvoice/   the same three in the singers' own classical voice, with its vibrato:
+//             sung softly (slow piano scales and arpeggios, pianissimo long tones) and in full
+//             voice (slow forte scales and arpeggios, forte long tones).
 #include "TestSignals.h"
 
 #include <sanctuary/Learn.h>
@@ -30,17 +34,21 @@ namespace fs = std::filesystem;
 
 namespace
 {
-enum Technique { Straight = 0, Breathy, Belt, NumTechniques };
+enum Technique { Straight = 0, Breathy, Belt, Vibrato, Full, NumTechniques };
 enum Kind { Sustain = 0, Onset, Legato, NumKinds };
-const char* kTechniqueDirs[] = { "", "breathy", "belt" };
+const char* kTechniqueDirs[] = { "", "breathy", "belt", "vibrato", "fullvoice" };
 const char* kKindDirs[] = { "", "short", "legato" };
 const char* kSectionDirs[] = { "Sopranos", "Altos", "Tenors", "Basses" };
 const char* kVowelDirs[] = { "ah", "oh", "oo", "ee", "eh" };
 
+// The classical voice moves around its note (VocalSet's slow scales: about 45 cents of standard
+// deviation, against 15 for straight tone): it is steady when its centre is.
+bool hasVibrato (int technique) { return technique == Vibrato || technique == Full; }
+
 struct Cut
 {
     std::string singer;
-    bool female = false;
+    bool female = false, countertenor = false;
     int vowel = 0, technique = Straight, kind = Sustain;
     float root = 0.0f, seconds = 0.0f, wobble = 0.0f;
     float to = 0.0f, crossing = 0.0f;   // legato: the next note, and when the pitch is halfway there (s)
@@ -63,10 +71,15 @@ int vowelIndex (char v)
 
 // Which sections a note (or a move from lo to hi) can serve, by voice and pitch, with some
 // overlap between sections.
-std::vector<int> sectionsFor (bool female, float lo, float hi)
+std::vector<int> sectionsFor (bool female, bool countertenor, float lo, float hi)
 {
     std::vector<int> s;
-    if (female)
+    if (countertenor)
+    {
+        // A male alto (falsetto): VocalSet's countertenor sings about G#3 to C5 there.
+        if (lo >= 53.5f && hi <= 73.5f) s.push_back (Alto);
+    }
+    else if (female)
     {
         if (lo >= 62.5f) s.push_back (Soprano);
         if (lo >= 52.5f && hi <= 74.5f) s.push_back (Alto);
@@ -99,11 +112,12 @@ float rmsBetween (const std::vector<float>& x, int64_t a, int64_t b)
     return b > a ? (float) std::sqrt (e / (double) (b - a)) : 0.0f;
 }
 
-Cut makeCut (const std::string& singer, bool female, int vowel, int technique, int kind, double sr)
+Cut makeCut (const std::string& singer, bool female, bool countertenor, int vowel, int technique, int kind, double sr)
 {
     Cut c;
     c.singer = singer;
     c.female = female;
+    c.countertenor = countertenor;
     c.vowel = vowel;
     c.technique = technique;
     c.kind = kind;
@@ -126,7 +140,7 @@ void cutMoves (const TakeAnalysis& take, const std::vector<float>& x, double sr,
         if (pa.size() < 5 || pb.size() < 5)
             continue;
         const float wobble = (pa[pa.size() * 9 / 10] - pa[pa.size() / 10]) + (pb[pb.size() * 9 / 10] - pb[pb.size() / 10]);
-        if (wobble > 0.9f)
+        if (wobble > (hasVibrato (proto.technique) ? 3.2f : 0.9f))
             continue;
         const float from = pa[pa.size() / 2], to = pb[pb.size() / 2];
         const float interval = to - from;
@@ -174,7 +188,7 @@ void cutMoves (const TakeAnalysis& take, const std::vector<float>& x, double sr,
     }
 }
 
-void cutFile (const fs::path& file, const std::string& singer, bool female, int vowel, int technique, Wanted want, std::vector<Cut>& out)
+void cutFile (const fs::path& file, const std::string& singer, bool female, bool countertenor, int vowel, int technique, Wanted want, std::vector<Cut>& out)
 {
     test::Audio in;
     std::string err;
@@ -183,7 +197,7 @@ void cutFile (const fs::path& file, const std::string& singer, bool female, int 
     const auto& x = in.channels[0];
     const double sr = in.sampleRate;
     const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
-    const Cut proto = makeCut (singer, female, vowel, technique, Sustain, sr);
+    const Cut proto = makeCut (singer, female, countertenor, vowel, technique, Sustain, sr);
     if (want.legato)
         cutMoves (take, x, sr, proto, out);
 
@@ -194,7 +208,8 @@ void cutFile (const fs::path& file, const std::string& singer, bool female, int 
         rmsOf[k] = rmsBetween (x, take.notes[k].start, take.notes[k].end);
         loudest = std::max (loudest, rmsOf[k]);
     }
-    const float maxWobble = technique == Straight ? 0.6f : 0.75f;
+    const bool vibrato = hasVibrato (technique);
+    const float maxWobble = technique == Straight ? 0.6f : vibrato ? 2.6f : 0.75f;
 
     for (size_t k = 0; k < take.notes.size(); ++k)
     {
@@ -213,7 +228,16 @@ void cutFile (const fs::path& file, const std::string& singer, bool female, int 
             if (secs >= (want.longTone ? 1.2f : 0.42f) && m.size() >= 6)
             {
                 const float spread = m[m.size() * 9 / 10] - m[m.size() / 10];
-                if (spread <= maxWobble)
+                // With vibrato, the centre must not drift from the first half to the second.
+                bool centred = true;
+                if (vibrato)
+                {
+                    const int64_t mid = (start + end) / 2;
+                    const auto a = pitchesBetween (take, start + (end - start) / 5, mid);
+                    const auto b = pitchesBetween (take, mid, end - (end - start) / 5);
+                    centred = a.size() >= 3 && b.size() >= 3 && std::abs (a[a.size() / 2] - b[b.size() / 2]) <= 0.35f;
+                }
+                if (spread <= maxWobble && centred)
                 {
                     Cut c = proto;
                     c.root = m[m.size() / 2];
@@ -239,7 +263,7 @@ void cutFile (const fs::path& file, const std::string& singer, bool female, int 
             if (secs < 0.12f || m.size() < 4)
                 continue;
             const float spread = m[m.size() * 9 / 10] - m[m.size() / 10];
-            if (spread > 1.0f)
+            if (spread > (vibrato ? 2.4f : 1.0f))
                 continue;
             // How quickly it speaks: time to 70% of the level it settles at.
             const float settled = rmsBetween (x, end - (int64_t) (0.06 * sr), end);
@@ -280,6 +304,9 @@ std::vector<const Cut*> pick (const std::vector<const Cut*>& list, int count)
 }
 } // namespace
 
+// Held notes kept per semitone (straight tone; the other ways of singing).
+constexpr int kHeldStraight = 5, kHeldOther = 2;
+
 int main (int argc, char** argv)
 {
     if (argc < 3)
@@ -300,6 +327,14 @@ int main (int argc, char** argv)
         { "arpeggios/breathy", Breathy, { false, true, true, true } },
         { "scales/belt", Belt, { false, true, true, true } },
         { "arpeggios/belt", Belt, { false, true, true, true } },
+        { "arpeggios/fast_forte", Straight, { false, false, true, false } },
+        { "arpeggios/fast_piano", Straight, { false, false, true, false } },
+        { "long_tones/pp", Vibrato, { true, true, true, false } },
+        { "scales/slow_piano", Vibrato, { false, true, true, true } },
+        { "arpeggios/slow_piano", Vibrato, { false, true, true, true } },
+        { "long_tones/forte", Full, { true, true, true, false } },
+        { "scales/slow_forte", Full, { false, true, true, true } },
+        { "arpeggios/slow_forte", Full, { false, true, true, true } },
     };
 
     std::vector<Cut> cuts;
@@ -308,8 +343,7 @@ int main (int argc, char** argv)
         if (! singerDir.is_directory())
             continue;
         const std::string singer = singerDir.path().filename().string();   // female3, male7...
-        if (singer == "male9")
-            continue;   // a countertenor: his voice sits in neither the tenor nor the bass section
+        const bool countertenor = singer == "male9";   // sings with the altos
         const bool female = singer.rfind ("female", 0) == 0;
         const std::string tag = (female ? "f" : "m") + singer.substr (female ? 6 : 4);
         for (const auto& source : sources)
@@ -324,7 +358,7 @@ int main (int argc, char** argv)
                     continue;
                 const int vowel = vowelIndex (name.back());
                 if (vowel >= 0)
-                    cutFile (f.path(), tag, female, vowel, source.technique, source.want, cuts);
+                    cutFile (f.path(), tag, female, countertenor, vowel, source.technique, source.want, cuts);
             }
         }
     }
@@ -351,7 +385,7 @@ int main (int argc, char** argv)
                             continue;
                         const float lo = kind == Legato ? std::min (c.root, c.to) : c.root;
                         const float hi = kind == Legato ? std::max (c.root, c.to) : c.root;
-                        for (int s : sectionsFor (c.female, lo, hi))
+                        for (int s : sectionsFor (c.female, c.countertenor, lo, hi))
                             if (s == section)
                                 bins[{ (int) std::lround (c.root), kind == Legato ? (int) std::lround (c.to - c.root) : 0 }].push_back (&c);
                     }
@@ -362,7 +396,13 @@ int main (int argc, char** argv)
                     if (technique != Straight) dir /= kTechniqueDirs[technique];
                     if (kind != Sustain) dir /= kKindDirs[kind];
                     fs::create_directories (dir);
-                    const int perBin = kind == Sustain ? (technique == Straight ? 3 : 2) : kind == Onset ? (technique == Straight ? 2 : 1) : 1;
+                    // As many different singers per note as the engine can tell apart: a section of
+                    // ten should not hear the same three takes over and over.
+                    // The other takes are sung by a share of the choir only, and the plug-in keeps
+                    // everything in memory: fewer of them.
+                    const int perBin = kind == Sustain ? (technique == Straight ? kHeldStraight : kHeldOther)
+                                     : kind == Onset ? (technique == Straight ? 3 : hasVibrato (technique) ? 2 : 1)
+                                                     : (technique == Straight ? 2 : 1);
                     int counter = 0;
                     for (auto& [key, list] : bins)
                     {

@@ -226,6 +226,7 @@ struct ChoirEngine::Singer
     SamplePlayer sampler;
     float synthF0 = 220.0f;
     float rJitter = 0.0f;
+    float rTake = 0.0f;          // where it stands in the section's share of classical voices (0..1)
     SampleNote sampleNote;       // what the recorded voice sings (it carries its own vibrato: less is added)
     float noteMidi = -1.0f;      // the note sampleNote.serial counts
     float silentFor = 1.0f;      // seconds since the singer last sang
@@ -526,23 +527,42 @@ void ChoirEngine::updateChildTone()
         }
 }
 
-Singing ChoirEngine::singingFor (const Singer& s) const noexcept
+float ChoirEngine::vibratoShare() const noexcept
 {
-    const Singing g = singingLayer();
-    return g == Singing::Natural && ens.airyEvery > 0 && s.index % ens.airyEvery == 1 ? Singing::Breathy : g;
+    // From the style's vibrato as sung (ensemble, energy and Vibrato knob included): none in a
+    // chamber choir, a fifth in Sacred, most of a gospel choir.
+    const float cents = style.vibratoCents * clampv (params.vibrato / 100.0f, 0.0f, 2.0f);
+    return clampv ((cents - 14.0f) / 32.0f, 0.0f, 0.85f);
+}
+
+Take ChoirEngine::takeFor (const Singer& s) const noexcept
+{
+    if (params.singing != Singing::Natural)
+        return takeOf (params.singing);
+    const float energy = (params.energy - 50.0f) / 50.0f;
+    const bool classical = s.rTake < vibratoShare();
+    const bool airy = ens.airyEvery > 0 && s.index % ens.airyEvery == 1;
+    if (energy >= 0.6f)
+    {
+        // Singing out: gospel and worship choirs belt, the others open into full voice
+        // (chant and children stay in their own voice).
+        if (params.style == Style::Gregorian || ens.trebles)
+            return airy ? Take::Breathy : Take::Natural;
+        const bool belts = params.style == Style::Gospel || params.style == Style::Worship || params.style == Style::Spiritual;
+        return belts && ! classical ? Take::Belt : Take::Full;
+    }
+    if (energy <= -0.6f)
+        return classical ? Take::Vibrato : Take::Breathy;
+    if (airy)
+        return Take::Breathy;
+    if (classical)
+        return energy >= 0.25f ? Take::Full : Take::Vibrato;
+    return Take::Natural;
 }
 
 int ChoirEngine::choirLatency() const noexcept
 {
     return params.lowLatency && params.vocalType != VocalType::Words ? liveLatency : latency;
-}
-
-Singing ChoirEngine::singingLayer() const noexcept
-{
-    if (params.singing != Singing::Natural)
-        return params.singing;
-    const float energy = (params.energy - 50.0f) / 50.0f;
-    return energy >= 0.6f ? Singing::Belt : (energy <= -0.6f ? Singing::Breathy : Singing::Natural);
 }
 
 Scale ChoirEngine::currentScale() const
@@ -785,6 +805,8 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
     s.rScoop = 0.5f + s.rng.uni();
     s.rAttack = 0.75f + 0.5f * s.rng.uni();
     s.rJitter = std::fmod ((float) (s.index * 4 + s.section + 1) * 0.6180340f, 1.0f);   // spread starts without using the rng
+    // Evenly spread through the section (golden ratio), so any share of it is that many singers.
+    s.rTake = std::fmod ((float) (s.index + 1) * 0.6180340f + (float) section * 0.29f, 1.0f);
     s.vibPhase = s.rng.uni();
     s.drift = Wander{};
     s.drift.timeConstant = 0.9f + 0.8f * s.rng.uni();
@@ -1362,8 +1384,11 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
             s.endAge += dt;
     }
 
+    // A recorded voice carries its own vibrato: most of the added one comes off again, all of
+    // it for a singer in their classical voice (the recording's vibrato is the real thing).
     auto& sn = s.sampleNote;
-    sn.hz = s.synthF0 * std::exp2 (-0.75f * (followLead ? vib * 0.35f : vib) / 12.0f);
+    const float ownVib = takeHasVibrato (takeFor (s)) ? 1.0f : 0.75f;
+    sn.hz = s.synthF0 * std::exp2 (-ownVib * (followLead ? vib * 0.35f : vib) / 12.0f);
     sn.noteHz = sn.hz * std::exp2 ((s.targetMidi - s.currentMidi - s.scoop) / 12.0f);
     sn.noteMidi = followLead || s.targetMidi < 0.0f ? -1.0f : s.targetMidi;
     if (singing)
@@ -1637,15 +1662,14 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         echoDuck = duckTo;
         const int64_t echoOffset = activeEchoOffset;
 
-        std::array<const SampleLayer*, NumSections> sampleLayers {}, airyLayers {};
+        // Each section's recordings of the vowel, per take (a take the set lacks falls back).
+        std::array<std::array<const SampleLayer*, SampleSet::kTakes>, NumSections> sampleLayers {};
         if (sampleSet != nullptr)
         {
             const VocalType vt = words ? VocalType::Ah : params.vocalType;
             for (int s = 0; s < NumSections; ++s)
-            {
-                sampleLayers[(size_t) s] = sampleSet->layerFor (formantSection (s), vt, singingLayer());
-                airyLayers[(size_t) s] = ens.airyEvery > 0 ? sampleSet->exactLayer (formantSection (s), vt, Singing::Breathy) : nullptr;
-            }
+                for (int t = 0; t < SampleSet::kTakes; ++t)
+                    sampleLayers[(size_t) s][(size_t) t] = sampleSet->layerFor (formantSection (s), vt, (Take) t);
         }
 
         // Section level by head count, eased so singers joining or leaving don't step the level
@@ -1758,20 +1782,14 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 const LyricScript::Entry* entry = s.syllable >= 0 && lyrics != nullptr
                                                       ? &lyrics->entries[(size_t) (s.syllable % (int) lyrics->entries.size())] : nullptr;
                 Articulation a0, a1;
-                const SampleLayer* layer = sampleLayers[(size_t) s.section];
-                if (airyLayers[(size_t) s.section] != nullptr && singingFor (s) != singingLayer())
-                    layer = airyLayers[(size_t) s.section];
+                const SampleLayer* layer = sampleLayers[(size_t) s.section][(size_t) takeFor (s)];
                 if (entry != nullptr)
                 {
                     const float age = s.ending ? s.endAge : s.sylAge;
                     a0 = LyricScript::at (*entry, age, s.ending);
                     a1 = LyricScript::at (*entry, age + dt, s.ending);
                     if (sampleSet != nullptr)
-                    {
-                        const SampleLayer* airy = singingFor (s) != singingLayer()
-                                                      ? sampleSet->exactLayer (formantSection (s.section), entry->vowel, singingFor (s)) : nullptr;
-                        layer = airy != nullptr ? airy : sampleSet->layerFor (formantSection (s.section), entry->vowel, singingLayer());
-                    }
+                        layer = sampleSet->layerFor (formantSection (s.section), entry->vowel, takeFor (s));
                     if (s.vowelOverride != (int) entry->vowel)
                     {
                         setSingerVowel (s, entry->vowel);

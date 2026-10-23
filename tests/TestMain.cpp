@@ -807,18 +807,20 @@ static float rmsAt (const std::vector<float>& y, double sr, double t0, double t1
 TEST (recordedNamesDescribeTheirTakes)
 {
     const auto move = SampleSet::infoFromPath ("Sopranos/ah/breathy/legato/f2_ah_007_m6561_to6342_x152.wav");
-    CHECK (move.singing == Singing::Breathy);
+    CHECK (move.take == Take::Breathy);
     CHECK (move.kind == SampleKind::Move);
     CHECK_NEAR (move.toMidi, 63.42, 0.001);
     CHECK_NEAR (move.crossingSeconds, 0.152, 0.0001);
     CHECK (move.singer == 102);
     CHECK_NEAR (SampleSet::rootFromPath ("Sopranos/ah/breathy/legato/f2_ah_007_m6561_to6342_x152.wav"), 65.61, 0.001);
     const auto onset = SampleSet::infoFromPath ("Basses/oh/belt/short/m11_oh_003_m4512.wav");
-    CHECK (onset.singing == Singing::Belt);
+    CHECK (onset.take == Take::Belt);
     CHECK (onset.kind == SampleKind::Onset);
     CHECK (onset.singer == 211);
+    CHECK (SampleSet::infoFromPath ("Altos/oo/vibrato/m9_oo_004_m6400.wav").take == Take::Vibrato);
+    CHECK (SampleSet::infoFromPath ("Basses/ah/fullvoice/legato/m3_ah_001_m4800_to5000_x120.wav").take == Take::Full);
     const auto plain = SampleSet::infoFromPath ("My Choir/Altos/alto_ah_take2.wav");
-    CHECK (plain.singing == Singing::Natural && plain.kind == SampleKind::Held && plain.singer == -1);
+    CHECK (plain.take == Take::Natural && plain.kind == SampleKind::Held && plain.singer == -1);
 }
 
 TEST (recordedSingingStylesFallBack)
@@ -828,17 +830,61 @@ TEST (recordedSingingStylesFallBack)
     const auto x = testTone (sr, 2.0, 60.0f, 60.0f, 99.0, 0.0);
     set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), sr, 60.0f);
     SampleNoteInfo breathy;
-    breathy.singing = Singing::Breathy;
+    breathy.take = Take::Breathy;
     set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), sr, 62.0f, breathy);
     set.finalise();
     CHECK (set.numNotes() == 2);
-    CHECK (set.has (Singing::Breathy) && ! set.has (Singing::Belt));
+    CHECK (set.has (Take::Breathy) && ! set.has (Take::Belt));
     const auto* natural = set.layerFor (Tenor, VocalType::Ah);
-    const auto* airy = set.layerFor (Tenor, VocalType::Ah, Singing::Breathy);
-    const auto* belt = set.layerFor (Tenor, VocalType::Ah, Singing::Belt);
+    const auto* airy = set.layerFor (Tenor, VocalType::Ah, Take::Breathy);
+    const auto* belt = set.layerFor (Tenor, VocalType::Ah, Take::Belt);
     CHECK (natural != nullptr && airy != nullptr && natural != airy);
     CHECK (belt == natural);   // nothing belted: natural singing
+    CHECK (set.layerFor (Tenor, VocalType::Oo, Take::Breathy) == natural);   // never another vowel's breathy take
     if (airy != nullptr) CHECK_NEAR (airy->zones[0].rootMidi, 62.0, 0.01);
+}
+
+TEST (classicalVoicesJoinWithTheStyle)
+{
+    // Straight-tone recordings are plain, the classical-voice ones carry a strong third
+    // harmonic. A chamber choir sings straight; in a gospel choir most singers use their
+    // classical voice; Vibrato at 0 % keeps everyone straight.
+    const double sr = 48000.0;
+    SampleSet set;
+    for (int sec = 0; sec < NumSections; ++sec)
+        for (float m = 40.0f; m <= 84.0f; m += 2.0f)
+        {
+            std::vector<float> plain ((size_t) (2.0 * sr)), rich (plain.size());
+            for (size_t i = 0; i < plain.size(); ++i)
+            {
+                const double ph = 2.0 * kPi * midiToHz (m) * (double) i / sr;
+                plain[i] = (float) (0.3 * std::sin (ph));
+                rich[i] = (float) (0.3 * (std::sin (ph) + 0.9 * std::sin (3.0 * ph)));
+            }
+            set.addNote (sec, 0, plain.data(), (int64_t) plain.size(), sr, m);
+            SampleNoteInfo classical;
+            classical.take = Take::Vibrato;
+            set.addNote (sec, 0, rich.data(), (int64_t) rich.size(), sr, m, classical);
+        }
+    set.finalise();
+    auto x = test::singMelody ({ { 60.0f, 3.0f, 0.3f } }, sr, Tenor, 0.0f);
+    auto third = [&] (Style style, float vibrato)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        eng.setSampleSet (&set);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::Unison);
+        p.sections[Tenor].solo = true;
+        p.style = style;
+        p.vibrato = vibrato;
+        eng.setParams (p);
+        const auto y = runEngine (eng, x, sr);
+        return bandDb (y, sr, 0.8, 2.8, 700.0f, 880.0f) - bandDb (y, sr, 0.8, 2.8, 230.0f, 300.0f);
+    };
+    const float chamber = third (Style::Chamber, 100.0f), gospel = third (Style::Gospel, 100.0f), straight = third (Style::Gospel, 0.0f);
+    std::printf ("  third harmonic against the note: chamber %.1f dB, gospel %.1f dB, gospel with no vibrato %.1f dB\n", chamber, gospel, straight);
+    CHECK (gospel > chamber + 10.0f);
+    CHECK (straight < gospel - 10.0f);
 }
 
 TEST (recordedLegatoSingsTheRecordedMove)

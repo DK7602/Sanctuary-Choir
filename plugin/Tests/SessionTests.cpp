@@ -485,8 +485,9 @@ static void chordLaneAndDragOut()
 
 static void voicePackLoads()
 {
-    // The voice pack that ships with the plug-in: held notes, onsets, legato moves, and the
-    // breathy and belted takes, all loaded, and singing a legato line from them.
+    // The voice pack that ships with the plug-in: held notes, onsets, legato moves, the
+    // breathy and belted takes and the classical voice (soft and full), all loaded, and singing
+    // a legato line from them.
     std::printf ("[ voicePackLoads ]\n");
     const File dir (String (SANCTUARY_SOURCE_DIR) + "/voices/SanctuaryVoices");
     if (! dir.isDirectory())
@@ -504,28 +505,33 @@ static void voicePackLoads()
     if (set == nullptr)
         return;
     std::printf ("  %s in %.1f s\n", set->describe().c_str(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
-    check (set->numNotes() > 1500, "held notes in every way of singing");
-    check (set->has (sc::Singing::Breathy) && set->has (sc::Singing::Belt), "breathy and belted takes");
+    check (set->numNotes() > 3000, "held notes in every take");
+    check (set->has (sc::Take::Breathy) && set->has (sc::Take::Belt), "breathy and belted takes");
+    check (set->has (sc::Take::Vibrato) && set->has (sc::Take::Full), "the classical voice, soft and full");
     size_t onsets = 0, moves = 0;
     for (int s = 0; s < sc::NumSections; ++s)
-        for (auto how : { sc::Singing::Natural, sc::Singing::Breathy, sc::Singing::Belt })
-            if (const auto* l = set->layerFor (s, sc::VocalType::Ah, how))
+        for (int t = 0; t < sc::SampleSet::kTakes; ++t)
+            if (const auto* l = set->layerFor (s, sc::VocalType::Ah, (sc::Take) t))
             {
                 onsets += l->onsets.size();
                 moves += l->moves.size();
-                check (l != set->layerFor (s, sc::VocalType::Ah) || how == sc::Singing::Natural, "a layer of its own per way of singing");
+                check (l != set->layerFor (s, sc::VocalType::Ah) || t == 0, "a layer of its own per take");
             }
     std::printf ("  Ah: %zu onsets, %zu moves\n", onsets, moves);
     check (onsets > 40 && moves > 200, "onsets and moves");
 
     // Sing a melody (learned, so every section moves note to note) in each way of singing.
     for (auto how : { sc::Singing::Natural, sc::Singing::Breathy, sc::Singing::Belt })
+        for (auto style : { sc::Style::Sacred, sc::Style::Gospel })
     {
+        if (how != sc::Singing::Natural && style != sc::Style::Sacred)
+            continue;
         sc::ChoirEngine engine;
         engine.prepare (48000.0, 512);
         engine.setSampleSet (set);
         sc::EngineParams p;
         p.singing = how;
+        p.style = style;   // Gospel: most of the choir in their classical voice
         p.reverb = 0.0f;
         p.leadDb = -60.0f;
         engine.setParams (p);
@@ -540,7 +546,7 @@ static void voicePackLoads()
         }
         for (float v : l) { e += (double) v * v; finite = finite && std::isfinite (v); }
         const double rmsDb = 10.0 * std::log10 (e / (double) l.size() + 1e-20);
-        std::printf ("  %s: %.1f dB\n", sc::getSingingNames()[(int) how], rmsDb);
+        std::printf ("  %s, %s: %.1f dB\n", sc::getSingingNames()[(int) how], sc::getStyleNames()[(int) style], rmsDb);
         check (finite && rmsDb > -40.0 && rmsDb < -6.0, "sings from the pack");
     }
 
