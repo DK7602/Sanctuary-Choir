@@ -187,7 +187,7 @@
     el("h2", "", page, "SETTINGS");
     const row = el("div", "row", page);
     const left = el("div", "", row);
-    left.style.cssText = "width:520px;display:flex;flex-direction:column;gap:12px";
+    left.style.cssText = "width:520px;display:flex;flex-direction:column;gap:10px";
     let foot = null;
 
     const midi = el("div", "group", left);
@@ -197,8 +197,8 @@
     const wordsBtn = el("button", "pill", midiHead, "SUNG WORDS");
     wordsBtn.title = "Type words (Kyrie eleison, Alleluia, Glory to God...) and the MIDI choir sings them, a syllable per note";
     wordsBtn.addEventListener("click", () => info.openWords && info.openWords());
-    const midiRow = el("div", "", midi);
-    midiRow.style.cssText = "display:flex;gap:10px 22px;flex-wrap:wrap";
+    // The three switches on one line, so the column fits the page with a long take summary.
+    const midiRow = el("div", "switch-row", midi);
     toggleSwitch(midiRow, "midiEnabled", "MIDI chords").title = "Hold chords to choose the harmony; with no voice coming in, the choir sings what you play. Program Change picks a preset.";
     toggleSwitch(midiRow, "midiParts", "Parts on ch. 1\u20134").title = "Channels 1, 2, 3 and 4 sing exactly the soprano, alto, tenor and bass notes you play";
     toggleSwitch(midiRow, "followBand", "Follow the band").title = "Sing the chords of the band, keys or backing track you route to Sanctuary's side-chain input";
@@ -256,7 +256,7 @@
         + (info.monoOutput ? "  \u00b7  mono track (use a stereo track for the full stage)" : "");
     };
 
-    const take = el("div", "group", left);
+    const take = el("div", "group take-group", left);
     take.style.position = "relative";
     el("h3", "", take, "LEARNED TAKE");
     const passesBtn = el("button", "pill", take, "MULTI-TAKE");
@@ -272,7 +272,7 @@
     exp.addEventListener("click", () => info.openTake && info.openTake());
     const presetFolder = el("button", "big-btn", btns, "PRESETS FOLDER");
     presetFolder.addEventListener("click", () => SC.send({ type: "cmd", name: "presetFolder" }));
-    const takeInfo = el("p", "", take, "");
+    const takeInfo = el("p", "take-info", take, "");
     info.onStatus = (st) => {
       if (st.latencyMs !== undefined && (st.latencyMs !== info.latencyMs || st.liveChoirMs !== info.liveChoirMs || !!st.monoOutput !== !!info.monoOutput)) {
         info.latencyMs = st.latencyMs;
@@ -291,6 +291,7 @@
       passesBtn.textContent = passCount ? "MULTI-TAKE · " + (passCount + 1) + " PASSES" : "MULTI-TAKE";
       passesBtn.classList.toggle("on", passCount > 0 || !!l.recordingPass);
       takeInfo.textContent = l.hasTake ? (l.text || "") : "No take yet. Press LEARN and sing, or LOAD a vocal file.";
+      takeInfo.title = takeInfo.textContent;
     };
 
     const rightCol = el("div", "", row);

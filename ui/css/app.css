@@ -63,8 +63,24 @@ html, body {
   font-size: 21px; font-weight: 500; color: #f4ead9; letter-spacing: 0.2px;
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
-#presetPrev { left: 404px; top: 27px; width: 16px; height: 36px; border-radius: 4px; }
-#presetNext { left: 420px; top: 27px; width: 16px; height: 36px; border-radius: 4px; }
+/* The previous/next pair, drawn over the skin's own (its left arrow is faded and clipped). */
+#presetPrev, #presetNext {
+  top: 26px; width: 18px; height: 38px;
+  background: linear-gradient(180deg, #211910 0%, #0e0a07 100%);
+  border: 1px solid rgba(201, 162, 98, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 230, 180, 0.08);
+}
+#presetPrev { left: 402px; border-radius: 8px 0 0 8px; border-right: 1px solid rgba(201, 162, 98, 0.22); }
+#presetNext { left: 420px; border-radius: 0 8px 8px 0; border-left: none; }
+#presetPrev::before, #presetNext::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px;
+  border-left: 2px solid #e6cd96; border-bottom: 2px solid #e6cd96;
+  filter: drop-shadow(0 0 2px rgba(255, 215, 150, 0.35));
+}
+#presetPrev::before { transform: translate(-30%, -50%) rotate(45deg); }
+#presetNext::before { transform: translate(-70%, -50%) rotate(-135deg); }
+#presetPrev:hover::before, #presetNext:hover::before { border-color: #fff1cf; }
+#presetPrev::after, #presetNext::after { border-radius: inherit; }
 
 #tabs { position: absolute; left: 0; top: 0; }
 .tab {
@@ -373,6 +389,16 @@ html, body {
 .big-btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
 .big-btn.small { height: 30px; padding: 0 12px; font-size: 10.5px; letter-spacing: 1.6px; }
 .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 18px; }
+.switch-row { display: flex; gap: 8px 14px; flex-wrap: wrap; }
+.switch-row .switch { font-size: 16px; gap: 8px; }
+/* Settings: the learned take's buttons and summary, kept inside the page (two lines at most). */
+.take-group { padding: 10px 14px; }
+.take-group h3 { margin-bottom: 6px; }
+.take-group .big-btn { height: 32px; padding: 0 14px; }
+.page .take-group .take-info {
+  font-size: 15px; line-height: 1.25; margin: 7px 0 0;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 .switch .track { width: 44px; height: 24px; border-radius: 12px; background: #17110e; border: 1px solid rgba(232,201,138,0.45); position: relative; transition: background 150ms; }
 .switch .track::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #8a7a62; transition: transform 150ms, background 150ms; }
 .switch.on .track { background: rgba(232, 201, 138, 0.3); }
