@@ -98,7 +98,7 @@ html, body {
   box-shadow: 0 2px 10px rgba(0,0,0,0.5);
   transition: opacity 300ms ease;
 }
-#singerBadge { right: 162px; }
+#singerBadge { right: 196px; top: 186px; }
 #harmonyBadge { left: 196px; top: 186px; display: flex; gap: 12px; }
 #venuePicker {
   position: absolute; left: 196px; top: 108px; width: 302px; height: 68px; padding: 0 14px 0 10px;
@@ -120,6 +120,23 @@ html, body {
 }
 #venuePicker .vp-desc { font-family: "Cormorant Garamond", Georgia, serif; font-size: 16.5px; line-height: 1.2; padding-top: 3px; color: #e9dcc2; }
 #venuePicker .vp-chev { flex: none; align-self: flex-start; margin-top: 14px; color: #f0cf8c; }
+/* Energy: the venue plaque's mirror image, top right of the scene */
+#energyPlaque {
+  position: absolute; left: 950px; top: 108px; width: 302px; height: 68px; padding: 0 10px 0 16px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 10px; cursor: ns-resize; user-select: none; touch-action: none;
+  background: linear-gradient(180deg, rgba(20, 14, 10, 0.8), rgba(12, 9, 7, 0.68));
+  border: 1px solid rgba(232, 201, 138, 0.55); border-radius: 12px; box-shadow: 0 3px 14px rgba(0, 0, 0, 0.55);
+  color: var(--gold-bright); transition: border-color 0.15s, box-shadow 0.15s;
+}
+#energyPlaque:hover { border-color: rgba(255, 220, 150, 0.9); box-shadow: 0 3px 14px rgba(0, 0, 0, 0.55), 0 0 14px rgba(255, 200, 110, 0.25); }
+#energyPlaque .ep-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#energyPlaque .ep-name {
+  font-family: "Cinzel", serif; font-size: 19px; letter-spacing: 1px; line-height: 1.15; color: #f2d79a; white-space: nowrap;
+  padding-bottom: 4px; border-bottom: 1px solid rgba(232, 201, 138, 0.3);
+}
+#energyPlaque .ep-desc { font-family: "Cormorant Garamond", Georgia, serif; font-size: 16.5px; line-height: 1.2; padding-top: 3px; color: #e9dcc2; }
+#energyPlaque .ep-chev { flex: none; align-self: flex-start; margin-top: 14px; padding: 0; background: none; border: none; color: #f0cf8c; cursor: pointer; }
+#energyPlaque .ep-dial { flex: none; width: 50px; height: 50px; }
 .menu .item .idesc { margin-left: 10px; font-size: 14px; color: var(--muted); }
 #chordReadout { color: #fff4dc; }
 #chordReadout:empty { display: none; }

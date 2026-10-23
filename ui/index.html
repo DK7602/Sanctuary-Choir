@@ -28,6 +28,12 @@
       <span class="vp-text"><span class="vp-name"></span><span class="vp-desc"></span></span>
       <svg class="vp-chev" viewBox="0 0 16 16" width="16" height="16"><path d="M3.5 6l4.5 4.5L12.5 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
+    <!-- How hard the choir sings: drag like a knob, or pick a level -->
+    <div id="energyPlaque" title="Energy: how hard the choir sings. Drag up or down, or pick a level.">
+      <span class="ep-text"><span class="ep-name">Energy</span><span class="ep-desc"></span></span>
+      <button class="ep-chev" title="Choose a level"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M3.5 6l4.5 4.5L12.5 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <canvas class="ep-dial"></canvas>
+    </div>
 
     <!-- MIX / FX / SETTINGS pages float over the church -->
     <section id="page-mix" class="page hidden" aria-label="Mix"></section>

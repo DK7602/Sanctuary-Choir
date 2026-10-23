@@ -9,6 +9,7 @@
 **Perform page**
 - **Choir Size** adds singers one at a time (up to 40). You watch them walk into the choir loft as you turn the knob.
 - **Volume, Space, Reverb, Tone, Presence** shape the sound. Space spreads the singers across the stage and adds early reflections.
+- **Energy**: how hard the choir sings, from hushed to massive, on the main page.
 - **Harmony Mode**:
   - Full Choir: classic four-part hymn voicing with voice leading.
   - Gospel Stack: close harmony with 7ths.
@@ -44,7 +45,6 @@
   - Per-section fader, pan, mute/solo and singing range.
   - Lead vocal and choir levels.
   - Humanize, Vibrato, Glide, Formant (gender/size), Pitch Lock and Breath.
-  - **Energy**: how hard the choir sings, from hushed to massive, in one knob.
   - **Sub-Octave**: oktavists, basses doubling the bass part an octave down.
 - **FX page**:
   - Six sacred spaces: Grand Cathedral, Stone Abbey, Wooden Chapel, Concert Hall, Gospel Church, Studio Room. Each one appears on screen with its own choir (monks in the abbey for Gregorian chant), chosen from the picker at the top of the scene.

@@ -1,7 +1,7 @@
 // Sanctuary Choir - main UI wiring.
 (function () {
   "use strict";
-  const { Params, BigKnob, Dropdown, Menu, hiDpiCanvas, stageRect, noteName } = window.SCW;
+  const { Params, BigKnob, Dropdown, Menu, hiDpiCanvas, stageRect, noteName, dragValue } = window.SCW;
   const { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords, buildPasses } = window.SCPages;
 
   // Each venue has its own room and choir; monks sing Gregorian chant in the abbey.
@@ -497,6 +497,54 @@
     });
     Params.on("venue", () => showRoom(false));
     Params.on("style", () => showRoom(false));
+
+    // Energy: the plaque opposite the room's. Drag it like a knob; the chevron picks a level.
+    const energy = $("energyPlaque"), energyDial = energy.querySelector(".ep-dial");
+    const ENERGY_LEVELS = [["Hushed", 0, "Quiet, airy, slow to speak"], ["Soft", 25, "Gentle and warm"], ["Natural", 50, "As the style sings"],
+                           ["Powerful", 75, "Louder, brighter, pressed"], ["Massive", 100, "Everything they have"]];
+    const drawEnergy = () => {
+      const c = hiDpiCanvas(energyDial, 50, 50);
+      const v = Params.norm("energy"), s = 0.75 * Math.PI, e = 2.25 * Math.PI, a = s + (e - s) * v;
+      c.clearRect(0, 0, 50, 50);
+      c.lineCap = "round";
+      c.lineWidth = 4;
+      c.strokeStyle = "#0a0706";
+      c.beginPath(); c.arc(25, 25, 20, s, e); c.stroke();
+      c.save();
+      c.shadowColor = "rgba(255, 200, 120, 0.9)";
+      c.shadowBlur = 7;
+      c.strokeStyle = "#f3d08a";
+      c.lineWidth = 3.2;
+      c.beginPath(); c.arc(25, 25, 20, s, a); c.stroke();
+      c.restore();
+      const g = c.createRadialGradient(20, 18, 1.5, 25, 25, 14);
+      g.addColorStop(0, "#fff0c4"); g.addColorStop(0.4, "#d8b06a"); g.addColorStop(0.8, "#8c6430"); g.addColorStop(1, "#3d2a12");
+      c.fillStyle = g;
+      c.beginPath(); c.arc(25, 25, 13.5, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = "rgba(255, 248, 232, 0.95)";
+      c.lineWidth = 1.8;
+      c.beginPath(); c.moveTo(25 + Math.cos(a) * 5, 25 + Math.sin(a) * 5); c.lineTo(25 + Math.cos(a) * 11.5, 25 + Math.sin(a) * 11.5); c.stroke();
+      energy.querySelector(".ep-desc").textContent = Params.format("energy") + " \u00b7 " + Math.round(Params.get("energy")) + " %";
+    };
+    dragValue(energy, "energy", { sensitivity: 180 });
+    const chev = energy.querySelector(".ep-chev");
+    chev.addEventListener("pointerdown", (e) => e.stopPropagation());
+    chev.addEventListener("dblclick", (e) => e.stopPropagation());
+    chev.addEventListener("click", (e) => {
+      e.stopPropagation();
+      Menu.open(stageRect(energy), (m) => {
+        Menu.heading(m, "ENERGY");
+        ENERGY_LEVELS.forEach(([name, v, desc]) => {
+          const it = Menu.item(m, name, Params.format("energy") === name, () => { Params.begin("energy"); Params.set("energy", v); Params.end("energy"); });
+          const d = document.createElement("span");
+          d.className = "idesc";
+          d.textContent = desc;
+          it.appendChild(d);
+        });
+      });
+    });
+    Params.on("energy", drawEnergy);
+    window.addEventListener("sc-rescale", drawEnergy);
 
     Choir.init($("choirCanvas")).then(() => {
       Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || MAX_ENGINE_SINGERS)), Choir.maxSingers() || MAX_ENGINE_SINGERS), true);
