@@ -1352,6 +1352,29 @@ TEST (childrenSingInTrebleRange)
     CHECK (ensembleRange (Ensemble::Choir, Bass, SectionRange { 40, 64 }).low == 40);
 }
 
+TEST (childrenSingPurer)
+{
+    // A child's voice is not a woman's sped up: little above 3 kHz (no singer's ring), so the
+    // children's sopranos are darker than the women's on the same notes, not brighter.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 67, 1.5f, 0.1f }, { 72, 1.5f, 0.1f }, { 69, 1.5f, 0.5f } }, sr, Soprano, 20.0f);
+    float tilt[2] = {};
+    for (int k = 0; k < 2; ++k)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+        p.ensemble = k == 0 ? Ensemble::Choir : Ensemble::Children;
+        eng.setParams (p);
+        auto st = runStems (eng, x);
+        const double lat = eng.getLatencySamples() / sr;
+        const auto& sop = st[Soprano * 2];
+        tilt[k] = bandDb (sop, sr, 0.4 + lat, 4.0 + lat, 3000.0f, 6000.0f) - bandDb (sop, sr, 0.4 + lat, 4.0 + lat, 300.0f, 1500.0f);
+    }
+    std::printf ("  above 3 kHz against the vowel: women %.1f dB, children %.1f dB\n", tilt[0], tilt[1]);
+    CHECK (tilt[1] < tilt[0] - 3.0f);
+}
+
 TEST (congregationEntersLooser)
 {
     // A congregation comes in late and scattered: the choir takes longer to reach full voice.

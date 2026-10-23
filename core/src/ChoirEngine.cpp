@@ -353,6 +353,7 @@ void ChoirEngine::reset()
     leadCentre = -1.0f;
     leadVoice = -1;
     shapedVoice = -2;
+    childToneOn = false;   // its filters are set again (for this sample rate)
     tracker.reset();
     analyzer.reset();
     for (auto& ps : passSources)
@@ -476,10 +477,10 @@ void ChoirEngine::updateVoiceCharacter()
     static const Shape fromFemale[] = { { 1.0f, 0, 0, 0, 2400.0f, 2900.0f }, { 0.97f, 0, 0, 0, 2400.0f, 2900.0f },
                                         { 0.86f, 2.0f, 4.0f, 3.0f, 2400.0f, 2900.0f }, { 0.82f, 1.0f, 3.0f, 4.0f, 2400.0f, 2900.0f } };
     // Children: a much shorter tract than either adult, little chest and no singer's formant.
-    static const Shape kidsFromMale[] = { { 1.32f, -12.0f, -7.0f, -5.0f, 2200.0f, 3200.0f }, { 1.3f, -11.0f, -7.0f, -5.0f, 2200.0f, 3200.0f },
-                                          { 1.3f, -11.0f, -7.0f, -5.0f, 2200.0f, 3200.0f }, { 1.28f, -10.0f, -6.0f, -5.0f, 2200.0f, 3200.0f } };
-    static const Shape kidsFromFemale[] = { { 1.12f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f }, { 1.1f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f },
-                                            { 1.1f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f }, { 1.08f, -2.0f, -3.0f, -3.0f, 2400.0f, 2900.0f } };
+    static const Shape kidsFromMale[] = { { 1.26f, -13.0f, -8.0f, -6.0f, 2200.0f, 3200.0f }, { 1.25f, -13.0f, -8.0f, -6.0f, 2200.0f, 3200.0f },
+                                          { 1.25f, -13.0f, -8.0f, -6.0f, 2200.0f, 3200.0f }, { 1.24f, -12.0f, -7.0f, -6.0f, 2200.0f, 3200.0f } };
+    static const Shape kidsFromFemale[] = { { 1.08f, -6.0f, -5.0f, -4.0f, 2600.0f, 3000.0f }, { 1.07f, -6.0f, -5.0f, -4.0f, 2600.0f, 3000.0f },
+                                            { 1.07f, -6.0f, -5.0f, -4.0f, 2600.0f, 3000.0f }, { 1.06f, -6.0f, -5.0f, -4.0f, 2600.0f, 3000.0f } };
     const Shape* table = ens.trebles ? (voice == 0 ? kidsFromMale : kidsFromFemale) : (voice == 0 ? fromMale : fromFemale);
     for (int s = 0; s < NumSections; ++s)
     {
@@ -501,6 +502,34 @@ void ChoirEngine::updateVoiceCharacter()
             }
         }
     }
+}
+
+void ChoirEngine::updateChildTone()
+{
+    // The recorded voices are trained women: a child has less of everything above about
+    // 2.5 kHz (no singer's formant cluster, a softer, more sinusoidal source) and no chest.
+    const bool on = ens.trebles && params.vocalType != VocalType::Words;
+    if (on == childToneOn)
+        return;
+    childToneOn = on;
+    if (! on)
+        return;
+    for (auto& t : childTone)
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            t.high[(size_t) ch].highShelf (sr, 2600.0, -6.0, 0.7);
+            t.ring[(size_t) ch].peak (sr, 3100.0, 1.2, -4.0);
+            t.low[(size_t) ch].lowShelf (sr, 260.0, -3.5);
+            t.high[(size_t) ch].reset();
+            t.ring[(size_t) ch].reset();
+            t.low[(size_t) ch].reset();
+        }
+}
+
+Singing ChoirEngine::singingFor (const Singer& s) const noexcept
+{
+    const Singing g = singingLayer();
+    return g == Singing::Natural && ens.airyEvery > 0 && s.index % ens.airyEvery == 1 ? Singing::Breathy : g;
 }
 
 int ChoirEngine::choirLatency() const noexcept
@@ -577,7 +606,10 @@ void ChoirEngine::setParams (const EngineParams& in)
             style.vibratoCents *= 0.3f; style.detuneCents *= 0.8f; style.driftCents *= 1.3f; style.timingMs *= 1.3f;
             style.scoopCents *= 0.6f; style.glideMs *= 0.8f; style.releaseS *= 0.9f; style.breath *= 1.6f;
             style.softness = clampv (style.softness + 0.12f, 0.0f, 1.0f);
-            ens.formantSpread = 1.3f; ens.tract = 1.18f; ens.zoneOffset = -3.0f; ens.trebles = true;
+            // Children's formants are about 10 % above women's (singing, ages 9-13), not the
+            // 20 % of speech: more makes the women's recordings sound sped up. What makes a child
+            // is the voice: pure, no singer's ring, no chest, airy (childTone, airyEvery).
+            ens.formantSpread = 1.3f; ens.tract = 1.1f; ens.zoneOffset = -1.6f; ens.airyEvery = 3; ens.trebles = true;
             break;
         case Ensemble::Gang:        // shouted: pressed and bright, no vibrato, loose and punchy
             style.vibratoCents *= 0.08f; style.detuneCents *= 2.2f; style.driftCents *= 1.6f; style.timingMs *= 3.0f;
@@ -1605,12 +1637,15 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         echoDuck = duckTo;
         const int64_t echoOffset = activeEchoOffset;
 
-        std::array<const SampleLayer*, NumSections> sampleLayers {};
+        std::array<const SampleLayer*, NumSections> sampleLayers {}, airyLayers {};
         if (sampleSet != nullptr)
         {
             const VocalType vt = words ? VocalType::Ah : params.vocalType;
             for (int s = 0; s < NumSections; ++s)
+            {
                 sampleLayers[(size_t) s] = sampleSet->layerFor (formantSection (s), vt, singingLayer());
+                airyLayers[(size_t) s] = ens.airyEvery > 0 ? sampleSet->exactLayer (formantSection (s), vt, Singing::Breathy) : nullptr;
+            }
         }
 
         // Section level by head count, eased so singers joining or leaving don't step the level
@@ -1724,13 +1759,19 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                                                       ? &lyrics->entries[(size_t) (s.syllable % (int) lyrics->entries.size())] : nullptr;
                 Articulation a0, a1;
                 const SampleLayer* layer = sampleLayers[(size_t) s.section];
+                if (airyLayers[(size_t) s.section] != nullptr && singingFor (s) != singingLayer())
+                    layer = airyLayers[(size_t) s.section];
                 if (entry != nullptr)
                 {
                     const float age = s.ending ? s.endAge : s.sylAge;
                     a0 = LyricScript::at (*entry, age, s.ending);
                     a1 = LyricScript::at (*entry, age + dt, s.ending);
                     if (sampleSet != nullptr)
-                        layer = sampleSet->layerFor (formantSection (s.section), entry->vowel, singingLayer());
+                    {
+                        const SampleLayer* airy = singingFor (s) != singingLayer()
+                                                      ? sampleSet->exactLayer (formantSection (s.section), entry->vowel, singingFor (s)) : nullptr;
+                        layer = airy != nullptr ? airy : sampleSet->layerFor (formantSection (s.section), entry->vowel, singingLayer());
+                    }
                     if (s.vowelOverride != (int) entry->vowel)
                     {
                         setSingerVowel (s, entry->vowel);
@@ -1779,6 +1820,22 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         }
         if (numWaiting > 0)
             flushWaiting();
+    }
+
+    // Children singing vowels: a child's tone from the recorded women.
+    updateChildTone();
+    if (stems == nullptr && childToneOn)
+    {
+        for (int s = 0; s < NumSections; ++s)
+        {
+            auto& t = childTone[(size_t) s];
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                float* x = sec (s, ch);
+                for (int i = 0; i < c; ++i)
+                    x[i] = t.low[(size_t) ch].process (t.ring[(size_t) ch].process (t.high[(size_t) ch].process (x[i])));
+            }
+        }
     }
 
     // Words mode: give each section the vocal tract and tone of the voices that sing there.

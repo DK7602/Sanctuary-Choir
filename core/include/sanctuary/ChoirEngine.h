@@ -259,6 +259,8 @@ private:
     /** Which recorded takes the voices sing from: the Singing choice, or breathy and belted
         takes at the ends of the Energy range when Singing is Natural. */
     Singing singingLayer() const noexcept;
+    /** The takes this singer sings from: the choir's, or breathy for a child's airy voice. */
+    Singing singingFor (const Singer& s) const noexcept;
     /** The PSOLA analyser a singer sings from (the input's or a pass's), and how far behind the
         input's that one's timeline runs. */
     const PsolaAnalyzer& sourceOf (const Singer& s, int64_t& base) const noexcept;
@@ -351,6 +353,7 @@ private:
         float tract = 1.0f;           // vocal tract scale against an adult choir (children ~1.18)
         float drive = 0.0f;           // choir bus saturation (shouting)
         float zoneOffset = 0.0f;      // recorded voices: sing from notes this far below (raises formants)
+        int airyEvery = 0;            // recorded voices: every Nth singer sings the breathy takes
         bool trebles = false;         // tenors and basses sing as trebles
     } ens;
     Ensemble lastEnsemble = Ensemble::Count;
@@ -389,6 +392,11 @@ private:
         bool active = false;
     };
     std::array<VoiceShape, NumSections> voiceShape;
+    // Children singing vowels: the recorded (adult) voices made a child's (purer, no ring,
+    // no chest). In Words mode the voice shapes above do it.
+    std::array<VoiceShape, NumSections> childTone;
+    bool childToneOn = false;
+    void updateChildTone();
     std::array<float, NumSections> vocalTract { 1.0f, 1.0f, 1.0f, 1.0f };
     float leadCentre = -1.0f;    // where the lead sings (MIDI), slowly averaged
     int leadVoice = -1;          // 0 = low (male) lead, 1 = high (female) lead, -1 unknown

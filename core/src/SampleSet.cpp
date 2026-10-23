@@ -287,6 +287,15 @@ const SampleLayer* SampleSet::layerFor (int section, VocalType vowel, Singing si
     return find (0);
 }
 
+const SampleLayer* SampleSet::exactLayer (int section, VocalType vowel, Singing singing) const noexcept
+{
+    const int v = (int) vowel, how = (int) singing;
+    if (section < 0 || section >= NumSections || v < 0 || v >= kVowels || how < 0 || how >= kSingings)
+        return nullptr;
+    const auto& l = layers[(size_t) section][(size_t) v][(size_t) how];
+    return l.empty() ? nullptr : &l;
+}
+
 bool SampleSet::has (Singing singing) const noexcept
 {
     const int how = (int) singing;

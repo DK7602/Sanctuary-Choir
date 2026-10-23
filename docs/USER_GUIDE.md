@@ -178,7 +178,7 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
 - **Presets** (top left) come in categories: Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, and Kids & Crowds. Point at a category to see its presets. Presets change the choir's sound, not your song: the Key and Scale you set stay as they are.
 - **Ensemble** (MIX page) chooses who sings:
   - **Choir**: an adult choir.
-  - **Children**: light, straight voices; every part is sung by trebles.
+  - **Children**: light, straight voices; every part is sung by trebles. They sound like children rather than grown-ups sped up: a child's pure tone (none of a trained singer's ring, no chest), a little higher in the vocal tract than the women, and some airy voices among them.
   - **Gang**: shouted gang vocals, punchy and loose with no vibrato. Try it with Unison and Words.
   - **Congregation**: untrained voices, wide tuning and late entrances, like a church full of people.
 - **Rhythm** (FX page) gates the choir in time with your song, following your DAW's tempo:

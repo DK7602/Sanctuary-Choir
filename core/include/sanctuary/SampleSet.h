@@ -93,6 +93,8 @@ public:
         to nothing, i.e. the synthesised hum), or nullptr. A way of singing the set has no
         recordings of falls back to natural singing. */
     const SampleLayer* layerFor (int section, VocalType vowel, Singing singing = Singing::Natural) const noexcept;
+    /** Notes for exactly this section, vowel and way of singing, or nullptr (no fallback). */
+    const SampleLayer* exactLayer (int section, VocalType vowel, Singing singing) const noexcept;
     /** True if some section has held notes sung this way. */
     bool has (Singing singing) const noexcept;
     /** Held notes (onsets and moves are extras on top of them). */
