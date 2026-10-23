@@ -4,6 +4,7 @@
 // setting changes on the message thread, with the session's timer running in between.
 #include "../Source/ChoirVoices.h"
 #include "../Source/LearnSession.h"
+#include "../Source/MeasuredRooms.h"
 #include "TestSignals.h"
 
 #include <cstdio>
@@ -729,9 +730,61 @@ static void passesMakeAMultiTakeChoir()
     }
 }
 
+static void measuredRoomsLoad()
+{
+    // Every venue's room is in the plug-in, decodes to unit energy with its decay as built
+    // (SOURCES.json), and follows the venue: a change builds the new room in the background.
+    std::printf ("[ measuredRoomsLoad ]\n");
+    const auto sources = JSON::parse (File (String (SANCTUARY_SOURCE_DIR) + "/rooms/SOURCES.json"));
+    for (int v = 0; v < (int) sc::Venue::Count; ++v)
+    {
+        const auto t0 = Time::getMillisecondCounterHiRes();
+        const auto ir = sanctuary::MeasuredRooms::getImpulse ((sc::Venue) v);
+        const double ms = Time::getMillisecondCounterHiRes() - t0;
+        check (ir != nullptr && ir->left.size() == ir->right.size() && ! ir->left.empty(), "room decodes");
+        if (ir == nullptr)
+            continue;
+        double e = 0.0;
+        for (size_t i = 0; i < ir->left.size(); ++i)
+            e += 0.5 * ((double) ir->left[i] * ir->left[i] + (double) ir->right[i] * ir->right[i]);
+        std::vector<float> both (ir->left.size());
+        for (size_t i = 0; i < both.size(); ++i)
+            both[i] = ir->left[i] + ir->right[i];
+        const float t30 = sc::measureDecayTime (both.data(), (int64_t) both.size(), ir->sampleRate);
+        double expected = 0.0;
+        if (const auto* rows = sources.getArray())
+            for (const auto& r : *rows)
+                if (r.getProperty ("file", {}).toString() == String (sc::getVenueSlug ((sc::Venue) v)) + ".ogg")
+                    expected = (double) r.getProperty ("t30_s", 0.0);
+        std::printf ("  %-16s %.1f s, energy %.3f, decay %.2f s (built %.2f s), decoded in %.0f ms\n", sc::getVenueNames()[v],
+                     (double) ir->left.size() / ir->sampleRate, e, t30, expected, ms);
+        check (std::abs (e - 1.0) < 0.01, "unit energy");
+        check (std::abs (t30 - expected) < 0.12 * expected + 0.03, "decay as built");
+    }
+
+    sc::Venue venue = sc::Venue::GrandCathedral;
+    sanctuary::MeasuredRooms rooms;
+    rooms.getVenue = [&venue] { return venue; };
+    const auto t0 = Time::getMillisecondCounterHiRes();
+    rooms.prepare (44100.0);
+    const double prepMs = Time::getMillisecondCounterHiRes() - t0;
+    auto* first = rooms.getLive();
+    check (first != nullptr && std::abs (first->getSampleRate() - 44100.0) < 0.5, "room ready after prepare, at the session's rate");
+    venue = sc::Venue::StudioRoom;
+    bool switched = false;
+    for (int waited = 0; waited < 10000 && ! switched; waited += 20)
+    {
+        pump (20);
+        switched = rooms.getLive() != first && rooms.getLive() != nullptr;
+    }
+    check (switched, "a venue change builds the new room");
+    std::printf ("  cathedral built for 44.1 kHz in %.0f ms; studio room %s\n", prepMs, switched ? "followed" : "did not follow");
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI juce;
+    measuredRoomsLoad();
     voicePackLoads();
     renderPressedWhileLearning();
     settingsChangedWhileRendering();

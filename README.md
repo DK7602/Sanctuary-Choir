@@ -47,7 +47,7 @@
   - Humanize, Vibrato, Glide, Formant (gender/size), Pitch Lock and Breath.
   - **Sub-Octave**: oktavists, basses doubling the bass part an octave down.
 - **FX page**:
-  - Six sacred spaces: Grand Cathedral, Stone Abbey, Wooden Chapel, Concert Hall, Gospel Church, Studio Room. Each one appears on screen with its own choir (monks in the abbey for Gregorian chant), chosen from the picker at the top of the scene.
+  - Six sacred spaces: Grand Cathedral, Stone Abbey, Wooden Chapel, Concert Hall, Gospel Church, Studio Room. Each one appears on screen with its own choir (monks in the abbey for Gregorian chant), chosen from the picker at the top of the scene. Their reverb is a real measured room (a church in Cremona, Aachen Cathedral's St. Nicholas Chapel, the Detmold Brahmssaal, the Arvedi Auditorium, BBC Maida Vale 5; CC BY datasets, see [rooms/CREDITS.txt](rooms/CREDITS.txt)), played by partitioned convolution.
   - Decay, pre-delay and brightness.
   - Lead reverb send.
   - Low/high cut, Warmth and a Glue compressor on the choir bus.
@@ -110,7 +110,7 @@ There is also a command-line renderer, handy for testing the engine without a DA
 input ─► YIN pitch tracker ─► harmoniser ─────────► control timeline (notes per section, per 5 ms)
    │        (key detection)    (live, or the                     │
    │                            learned score)                   ▼
-   └────► PSOLA analyser ─► up to 40 singers ─► S/A/T/B buses ─► stage · Close/Tree/Room mics ─► tone · glue ─► cathedral FDN reverb ─► + lead ─► limiter
+   └────► PSOLA analyser ─► up to 40 singers ─► S/A/T/B buses ─► stage · Close/Tree/Room mics ─► tone · glue ─► measured room (convolution) ─► + lead ─► limiter
                             (Words: pitch-shifted grains of your voice;
                              vowels: glottal source + SATB formant filters;
                              each singer with its own timing, detune, drift and vibrato)
@@ -118,10 +118,11 @@ input ─► YIN pitch tracker ─► harmoniser ─────────► 
 
 | Folder | What's inside |
 | --- | --- |
-| `core/` | The DSP engine in plain C++20 (no framework). Pitch tracking, PSOLA, vowel synthesis, music theory and voice leading, harmoniser, reverb, Learn analysis, lining up extra passes, and offline rendering. |
+| `core/` | The DSP engine in plain C++20 (no framework). Pitch tracking, PSOLA, vowel synthesis, music theory and voice leading, harmoniser, reverb (measured rooms by partitioned convolution, and an FDN), Learn analysis, lining up extra passes, and offline rendering. |
 | `plugin/` | The JUCE wrapper: parameters, presets, the Learn session (timeline capture, background analysis/render, playback, saving takes with the project) and the WebView editor. |
 | `ui/` | The interface: HTML/CSS/JS drawn over artwork taken from the design mockups. Opening `ui/index.html` through a local web server runs it in a browser with a simulated engine. |
 | `tools/art/` | Scripts that turn the mockups into the UI skin and the singer sprites. |
+| `rooms/`, `tools/rooms/` | The venues' measured rooms (built into the plug-in) and the script that makes them from the datasets, with their sources and credits. |
 | `tests/` | DSP unit tests. These cover pitch accuracy, voicing rules, key detection, section pitches in every mode, latency alignment, learn and render, and a CPU budget check. |
 
 The plugin reports its latency (about 39 ms) so your DAW keeps everything in time. For recording and live use, **Settings → Monitoring → Live** passes your voice through with no delay at all and runs the vowel choir about 15 ms behind you (Words keep the full 39 ms); the plugin then reports zero latency. The standalone app always runs live.
@@ -131,4 +132,5 @@ The plugin reports its latency (about 39 ms) so your DAW keeps everything in tim
 - Sanctuary Choir is built on [JUCE](https://juce.com). JUCE is available under the AGPLv3 or a commercial JUCE licence (free "Personal" tier for small revenue). If you sell the plug-in closed-source, get the appropriate JUCE licence.
 - Fonts: Cinzel, Cormorant Garamond and Montserrat (SIL Open Font License, see `ui/assets/fonts`).
 - Sanctuary Voices (`voices/SanctuaryVoices`) are cut from [VocalSet](https://zenodo.org/records/1442513) by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (ISMIR 2018), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credit them wherever you distribute the plug-in; `voices/SanctuaryVoices/CREDITS.txt` says what was changed. `tools/voicepack` rebuilds the pack from the dataset. The Words-mode voice prints (`core/src/VoicePrints.inc`) are measured from the same recordings by `tools/voiceprints`.
+- Rooms (`rooms/`): measured impulse responses from ChurchIR (Giampiccolo, Parrinelli & Antonacci), the St. Nicholas Chapel of Aachen Cathedral (Zerwas & Kayku), the Detmold University of Music (Amengual Gari, Sahin, Eddy & Kob) and the Arvedi Auditorium (Miotello et al.), all CC BY 4.0, and the BBC Maida Vale dataset (Kearney, Daffern et al., University of York, with BBC R&D), CC BY 3.0. `rooms/CREDITS.txt` (shipped as ROOMS-CREDITS.txt) names each and what was changed; `rooms/SOURCES.json` records the exact files used.
 - Artwork: the UI is built from the Sanctuary Choir design mockups in `design/mockups/`.

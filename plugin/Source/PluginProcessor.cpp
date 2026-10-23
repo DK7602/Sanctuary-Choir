@@ -43,6 +43,7 @@ SanctuaryProcessor::SanctuaryProcessor()
         }
         return String::toHexString ((int64) h);
     };
+    rooms.getVenue = [this] { return currentParams().venue; };
     voices.onStatusChanged = [this] { ++statusVersion; };
     voices.onSetChanged = [this] { learn.renderSettingsChanged(); };   // rendered takes used the old voices
     // The recorded Sanctuary Voices are the default when they are installed.
@@ -78,6 +79,7 @@ bool SanctuaryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
 void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock);
+    rooms.prepare (sampleRate);   // a fresh room for this rate, ready for the first block
     setLatencySamples (reportedLatency());
     if (const int key = rememberedKey.load(); key >= 0)
         engine.seedKey (key % 12, key >= 12);
@@ -267,6 +269,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     engine.setScore (score);
     engine.setPasses (passes, numPasses);
     engine.setSampleSet (voices.getLive());
+    engine.setRoom (rooms.getLive());
 
     const float* inL = buffer.getReadPointer (0);
     const float* inR = numIn > 1 ? buffer.getReadPointer (1) : nullptr;

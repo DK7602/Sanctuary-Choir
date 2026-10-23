@@ -46,9 +46,17 @@ juce_add_binary_data(SanctuaryChoirAssets
     SOURCES "${SANCTUARY_UI_ZIP}")
 add_dependencies(SanctuaryChoirAssets SanctuaryChoirUIZip)
 
+# The venues' measured rooms (see tools/rooms), built into the plug-in.
+file(GLOB SANCTUARY_ROOM_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/rooms/*.ogg")
+juce_add_binary_data(SanctuaryRooms
+    HEADER_NAME SanctuaryRoomsData.h
+    NAMESPACE SanctuaryRoomsData
+    SOURCES ${SANCTUARY_ROOM_FILES} "${PROJECT_SOURCE_DIR}/rooms/SOURCES.json")
+
 target_sources(SanctuaryChoir PRIVATE
     Source/ChoirVoices.cpp
     Source/LearnSession.cpp
+    Source/MeasuredRooms.cpp
     Source/Parameters.cpp
     Source/PluginEditor.cpp
     Source/PluginProcessor.cpp
@@ -68,6 +76,7 @@ target_link_libraries(SanctuaryChoir
     PRIVATE
         sanctuary_core
         SanctuaryChoirAssets
+        SanctuaryRooms
         juce::juce_audio_utils
         juce::juce_audio_formats
         juce::juce_gui_extra
@@ -84,6 +93,7 @@ if(SANCTUARY_BUILD_TESTS)
         Tests/SessionTests.cpp
         Source/ChoirVoices.cpp
         Source/LearnSession.cpp
+        Source/MeasuredRooms.cpp
         Source/TakeExport.cpp
         "${PROJECT_SOURCE_DIR}/tests/TestSignals.cpp")
     target_include_directories(SanctuarySessionTests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
@@ -94,6 +104,7 @@ if(SANCTUARY_BUILD_TESTS)
         JUCE_MODAL_LOOPS_PERMITTED=1)
     target_link_libraries(SanctuarySessionTests PRIVATE
         sanctuary_core
+        SanctuaryRooms
         juce::juce_audio_formats
         juce::juce_audio_processors
         juce::juce_recommended_config_flags)

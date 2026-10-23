@@ -208,12 +208,12 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
   - Click a singer icon to mute that section; double-click to solo it.
   - Drag a keyboard to change that section's range.
   - Drag the coloured bar to set the section's level.
-- **The room**: choose where the choir sings with the picker at the top left of the main page, or on the FX page. Each room has its own choir:
-  - **Grand Cathedral**: a large robed choir with its conductor. Vast stone, a 6 s tail.
-  - **Stone Abbey**: a robed choir in the cloisters. With the *Gregorian* style, monks sing there instead.
-  - **Wooden Chapel**: a small choir, warm and close.
-  - **Concert Hall**: a choir in black on risers, clear and wide.
-  - **Gospel Church**: a gospel choir in purple robes with its director, lively.
-  - **Studio Room**: five singers at their microphones, dry and intimate.
+- **The room**: choose where the choir sings with the picker at the top left of the main page, or on the FX page. Each room has its own choir, and its reverb is a real room, measured: the sound of a spaced pair of microphones in the hall (hover over a room on the FX page to see which).
+  - **Grand Cathedral**: a large robed choir with its conductor. Vast stone, a 5 s tail: the church of Santi Marcellino e Pietro in Cremona, heard from 21 m down the nave, its decay lengthened.
+  - **Stone Abbey**: a robed choir in the cloisters. With the *Gregorian* style, monks sing there instead. The Gothic St. Nicholas Chapel of Aachen Cathedral, 4.3 s.
+  - **Wooden Chapel**: a small choir, warm and close. The wood-panelled Brahmssaal of the Detmold University of Music, 1.5 s.
+  - **Concert Hall**: a choir in black on risers, clear and wide. The Giovanni Arvedi Auditorium in Cremona, 2.1 s.
+  - **Gospel Church**: a gospel choir in purple robes with its director, lively. The Cremona church again, nearer the front and with a shorter, fuller-house decay of 1.7 s.
+  - **Studio Room**: five singers at their microphones, dry and intimate. BBC Maida Vale Studio 5.
   - Choir Size fills each room in turn, front row first.
-- **FX page**: the reverb of the room, and the choir bus (low/high cut, warmth, glue).
+- **FX page**: the reverb of the room, and the choir bus (low/high cut, warmth, glue). **Decay** stretches or shortens the room's own decay (30 to 250%), **Pre-Delay** waits before the room answers, **Brightness** darkens or brightens it (50% is the room as measured). Changing rooms lets the old one ring out briefly while the new one takes over. The measurements come from research datasets under Creative Commons Attribution licences; their authors are credited in ROOMS-CREDITS.txt next to the plug-in.

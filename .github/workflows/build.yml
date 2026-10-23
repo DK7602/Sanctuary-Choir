@@ -115,6 +115,7 @@ jobs:
           cp -R "$REL/VST3/Sanctuary Choir.vst3" "dist/$OUT/"
           cp -R voices/SanctuaryVoices "dist/$OUT/SanctuaryVoices"
           cp packaging/INSTALL-${{ matrix.name }}.txt "dist/$OUT/INSTALL.txt"
+          cp rooms/CREDITS.txt "dist/$OUT/ROOMS-CREDITS.txt"
           if [ "$RUNNER_OS" = "macOS" ]; then
             cp -R "$REL/AU/Sanctuary Choir.component" "dist/$OUT/"
             cp -R "$REL/Standalone/Sanctuary Choir.app" "dist/$OUT/"

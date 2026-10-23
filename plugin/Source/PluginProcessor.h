@@ -3,6 +3,7 @@
 
 #include "ChoirVoices.h"
 #include "LearnSession.h"
+#include "MeasuredRooms.h"
 #include "Parameters.h"
 #include "Presets.h"
 
@@ -100,6 +101,7 @@ private:
     PresetManager presets;
     LearnSession learn;
     ChoirVoices voices;
+    MeasuredRooms rooms;   // the venue's measured room, for the engine
     sc::ChoirEngine engine;
 
     // MIDI state (audio thread), per channel: in Parts mode channels 1-4 sing S, A, T and B.

@@ -398,6 +398,23 @@ static RoomImpulse testRoom (double sr, float seconds, float rt60, uint32_t seed
     return ir;
 }
 
+TEST (roomResamplingKeepsTheResponse)
+{
+    // A 1 kHz tone through 48 -> 44.1 -> 48 kHz: same frequency, same level, nothing above it.
+    const double a = 48000.0, b = 44100.0;
+    std::vector<float> x ((size_t) a);
+    for (size_t i = 0; i < x.size(); ++i) x[i] = std::sin (2.0f * kPi * 1000.0f * (float) i / (float) a);
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto y = resampleImpulse (x, a, b);
+    const double ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - t0).count();
+    const auto z = resampleImpulse (y, b, a);
+    double err = 0.0, ref = 0.0;
+    for (size_t i = 2000; i + 2000 < x.size(); ++i) { err += (double) (z[i] - x[i]) * (z[i] - x[i]); ref += (double) x[i] * x[i]; }
+    std::printf ("  48 -> 44.1 -> 48 kHz: %zu -> %zu samples, error %.1f dB, %.1f ms a second of audio\n", x.size(), y.size(), 10.0 * std::log10 (err / ref), ms);
+    CHECK (y.size() == 44100);
+    CHECK (10.0 * std::log10 (err / ref) < -60.0);
+}
+
 TEST (convolutionRoomMatchesDirectConvolution)
 {
     // Head and tail partitions together must be one plain convolution, the room answering

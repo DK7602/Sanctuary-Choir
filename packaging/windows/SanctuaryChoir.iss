@@ -40,6 +40,7 @@ Source: "{#SourceDir}\Sanctuary Choir.vst3\*"; DestDir: "{commoncf64}\VST3\Sanct
 Source: "{#SourceDir}\Sanctuary Choir.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "{#SourceDir}\SanctuaryVoices\*"; DestDir: "{commonappdata}\Sanctuary Choir\Voices\SanctuaryVoices"; Components: voices; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\INSTALL.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\ROOMS-CREDITS.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Sanctuary Choir"; Filename: "{app}\Sanctuary Choir.exe"; Components: standalone

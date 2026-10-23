@@ -47,7 +47,30 @@ std::vector<float> resampleImpulse (const std::vector<float>& x, double fromRate
     const double ratio = toRate / fromRate;
     const double fc = std::min (1.0, ratio) * 0.97;   // cutoff, as a fraction of the input's Nyquist
     const int half = (int) std::ceil (24.0 / fc);
+    const int taps = 2 * half;
+
+    // Kaiser-windowed sinc at `phases` fractional positions (and one more, to interpolate).
+    constexpr int phases = 512;
     const double beta = 8.0, norm = besselI0 (beta);
+    std::vector<float> table ((size_t) (phases + 1) * (size_t) taps);
+    for (int ph = 0; ph <= phases; ++ph)
+    {
+        const double frac = (double) ph / phases;
+        for (int k = 0; k < taps; ++k)
+        {
+            const double d = frac + (double) (half - 1 - k);   // distance from tap k to the output point
+            const double u = d / (double) half;
+            double v = 0.0;
+            if (std::abs (u) < 1.0)
+            {
+                const double arg = kPiD * fc * d;
+                const double sinc = std::abs (arg) < 1.0e-9 ? 1.0 : std::sin (arg) / arg;
+                v = fc * sinc * besselI0 (beta * std::sqrt (1.0 - u * u)) / norm;
+            }
+            table[(size_t) ph * (size_t) taps + (size_t) k] = (float) v;
+        }
+    }
+
     const auto n = (int64_t) x.size();
     const auto outN = (int64_t) std::ceil ((double) n * ratio);
     std::vector<float> y ((size_t) outN, 0.0f);
@@ -55,20 +78,21 @@ std::vector<float> resampleImpulse (const std::vector<float>& x, double fromRate
     {
         const double p = (double) j / ratio;
         const auto base = (int64_t) std::floor (p);
-        double acc = 0.0;
-        for (int64_t k = base - half + 1; k <= base + half; ++k)
+        const double fp = (p - (double) base) * phases;
+        const int ph = std::min (phases - 1, (int) fp);
+        const float w = (float) (fp - ph);
+        const float* t0 = table.data() + (size_t) ph * (size_t) taps;
+        const float* t1 = t0 + taps;
+        const int64_t first = base - half + 1;
+        float acc = 0.0f;
+        for (int k = 0; k < taps; ++k)
         {
-            if (k < 0 || k >= n)
+            const int64_t i = first + k;
+            if (i < 0 || i >= n)
                 continue;
-            const double d = p - (double) k;
-            const double u = d / (double) half;
-            if (std::abs (u) >= 1.0)
-                continue;
-            const double arg = kPiD * fc * d;
-            const double sinc = std::abs (arg) < 1.0e-9 ? 1.0 : std::sin (arg) / arg;
-            acc += (double) x[(size_t) k] * fc * sinc * besselI0 (beta * std::sqrt (1.0 - u * u)) / norm;
+            acc += x[(size_t) i] * (t0[k] + (t1[k] - t0[k]) * w);
         }
-        y[(size_t) j] = (float) acc;
+        y[(size_t) j] = acc;
     }
     return y;
 }

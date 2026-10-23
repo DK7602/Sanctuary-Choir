@@ -127,22 +127,23 @@
   }
 
   const VENUES = [
-    ["Grand Cathedral", "Vast stone, 6 s tail"],
-    ["Stone Abbey", "Cloisters, 4 s"],
-    ["Wooden Chapel", "Warm & close, 2 s"],
-    ["Concert Hall", "Clear & wide, 2.4 s"],
-    ["Gospel Church", "Lively, 1.6 s"],
-    ["Studio Room", "Dry & intimate"],
+    ["Grand Cathedral", "Vast stone, 5 s tail", "The church of Santi Marcellino e Pietro, Cremona, 21 m down the nave (decay lengthened). ChurchIR, Giampiccolo, Parrinelli & Antonacci, CC BY 4.0"],
+    ["Stone Abbey", "Gothic stone, 4.3 s", "The St. Nicholas Chapel of Aachen Cathedral. Zerwas & Kayku, CC BY 4.0"],
+    ["Wooden Chapel", "Warm & close, 1.5 s", "The Brahmssaal of the Detmold University of Music (decay lengthened). Amengual Gari, Sahin, Eddy & Kob, CC BY 4.0"],
+    ["Concert Hall", "Clear & wide, 2.1 s", "The Giovanni Arvedi Auditorium, Cremona (decay lengthened). Miotello et al., CC BY 4.0"],
+    ["Gospel Church", "Lively, 1.7 s", "Santi Marcellino e Pietro, Cremona, 10 m from the front (decay shortened). ChurchIR, Giampiccolo, Parrinelli & Antonacci, CC BY 4.0"],
+    ["Studio Room", "Dry & intimate", "BBC Maida Vale Studio 5. Kearney, Daffern et al. (University of York) with BBC R&D, CC BY 3.0"],
   ];
 
   function buildFx(page) {
     page.innerHTML = "";
     el("h2", "", page, "THE ROOM");
     const venues = el("div", "venues", page);
-    VENUES.forEach(([name, desc], i) => {
+    VENUES.forEach(([name, desc, room], i) => {
       const card = el("div", "venue", venues);
       el("div", "vname", card, name);
       el("div", "vdesc", card, desc);
+      card.title = "A measured room: " + room;
       card.addEventListener("click", () => Params.set("venue", i));
       Params.on("venue", (v) => card.classList.toggle("on", Math.round(v) === i));
     });

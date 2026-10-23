@@ -1,4 +1,5 @@
 #include "LearnSession.h"
+#include "MeasuredRooms.h"
 
 #include <mutex>
 #include <cstdlib>
@@ -1279,11 +1280,13 @@ void LearnSession::prepareExport (std::function<void (File)> onDone, bool automa
         };
         auto mix = [&] (const File& file, const sc::EngineParams& p, bool roomOnly, float tail, const std::vector<float>* lead = nullptr)
         {
+            const auto room = MeasuredRooms::getImpulse (p.venue);   // the venue's measured room
             StereoWavWriter w;
             *ok = w.open (file, rate) && w.writeSilence (offset)
                   && sc::mixdownStemsStreaming (rate, st.length, p, roomOnly, tail, readStems,
                                                 [&] (const float* l, const float* r, int len) { return ! exportCancel.load() && w.write (l, r, len); },
-                                                lead != nullptr ? lead->data() : nullptr, lead != nullptr ? (int64_t) lead->size() : 0)
+                                                lead != nullptr ? lead->data() : nullptr, lead != nullptr ? (int64_t) lead->size() : 0,
+                                                room.get())
                   && w.close();
         };
         // Each section where it stands on the stage, through the mics, without the hall.
