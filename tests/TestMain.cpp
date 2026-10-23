@@ -1746,7 +1746,7 @@ TEST (bandHelpsFindTheKey)
             m.push_back ({ (float) n, 0.45f, 0.05f });
     auto voice = test::singMelody (m, sr, Soprano, 15.0f);
     auto band = test::playBand ({ { { 53, 57, 60 }, 41, 2.0f }, { { 58, 62, 65 }, 46, 2.0f }, { { 55, 60, 64 }, 48, 2.0f }, { { 53, 57, 60 }, 41, 2.0f } }, sr);
-    band.resize (voice.size(), 0.0f);
+    band.resize (voice.size() + (size_t) sr, 0.0f);   // runEngine runs past the voice by the latency
     ChoirEngine eng;
     eng.prepare (sr, 256);
     auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
@@ -1867,7 +1867,7 @@ static int lagOf (const std::vector<float>& x, const std::vector<float>& y, int 
     for (int lag = 0; lag <= maxLag; ++lag)
     {
         double v = 0.0;
-        for (size_t i = 4800; i + (size_t) lag < y.size(); ++i) v += (double) x[i] * y[i + (size_t) lag];
+        for (size_t i = 4800; i + (size_t) lag < y.size() && i < x.size(); ++i) v += (double) x[i] * y[i + (size_t) lag];
         if (v > bestV) { bestV = v; best = lag; }
     }
     return best;
