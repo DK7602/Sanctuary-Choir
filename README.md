@@ -6,6 +6,8 @@
 
 ## Features
 
+The plug-in carries its own manual: **Settings → Manual**, or the gear at the top left. It walks through every feature in plain words, with a numbered tour of the main page, recipes, troubleshooting and a search ([docs/USER_GUIDE.md](docs/USER_GUIDE.md) has the same for reading outside it).
+
 **Perform page**
 - **Choir Size** adds singers one at a time (up to 40). You watch them walk into the choir loft as you turn the knob.
 - **Volume, Space, Reverb, Tone, Presence** shape the sound. Space spreads the singers across the stage and adds early reflections.

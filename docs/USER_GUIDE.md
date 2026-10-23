@@ -1,5 +1,7 @@
 # Sanctuary Choir: user guide
 
+The plug-in has its own manual: **Settings → Manual → Open the manual**, or the **gear** at the top left → *The manual*. It explains every part of Sanctuary Choir step by step, with a numbered tour of the main page, recipes, troubleshooting and a search. This guide covers the same ground for reading outside the plug-in.
+
 ## 1. Install
 
 1. Open the repository's **Actions** tab, click the newest green **Build**, and download the zip for your computer under *Artifacts*.
@@ -177,6 +179,7 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
 
 ## 7. More things to try
 
+- **The gear** (top left, beside the preset) opens a small menu: the manual, Settings, *Save this sound as a preset…* and the presets folder.
 - **Presets** (top left) come in categories: Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, and Kids & Crowds. Point at a category to see its presets. Presets change the choir's sound, not your song: the Key and Scale you set stay as they are.
 - **Ensemble** (MIX page) chooses who sings:
   - **Choir**: an adult choir.

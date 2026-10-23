@@ -334,7 +334,7 @@
   //==========================================================================
   // Presets
   // Presets: categories on the left, the presets of the chosen category on the right.
-  function openPresetMenu() {
+  function openPresetMenu(nameIt) {
     const st = state.status || {};
     const presets = st.presets || [];
     const catOf = (p) => p.category || (p.factory ? "Factory" : "My Presets");
@@ -388,6 +388,20 @@
       actions.style.cssText = "display:flex";
       Menu.item(actions, "SAVE CURRENT SOUND", false, () => { if (input.value.trim()) SC.send({ type: "cmd", name: "presetSave", value: input.value.trim() }); }, "action");
       Menu.item(actions, "OPEN PRESETS FOLDER", false, () => SC.send({ type: "cmd", name: "presetFolder" }), "action");
+      if (nameIt) setTimeout(() => input.focus(), 0);
+    });
+  }
+
+  // The gear beside the preset: the manual, the settings and saving a sound.
+  function openGearMenu() {
+    Menu.open(stageRect($("gearBtn")), (m) => {
+      m.classList.add("gear-menu");
+      Menu.item(m, "\u2756  THE MANUAL", false, () => window.SCManual.open(), "action");
+      Menu.item(m, state.tab === "settings" ? "BACK TO PERFORM" : "SETTINGS", false, () => setTab(state.tab === "settings" ? "perform" : "settings"), "action");
+      Menu.sep(m);
+      // Opened once this menu has closed (picking an item closes the menu it is in).
+      Menu.item(m, "SAVE THIS SOUND AS A PRESET\u2026", false, () => setTimeout(() => openPresetMenu(true), 0), "action");
+      Menu.item(m, "OPEN PRESETS FOLDER", false, () => SC.send({ type: "cmd", name: "presetFolder" }), "action");
     });
   }
 
@@ -446,6 +460,8 @@
     const passesInfo = { close: () => setTab("settings"), standalone: !!info.standalone, maxSingers: info.maxSingers };
     buildPasses($("page-passes"), passesInfo);
     state.passesInfo = passesInfo;
+    window.SCManual.build($("stage"), { goto: (p) => setTab(p) });
+    settingsInfo.openManual = (id) => window.SCManual.open(id);
     const takeInfo = { toast, close: () => setTab(state.returnTab && !SUB_PAGES[state.returnTab] ? state.returnTab : "settings"), visible: () => state.tab === "take" };
     buildTake($("page-take"), takeInfo);
     state.takeInfo = takeInfo;
@@ -462,7 +478,7 @@
       else if (t === "mix" && state.tab === "stage") setTab("mix");
       else setTab(t);
     }));
-    $("gearBtn").addEventListener("click", () => setTab(state.tab === "settings" ? "perform" : "settings"));
+    $("gearBtn").addEventListener("click", openGearMenu);
     $("presetBox").addEventListener("click", openPresetMenu);
     $("presetPrev").addEventListener("click", () => SC.send({ type: "cmd", name: "presetPrev" }));
     $("presetNext").addEventListener("click", () => SC.send({ type: "cmd", name: "presetNext" }));

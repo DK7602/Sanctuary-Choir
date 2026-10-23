@@ -378,15 +378,22 @@
     };
     Params.on("scene", showScenes);
 
+    // The manual: everything explained, from the first minute to the last detail.
     const right = el("div", "group", rightCol);
     right.style.cssText = "flex:1";
-    el("h3", "", right, "HOW TO USE SANCTUARY CHOIR");
-    const ol = el("ol", "", right);
-    ol.style.cssText = "margin:4px 0 0;padding-left:22px";
-    [
-      "<b>Sing</b> into the plugin on a stereo track; <b>Learn</b>, then <b>Render</b> for the best quality.",
-      "<b>Singing</b>, <b>Ensemble</b> and <b>Chord Speed</b> are on MIX, <b>Rhythm</b> on FX.",
-    ].forEach((html) => { const li = el("li", "", ol); li.innerHTML = html; li.style.fontSize = "15.5px"; });
+    const manHead = el("div", "", right);
+    manHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
+    el("h3", "", manHead, "MANUAL").style.margin = "0";
+    const manBtns = el("div", "pill-row", manHead);
+    const quick = el("button", "pill", manBtns, "QUICK START");
+    quick.title = "Your first choir in about a minute";
+    quick.addEventListener("click", () => info.openManual && info.openManual("quickstart"));
+    const openMan = el("button", "pill on manual-btn", manBtns, "OPEN THE MANUAL");
+    openMan.title = "Every feature explained step by step, with a search";
+    openMan.addEventListener("click", () => info.openManual && info.openManual());
+    const manText = el("p", "", right);
+    manText.style.cssText = "font-size:15.5px;line-height:1.3;margin-top:6px";
+    manText.innerHTML = "How to use every part of Sanctuary Choir, in plain words: setting it up in your DAW, <b>Learn</b> and <b>Render</b>, the stage, the rooms, MIDI and more. Also in the <b>gear</b> menu at the top left.";
     foot = el("p", "", right);
     foot.style.cssText = "margin-top:8px;color:#8f7f66;font-size:14px";
     Params.on("latencyMode", describe);

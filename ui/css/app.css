@@ -584,3 +584,92 @@ html, body {
 .lane-legend button { background: none; border: none; cursor: pointer; padding: 2px 6px; font: 700 10px Montserrat, sans-serif; letter-spacing: 1.6px; color: var(--c); text-shadow: 0 0 8px rgba(255, 210, 140, 0.25); }
 .lane-legend button.off { opacity: 0.32; text-decoration: line-through; }
 .lane-legend button:hover { filter: brightness(1.15); }
+
+/* The manual: a reader over the whole window (Settings › Manual, or the gear). */
+#manual {
+  position: absolute; left: 28px; top: 80px; width: 1392px; height: 982px; z-index: 40;
+  display: flex; flex-direction: column; padding: 18px 26px 20px; border-radius: 22px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 210, 140, 0.10), rgba(0,0,0,0) 60%),
+    linear-gradient(180deg, #120d0b, #0a0807);
+  border: 1px solid rgba(232, 201, 138, 0.55);
+  box-shadow: 0 0 0 4px rgba(20, 14, 10, 0.6), 0 0 0 5px rgba(232, 201, 138, 0.25), 0 20px 60px rgba(0,0,0,0.7);
+  -webkit-user-select: text; user-select: text;
+  animation: pageIn 160ms ease-out;
+}
+#manual.hidden { display: none; }
+#manual .m-head { display: flex; align-items: center; gap: 18px; margin-bottom: 14px; }
+#manual h2 { margin: 0; font-family: "Cinzel", serif; font-weight: 600; font-size: 24px; letter-spacing: 5px; color: var(--gold-bright); text-shadow: 0 0 14px rgba(255, 210, 140, 0.35); }
+#manual .m-search {
+  margin-left: auto; width: 420px; height: 38px; padding: 0 18px; border-radius: 19px; outline: none;
+  font-family: "Cormorant", Georgia, serif; font-size: 20px; color: var(--text);
+  background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(232, 201, 138, 0.45);
+}
+#manual .m-search:focus { border-color: var(--gold); box-shadow: 0 0 10px rgba(255, 210, 140, 0.25); }
+#manual .m-close { position: static; flex: none; width: 38px; height: 38px; font-size: 15px; }
+#manual .m-body { flex: 1; display: flex; gap: 24px; min-height: 0; }
+#manual .m-toc { width: 300px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 8px; border-right: 1px solid rgba(232, 201, 138, 0.18); }
+#manual .m-toc button {
+  display: flex; gap: 10px; align-items: baseline; text-align: left; cursor: pointer; padding: 6px 10px; border-radius: 10px;
+  font-family: "Cormorant", Georgia, serif; font-size: 19px; line-height: 1.2; color: #d9cdb8; background: none; border: 1px solid transparent;
+}
+#manual .m-toc button:hover { background: rgba(255, 255, 255, 0.04); color: var(--gold-bright); }
+#manual .m-toc button.on { color: var(--gold-bright); border-color: rgba(232, 201, 138, 0.55); background: rgba(255, 210, 140, 0.08); }
+#manual .m-toc-num { flex: none; width: 22px; text-align: right; font-family: "Montserrat", sans-serif; font-size: 12px; color: var(--muted); }
+#manual .m-none { font-size: 18px; font-style: italic; color: var(--muted); padding: 6px 10px; }
+#manual .m-content { flex: 1; overflow-y: auto; padding: 2px 28px 24px 4px; font-size: 20px; line-height: 1.5; color: #e6dac4; }
+#manual .m-title { margin: 0 0 4px; font-family: "Cinzel", serif; font-weight: 600; font-size: 27px; letter-spacing: 2px; color: var(--gold-bright); }
+#manual .m-summary { margin: 0 0 16px; font-size: 21px; font-style: italic; color: #cbb994; }
+#manual .m-content h4 { margin: 22px 0 6px; font-family: "Cinzel", serif; font-weight: 600; font-size: 18px; letter-spacing: 1.5px; color: var(--gold); }
+#manual .m-content p, #manual .m-content li { margin: 6px 0; }
+#manual .m-content ul, #manual .m-content ol { padding-left: 26px; margin: 6px 0; }
+#manual .m-content b { color: var(--gold-bright); font-weight: 600; }
+#manual .m-content i { color: #f1e2c4; }
+#manual .m-steps li { margin: 9px 0; padding-left: 4px; }
+#manual .m-steps li::marker { color: var(--gold); font-family: "Cinzel", serif; font-weight: 700; }
+#manual .m-ui {
+  display: inline-block; padding: 0 7px; border-radius: 6px; vertical-align: 2px; white-space: nowrap;
+  font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 12.5px; letter-spacing: 1.4px; line-height: 21px;
+  color: var(--gold-bright); background: rgba(255, 210, 140, 0.07); border: 1px solid rgba(232, 201, 138, 0.45);
+}
+#manual .m-tip { margin: 16px 0; padding: 10px 16px; border-left: 3px solid var(--gold); border-radius: 8px; background: rgba(255, 210, 140, 0.07); }
+#manual .m-tip-label { display: block; margin-bottom: 2px; font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 2.2px; text-transform: uppercase; color: var(--gold); }
+#manual .m-note { border-left-color: var(--tenor); background: rgba(130, 184, 242, 0.07); }
+#manual .m-note .m-tip-label { color: #9cc6f5; }
+#manual .m-dl dt { margin-top: 12px; font-weight: 600; color: var(--gold-bright); }
+#manual .m-dl dd { margin: 2px 0 0 22px; }
+#manual .m-table { width: 100%; border-collapse: collapse; font-size: 18.5px; line-height: 1.4; margin: 6px 0 10px; }
+#manual .m-table th { text-align: left; font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 11.5px; letter-spacing: 2px; color: var(--muted); }
+#manual .m-table th, #manual .m-table td { padding: 8px 10px; vertical-align: top; border-bottom: 1px solid rgba(232, 201, 138, 0.18); }
+#manual .m-go {
+  display: inline-block; margin: 14px 10px 0 0; padding: 7px 16px; border-radius: 18px; cursor: pointer;
+  font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 12px; letter-spacing: 1.8px; text-transform: uppercase;
+  color: var(--gold-bright); background: rgba(255, 210, 140, 0.1); border: 1px solid rgba(232, 201, 138, 0.6);
+}
+#manual .m-content p .m-go, #manual .m-content li .m-go { margin: 0 2px; padding: 2px 10px; }
+#manual .m-go:hover { background: rgba(255, 210, 140, 0.2); }
+#manual .m-figure { position: relative; max-width: 920px; margin: 6px 0 14px; }
+#manual .m-figure img { display: block; width: 100%; border-radius: 12px; border: 1px solid rgba(232, 201, 138, 0.35); }
+#manual .m-pin, #manual .m-num {
+  display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%;
+  font-family: "Montserrat", sans-serif; font-weight: 700; font-size: 12.5px; color: #1d150a;
+  background: radial-gradient(circle at 40% 35%, #fff3d2, #e1b665 70%, #b48a4a);
+  box-shadow: 0 0 0 2px rgba(10, 6, 4, 0.75), 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+#manual .m-pin { position: absolute; transform: translate(-50%, -50%); cursor: default; transition: transform 120ms; }
+#manual .m-pin.lit { transform: translate(-50%, -50%) scale(1.3); box-shadow: 0 0 0 3px #fff2cf, 0 0 18px rgba(255, 220, 150, 0.95); z-index: 2; }
+#manual .m-legend { columns: 2; column-gap: 26px; list-style: none; padding: 0; margin: 0 0 14px; font-size: 18.5px; }
+#manual .m-legend li { display: flex; align-items: center; gap: 10px; margin: 0; padding: 3px 8px; border-radius: 8px; break-inside: avoid; }
+#manual .m-legend li.lit { background: rgba(255, 210, 140, 0.12); color: var(--gold-bright); }
+#manual .m-num { flex: none; width: 24px; height: 24px; font-size: 11.5px; }
+#manual .m-nav { display: flex; justify-content: space-between; gap: 16px; margin-top: 30px; padding-top: 14px; border-top: 1px solid rgba(232, 201, 138, 0.2); }
+#manual .m-nav button {
+  cursor: pointer; padding: 6px 16px; border-radius: 18px; font-family: "Cormorant", Georgia, serif; font-size: 19px;
+  color: var(--gold-bright); background: none; border: 1px solid rgba(232, 201, 138, 0.4);
+}
+#manual .m-nav button:hover { background: rgba(255, 210, 140, 0.1); }
+#manual mark { padding: 0 2px; border-radius: 3px; color: #fff; background: rgba(255, 196, 92, 0.45); }
+#manual .m-toc::-webkit-scrollbar, #manual .m-content::-webkit-scrollbar { width: 8px; }
+#manual .m-toc::-webkit-scrollbar-thumb, #manual .m-content::-webkit-scrollbar-thumb { background: rgba(232, 201, 138, 0.35); border-radius: 4px; }
+#manual .m-toc::-webkit-scrollbar-track, #manual .m-content::-webkit-scrollbar-track { background: transparent; }
+.manual-btn { font-size: 13px; letter-spacing: 2px; }
