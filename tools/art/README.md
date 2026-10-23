@@ -221,10 +221,15 @@ tools/art/.venv/bin/python tools/art/build_stage_art.py --stage fix     # cut an
    as one layer (SAM outlines) warped column by column, so neighbours keep overlapping as
    they did. What the taller figures no longer cover is inpainted. The log gives each
    singer's stretch.
-3. **Quality.** 4x Real-ESRGAN (x4plus, colour and alpha; colour is bled out under the
-   transparent pixels first, so the outline gets no dark fringe), then GFPGAN v1.4 redraws
-   every face RetinaFace finds, blended in at `GFPGAN_WEIGHT` so each face keeps its own
-   features. The lead's in particular is meant to read as no one race.
+3. **Quality.** 4x Real-ESRGAN, the general x4v3 model half denoised (`DENOISE`), for the
+   robes, hair and risers; the alpha is scaled bilinearly and colour is bled out under the
+   transparent pixels first, so the outline gets no fringe. The faces are too small for
+   Real-ESRGAN (x4plus and x4v3 both paint them smooth and pale), so GFPGAN v1.4 redraws
+   every face RetinaFace finds in a plain 4x Lanczos copy instead, and each redrawn face
+   gets the original's broad tone and shading back (everything broader than `TONE_SIGMA`):
+   GFPGAN adds only the detail of eyes, mouth and nose, so no skin tone moves and every
+   singer keeps their own look. The lead's face in particular is meant to read as no one
+   race.
 4. **Sizes.** Scaled down (premultiplied) to `OUT_WIDTH` (sections) or `OUT_HEIGHT`
    (leads), WebP q90 with alpha.
 
@@ -232,7 +237,7 @@ It needs, besides the YOLO pose and SAM weights above, in `tools/art/.cache/rest
 
 | file | from |
 |---|---|
-| `RealESRGAN_x4plus.pth` | https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.1.0 |
+| `realesr-general-x4v3.pth`, `realesr-general-wdn-x4v3.pth` | https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0 |
 | `GFPGANv1.4.pth` | https://github.com/TencentARC/GFPGAN/releases/tag/v1.3.0 |
 | `detection_Resnet50_Final.pth`, `parsing_parsenet.pth` | https://github.com/xinntao/facexlib/releases/tag/v0.1.0 and v0.2.2 |
 
@@ -248,7 +253,7 @@ tools/art/.venv/bin/pip install --no-deps facexlib==0.3.0 gfpgan==1.3.8 realesrg
 tools/art/.venv/bin/pip install addict==2.4.0 filterpy==1.4.5 lmdb==3.0.0 numba==0.68.0 scikit-image==0.26.0 tqdm==4.70.1 yapf==0.43.0
 ```
 
-A full run takes about 30 minutes on 4 cores, most of it in Real-ESRGAN.
+A full run takes about 15 minutes on 4 cores, most of it in SAM (the front rows' outlines).
 
 In the UI the Stage page draws the stage from the hall: each section's picture stands with
 its risers' front edge on the floor at the front of its depth, scaled for perspective; it

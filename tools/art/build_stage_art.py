@@ -15,8 +15,12 @@ ui/assets/stage/{sop,alt,ten,bas,lead-front,lead-back}.webp and manifest.json.
    takes (at most MAX_STRETCH) and the head lifted to match, as one layer (SAM outlines)
    warped column by column so neighbours keep overlapping as they did. What the taller
    figures no longer cover is inpainted.
-3. Quality: 4x Real-ESRGAN (x4plus), then GFPGAN v1.4 redraws the faces (RetinaFace finds
-   them, the face parser blends them back), at GFPGAN_WEIGHT so each face keeps its look.
+3. Quality: 4x Real-ESRGAN (the general x4v3 model, half denoised) for the robes, hair and
+   risers. Faces are too small for it (it paints them smooth and pale), so they are done
+   apart: GFPGAN v1.4 redraws every face RetinaFace finds in a plain 4x Lanczos copy, then
+   each face gets its own colour back (the redrawn face's broad shading and tone replaced
+   by the original's; GFPGAN keeps only the detail: eyes, mouth, nose), so no skin tone
+   moves and each face keeps its look.
 4. Sizes: scaled to OUT_WIDTH (sections) / OUT_HEIGHT (leads), WebP with alpha.
 
 Run:  tools/art/.venv/bin/python tools/art/build_stage_art.py [--stage pieces|fix|all]
@@ -44,7 +48,8 @@ CACHE = HERE / ".cache"
 RESTORE = CACHE / "restore"
 
 MAX_STRETCH = 1.16     # front rows' bodies, shoulders to ankles, at most
-GFPGAN_WEIGHT = 0.6    # 0 keeps the drawn face, 1 the restored one
+DENOISE = 0.5          # Real-ESRGAN general x4v3: 0 keeps the picture's grain, 1 smooths it all
+TONE_SIGMA = 6.0       # restored faces keep the original's colour broader than this (4x pixels)
 OUT_WIDTH = 1200       # sections
 OUT_HEIGHT = 480       # leads
 OPAQUE = 248           # the picture's alpha tops out at 253 (lossy WebP): this and above is solid
@@ -258,9 +263,9 @@ def fix_front_row(rgba, name):
 
 
 def bleed(rgba):
-    """Colour under the transparent pixels taken from the nearest solid one, so upscaling
-    gives no dark fringe at the outline."""
-    solid = rgba[..., 3] >= 250
+    """Colour under the transparent pixels taken from the nearest visible one, so upscaling
+    gives no dark fringe at the outline. Half-transparent pixels keep their own colour."""
+    solid = rgba[..., 3] > 16
     _, lab = cv2.distanceTransformWithLabels((~solid).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
     ys, xs = np.nonzero(solid)
     src = np.zeros((lab.max() + 1, 2), np.int64)
@@ -272,20 +277,23 @@ def bleed(rgba):
 
 
 def upscale(rgba):
-    """4x Real-ESRGAN (x4plus), colour and alpha."""
-    from basicsr.archs.rrdbnet_arch import RRDBNet
+    """4x Real-ESRGAN (general x4v3 at DENOISE) for the colour, bilinear for the alpha (the
+    model sharpens a soft outline into a ragged one)."""
     from realesrgan import RealESRGANer
+    from realesrgan.archs.srvgg_arch import SRVGGNetCompact
     if "esrgan" not in _models:
-        net = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
-        _models["esrgan"] = RealESRGANer(scale=4, model_path=str(RESTORE / "RealESRGAN_x4plus.pth"), model=net,
-                                         tile=256, tile_pad=12, pre_pad=0, half=False)
+        net = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type="prelu")
+        _models["esrgan"] = RealESRGANer(
+            scale=4, model=net, model_path=[str(RESTORE / "realesr-general-x4v3.pth"), str(RESTORE / "realesr-general-wdn-x4v3.pth")],
+            dni_weight=[1 - DENOISE, DENOISE], tile=512, tile_pad=16, pre_pad=0, half=False)
     bgra = np.clip(bleed(rgba), 0, 255).astype(np.uint8)[..., [2, 1, 0, 3]]
-    out, _ = _models["esrgan"].enhance(bgra, outscale=4)
+    out, _ = _models["esrgan"].enhance(bgra, outscale=4, alpha_upsampler="bilinear")
     return out[..., [2, 1, 0, 3]].astype(np.float32)
 
 
-def restore_faces(rgba):
-    """GFPGAN v1.4 on every face it finds, blended in at GFPGAN_WEIGHT."""
+def restore_faces(small, big):
+    """big (the 4x upscale of small) with every face GFPGAN v1.4 finds redrawn. GFPGAN works
+    on a plain 4x Lanczos copy of small and the faces it draws keep the original's colour."""
     from gfpgan import GFPGANer
     if "gfpgan" not in _models:
         # facexlib looks for its face detector and parser in ./gfpgan/weights.
@@ -301,11 +309,24 @@ def restore_faces(rgba):
                                          channel_multiplier=2, bg_upsampler=None)
         finally:
             os.chdir(here)
-    flat = flatten(rgba, grey=110)
-    _, faces, restored = _models["gfpgan"].enhance(flat[..., ::-1].copy(), has_aligned=False, only_center_face=False,
-                                                   paste_back=True)
-    out = rgba.copy()
-    out[..., :3] += GFPGAN_WEIGHT * (restored[..., ::-1].astype(np.float32) - flat)
+    h, w = big.shape[:2]
+    lan = cv2.resize(np.clip(bleed(small), 0, 255), (w, h), interpolation=cv2.INTER_LANCZOS4)
+    lan[..., 3] = big[..., 3]
+    flat = flatten(lan, grey=110).astype(np.float32)
+    _, faces, restored = _models["gfpgan"].enhance(flat[..., ::-1].astype(np.uint8), has_aligned=False,
+                                                   only_center_face=False, paste_back=True)
+    restored = restored[..., ::-1].astype(np.float32)
+    # Where GFPGAN drew (its own soft paste-back mask shows as the change).
+    changed = (np.abs(restored - flat).max(-1) > 2).astype(np.uint8)
+    changed = cv2.morphologyEx(changed, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    m = cv2.GaussianBlur(changed.astype(np.float32), (0, 0), 3)
+    # Not on the outline: GFPGAN saw the hair's soft edge against grey.
+    m = (m * np.clip((big[..., 3] - 64) / 160, 0, 1))[..., None]
+    # The original's colour: broad tone and shading from the Lanczos copy, detail from GFPGAN.
+    blur = lambda x: cv2.GaussianBlur(x, (0, 0), TONE_SIGMA)
+    face = restored + blur(flat) - blur(restored)
+    out = big.copy()
+    out[..., :3] = big[..., :3] * (1 - m) + face * m
     return out, len(faces)
 
 
@@ -348,7 +369,7 @@ def main():
     manifest = {}
     for name, rgba in pieces.items():
         big = upscale(rgba)
-        big, n = restore_faces(big)
+        big, n = restore_faces(rgba, big)
         save_png(WORK / f"3-{name}.png", big)
         h, w = big.shape[:2]
         size = (OUT_WIDTH, round(h * OUT_WIDTH / w)) if name in SECTIONS else (round(w * OUT_HEIGHT / h), OUT_HEIGHT)
