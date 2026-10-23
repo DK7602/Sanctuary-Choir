@@ -141,7 +141,7 @@ MIDI chords still come first: hold a chord and the choir sings it, whatever the 
 
 ## 6. The stage and the microphones
 
-Click the choir loft on the main page, or **MIX → Stage & Mics**, to see the stage from the hall: the four sections on their risers (sopranos in pink, altos in gold, tenors in blue, basses in green), further back higher up and smaller. Each section's name shows how many singers it has at the current Choir Size; a section with nobody singing is faded.
+Click the choir loft on the main page, **MIX → Stage & Mics**, or simply click **MIX** again while on the MIX page (clicking it once more goes back to the knobs), to see the stage from the hall: the four sections on their risers (sopranos in pink, altos in gold, tenors in blue, basses in green), further back higher up and smaller. Each section's name shows how many singers it has at the current Choir Size; a section with nobody singing is faded.
 
 **Arrange the singers**
 

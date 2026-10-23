@@ -323,6 +323,8 @@
     if (!SUB_PAGES[tab] && !SUB_PAGES[state.tab]) state.returnTab = state.tab;
     state.tab = tab;
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === (SUB_PAGES[tab] || tab)));
+    const mixTab = document.querySelector('.tab[data-tab="mix"]');
+    if (mixTab) mixTab.title = tab === "mix" ? "Click again for the stage" : tab === "stage" ? "Click again for the mix knobs" : "";
     ["mix", "fx", "settings", "take", "stage", "words", "passes"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
     if (tab === "take") SC.send({ type: "cmd", name: "lane" });
     SC.send({ type: "cmd", name: "tab", value: tab });
@@ -453,7 +455,13 @@
       if (l.hasTake && ["learned", "rendered"].includes(l.phase)) setTab("take");
     });
 
-    document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+    // MIX clicked again cycles between the knobs and the stage.
+    document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
+      const t = b.dataset.tab;
+      if (t === "mix" && state.tab === "mix") setTab("stage");
+      else if (t === "mix" && state.tab === "stage") setTab("mix");
+      else setTab(t);
+    }));
     $("gearBtn").addEventListener("click", () => setTab(state.tab === "settings" ? "perform" : "settings"));
     $("presetBox").addEventListener("click", openPresetMenu);
     $("presetPrev").addEventListener("click", () => SC.send({ type: "cmd", name: "presetPrev" }));
