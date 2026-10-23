@@ -167,11 +167,18 @@ The steps:
    and matting are the loft pipeline's. A big figure in front of the choir (the gospel
    director, the cathedral conductor) whose SAM mask comes back far smaller than its
    box is redone with points down the body and its enclosed holes filled.
+   Rooms in `ROOM_FIXES` (the studio) get more: each head is segmented again with a box
+   around it and points on the ears, so headphones belong to their singer; hint points
+   bring back a body seen again below a music stand's desk.
 4. **Choir onto the empty room.** The two pictures of a room are not drawn identically
    (the abbey's choir picture is 4% larger). SIFT on the architecture outside the
    singers gives the transform, and every sprite is warped with it.
 5. **Foreground.** Pixels of the empty room within a few pixels below a singer's edge,
-   where the choir picture shows the same scenery, are drawn over the singers.
+   where the choir picture shows the same scenery, are drawn over the singers. In rooms
+   with `props` (the studio), so are the stands, desks and microphones in front of the
+   singers: pixels the two pictures share, with a singer on both sides, in shapes that
+   carry on beyond the singer. The singers then sway behind fixed stands instead of
+   carrying holes that slide over the room.
 6. **Verification.** `.work/rooms/verify_<room>.jpg` puts the rebuilt room beside the
    mockup; `verify_<room>_third.jpg` shows a third of the choir; `labels_<room>.png`
    shows the masks and the occlusion.

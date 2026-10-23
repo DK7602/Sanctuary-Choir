@@ -48,6 +48,16 @@ ROOM_FILES = {
 }
 # UI drawn into a mockup's scene that is not part of the room (painted out with the singers).
 OVERLAYS = {"hall": [(190, 104, 505, 182)]}   # the Concert Hall mockup's venue picker
+# Rooms whose singers stand behind microphones and music stands, and what SAM misses there:
+# - headgear: headphones (SAM keeps the head and drops the ear cups and headband);
+# - hidden: points (choir picture) on a body seen again below a music stand's desk;
+# - props: stands, desks and mics in front of the singers are drawn over them (from the
+#   empty room), so the singers sway behind them instead of carrying holes that slide over
+#   the room.
+ROOM_FIXES = {
+    "studio": dict(headgear=True, hidden=[(505, 505), (515, 535)], props=True),
+}
+PROPS_SAME = 16   # max colour difference (choir picture vs empty room) of a prop pixel
 
 
 def register_to_skin(img, skin):
@@ -243,6 +253,138 @@ def rescue_sam(tier, name, people, logits):
     return logits
 
 
+def _region_logits(mask):
+    """A hard (logits, origin) window for a boolean mask."""
+    ys, xs = np.nonzero(mask)
+    x0, y0, x1, y1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+    return np.where(mask[y0:y1, x0:x1], 8.0, -8.0).astype(np.float32), (int(x0), int(y0))
+
+
+def empty_difference(tier, base, A):
+    """Per pixel, how different the choir picture is from the empty room (max over the
+    colour channels, lightly blurred), in choir-picture coordinates."""
+    H, W = tier.shape[:2]
+    base_t = cv2.warpAffine(base, cv2.invertAffineTransform(A), (W, H), flags=cv2.INTER_LINEAR,
+                            borderMode=cv2.BORDER_REPLICATE)
+    return np.abs(cv2.GaussianBlur(tier, (3, 3), 0).astype(np.int16)
+                  - cv2.GaussianBlur(base_t, (3, 3), 0).astype(np.int16)).max(axis=2)
+
+
+def worn_and_hidden(tier, name, people, logits, lab, fix, diff):
+    """What SAM leaves out of a singer in a studio: headphones (each head is segmented again
+    with a box around it and points on the ears, and what it gains around the head is
+    added) and a body seen again below a music stand (segmented from the room's hint
+    points; only pixels that differ from the empty room, so the desk itself stays out)."""
+    cache = WORK / f"worn_{name}.npz"
+    done = dict(np.load(cache)) if cache.exists() else {}
+    H, W = lab.shape
+    X0, Y0, X1, Y1 = CROP
+    kps = bs.pose_keypoints(tier, name, people)
+    heads = np.array([p["head"] for p in people])
+    sam = None
+    changed = False
+    regions = []
+
+    def get_sam():
+        nonlocal sam
+        if sam is None:
+            from sam_util import SoftSAM
+            sam = SoftSAM(str(bs.CACHE / "sam2.1_l.pt"))
+        return sam
+
+    def others(i, c0, r0, c1, r1):
+        return [(x - c0, y - r0) for j, (x, y) in enumerate(heads) if j != i and c0 < x < c1 and r0 < y < r1]
+
+    for i, p in enumerate(people):
+        kp = kps[i]
+        if fix.get("headgear") and kp is not None:
+            key = f"h{i}"
+            if key not in done:
+                ears = np.array(kp)[[3, 4], :2]
+                hw = max(abs(ears[0, 0] - ears[1, 0]), 50.0)
+                cx, ey = ears[:, 0].mean(), ears[:, 1].mean()
+                hb = [cx - 0.95 * hw, ey - 1.25 * hw, cx + 0.95 * hw, ey + 0.55 * hw]
+                c0, c1 = int(max(X0, hb[0] - 0.4 * hw)), int(min(X1, hb[2] + 0.4 * hw))
+                r0, r1 = int(max(Y0, hb[1] - 0.3 * hw)), int(min(Y1, hb[3] + 0.4 * hw))
+                s = get_sam()
+                s.set_crop(tier[r0:r1, c0:c1])
+                pos = [(heads[i][0] - c0, heads[i][1] - r0)] + [(x - c0, y - r0) for x, y in ears]
+                lg, score = s.logits([hb[0] - c0, hb[1] - r0, hb[2] - c0, hb[3] - r0], pos, others(i, c0, r0, c1, r1))
+                m = np.zeros((H, W), bool)
+                inbox = np.zeros(lg.shape, bool)
+                inbox[max(0, int(hb[1] - r0)):int(hb[3] - r0), max(0, int(hb[0] - c0)):int(hb[2] - c0)] = True
+                m[r0:r1, c0:c1] = (lg > 0) & inbox
+                done[key] = np.packbits(m)
+                changed = True
+                bs.log(f"  {name}: person {i} head again (score {score:.3f})")
+            m = np.unpackbits(done[key])[: H * W].reshape(H, W).astype(bool)
+            gain = m & ((lab < 0) | (lab == i))
+            if gain.any():
+                regions.append((i, gain))
+        hints = [h for h in fix.get("hidden", [])
+                 if min(range(len(people)), key=lambda j: abs(np.mean([kps[j][q][0] for q in (11, 12)]) - h[0])
+                        if kps[j] is not None else 1e9) == i]
+        if hints:
+            key = f"b{i}"
+            if key not in done:
+                hy = float(np.mean([kp[q][1] for q in (11, 12)]))
+                xs = [h[0] for h in hints]
+                c0, c1 = int(max(X0, min(xs) - 120)), int(min(X1, max(xs) + 120))
+                r0, r1 = int(hy - 80), Y1
+                s = get_sam()
+                s.set_crop(tier[r0:r1, c0:c1])
+                box = [max(0, min(xs) - c0 - 70), hy - 30 - r0, min(c1 - c0 - 1, max(xs) - c0 + 70), r1 - r0 - 1]
+                lg, score = s.logits(box, [(x - c0, y - r0) for x, y in hints], others(i, c0, r0, c1, r1))
+                m = np.zeros((H, W), bool)
+                m[r0:r1, c0:c1] = lg > 0
+                done[key] = np.packbits(m)
+                changed = True
+                bs.log(f"  {name}: person {i} body below the stand (score {score:.3f})")
+            m = np.unpackbits(done[key])[: H * W].reshape(H, W).astype(bool)
+            m &= (lab < 0) & (diff >= PROPS_SAME)
+            n, cc, _, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), 8)
+            keep = [cc[int(y), int(x)] for x, y in hints if cc[int(y), int(x)] > 0]
+            gain = np.isin(cc, keep)
+            if gain.any():
+                regions.append((i, gain))
+    if changed:
+        np.savez_compressed(cache, **done)
+    for i, gain in regions:
+        logits[i] = bs.merge_logits(logits[i], _region_logits(gain))
+        bs.log(f"  {name}: person {i} gains {int(gain.sum())} px")
+    return logits
+
+
+def props_in_front(lab, N, diff):
+    """Stands, desks and microphones in front of the singers (choir-picture coordinates):
+    pixels the choir picture shares with the empty room with a singer on both sides of them
+    (above and below, or left and right), in shapes that carry on beyond the singer the
+    way a stand or a desk does. Pockets of background a singer encloses (between an arm and
+    the body) do not, and are left alone."""
+    same = cv2.morphologyEx((diff < PROPS_SAME).astype(np.uint8), cv2.MORPH_CLOSE, bs.disk(1)) > 0
+    person = lab >= 0
+    env = np.zeros_like(person)
+    for i in range(N):
+        m = lab == i
+        if not m.any():
+            continue
+        cols = np.maximum.accumulate(m, axis=0) & np.maximum.accumulate(m[::-1], axis=0)[::-1]
+        rows = np.maximum.accumulate(m, axis=1) & np.maximum.accumulate(m[:, ::-1], axis=1)[:, ::-1]
+        env |= cols | rows
+    props = same & ~person & env
+    beyond = same & ~person & ~env
+    n, cc, st, _ = cv2.connectedComponentsWithStats(props.astype(np.uint8), 8)
+    keep = np.zeros(n, bool)
+    for q in range(1, n):
+        if st[q, cv2.CC_STAT_AREA] < 120:   # specks along a hairline are not stands
+            continue
+        x, y, w, h = st[q, :4]
+        x0, y0, x1, y1 = max(0, x - 3), max(0, y - 3), x + w + 3, y + h + 3
+        comp = cc[y0:y1, x0:x1] == q
+        keep[q] = (bs.dil(comp, 2) & beyond[y0:y1, x0:x1]).sum() >= 3
+    return keep[cc] & props
+
+
 def build(keys):
     skin = cv2.imread(str(SKIN), cv2.IMREAD_COLOR)
     _, rooms = load_rooms(keys)
@@ -270,6 +412,11 @@ def build(keys):
                f"shift={reg['shift_at_choir'][0]:+.1f},{reg['shift_at_choir'][1]:+.1f} inliers={reg['inliers']}")
         logits = rescue_sam(tier, name, people, bs.sam_logits(tier, name, people))
         lab = bs.ownership((H, W), logits)
+        fix = ROOM_FIXES.get(k, {})
+        diff = empty_difference(tier, base, A) if fix else None
+        if fix.get("headgear") or fix.get("hidden"):
+            logits = worn_and_hidden(tier, name, people, logits, lab, fix, diff)
+            lab = bs.ownership((H, W), logits)
         for stage in ("held", "limbs", "enclosed"):
             if stage == "held":
                 objs, recs = bs.held_objects(tier, name, people, lab)
@@ -298,6 +445,10 @@ def build(keys):
             below[dy:] |= person_b[:-dy]
         same = np.abs(tier_b.astype(np.int16) - base.astype(np.int16)).max(axis=2) < 40
         fg = below & ~person_b & same & (opening > 0.5)
+        if fix.get("props"):
+            props = props_in_front(lab, N, diff)
+            fg |= (cv2.warpAffine(props.astype(np.uint8), A, (W, H), flags=cv2.INTER_NEAREST) > 0) & (opening > 0.5)
+            bs.log(f"  props in front of the singers: {int(props.sum())} px")
         fg_a = cv2.GaussianBlur(fg.astype(np.float32), (0, 0), 0.7)
         fg_a = np.where(fg, 1.0, fg_a) * opening
         # hidden (hard-edged) zone for matting, in choir-picture coordinates
