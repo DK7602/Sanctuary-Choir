@@ -424,6 +424,7 @@ ${go("settings", "Show me Settings")}`,
 <dt>The vowel modes sound synthetic</dt><dd>${ui("SETTINGS")} › ${ui("CHOIR VOICES")}: choose ${ui("SANCTUARY")}. If it is greyed out, the recorded voices aren't installed: run the installer again with <i>Sanctuary Voices</i> ticked.</dd>
 <dt>My DAW won't take the drag from Chords &amp; Stems</dt><dd>Use ${ui("SAVE TO FOLDER")} and drag from the folder instead.</dd>
 <dt>A pass was turned down</dt><dd>It sang too little of the part, or a different part. Sing the same part again from a bar or two before the take.</dd>
+<dt>Reporting a problem</dt><dd>Say which build you have: it is at the bottom of ${ui("SETTINGS")} (for example <i>1.0.0 build e6eda58</i>). Save the sound as a preset (the gear › <i>Save this sound as a preset</i>) and send the file along with a short clip, so the problem can be heard with your exact settings.</dd>
 </dl>`,
     },
     {

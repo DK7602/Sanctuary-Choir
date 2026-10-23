@@ -72,6 +72,19 @@ target_compile_definitions(SanctuaryChoir PUBLIC
     JUCE_REPORT_APP_USAGE=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
+# Which commit this build is (shown in Settings and the manual), so a report can be matched to
+# its code. Read when CMake configures: CI configures every run; a local build after new
+# commits needs a re-configure to update it.
+execute_process(COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    OUTPUT_VARIABLE SANCTUARY_BUILD_ID
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT SANCTUARY_BUILD_ID)
+    set(SANCTUARY_BUILD_ID "local")
+endif()
+target_compile_definitions(SanctuaryChoir PRIVATE SANCTUARY_BUILD_ID="${SANCTUARY_BUILD_ID}")
+
 target_link_libraries(SanctuaryChoir
     PRIVATE
         sanctuary_core

@@ -150,7 +150,10 @@ void SanctuaryEditor::sendInit()
             params.add (describeParameter (*rp));
     o->setProperty ("params", params);
     o->setProperty ("tab", processor.uiTab);
-    o->setProperty ("version", JucePlugin_VersionString);
+   #ifndef SANCTUARY_BUILD_ID
+    #define SANCTUARY_BUILD_ID "local"
+   #endif
+    o->setProperty ("version", String (JucePlugin_VersionString) + " build " + SANCTUARY_BUILD_ID);
     o->setProperty ("standalone", processor.isStandaloneApp());
     addLatencyInfo (*o);
     o->setProperty ("maxSingers", sc::kMaxSingers);
