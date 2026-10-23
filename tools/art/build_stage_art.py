@@ -17,10 +17,10 @@ ui/assets/stage/{sop,alt,ten,bas,lead-front,lead-back}.webp and manifest.json.
    figures no longer cover is inpainted.
 3. Quality: 4x Real-ESRGAN (the general x4v3 model, half denoised) for the robes, hair and
    risers. Faces are too small for it (it paints them smooth and pale), so they are done
-   apart: GFPGAN v1.4 redraws every face RetinaFace finds in a plain 4x Lanczos copy, then
-   each face gets its own colour back (the redrawn face's broad shading and tone replaced
-   by the original's; GFPGAN keeps only the detail: eyes, mouth, nose), so no skin tone
-   moves and each face keeps its look.
+   apart: GFPGAN v1.4 redraws every face RetinaFace finds in a plain 4x Lanczos copy, and
+   only the fine detail of its light and shade is kept (eyes, mouth, nose); colour and broad
+   shading stay the original's, so no skin tone moves, no eye gets tinted, and each face
+   keeps its look.
 4. Sizes: scaled to OUT_WIDTH (sections) / OUT_HEIGHT (leads), WebP with alpha.
 
 Run:  tools/art/.venv/bin/python tools/art/build_stage_art.py [--stage pieces|fix|all]
@@ -49,7 +49,8 @@ RESTORE = CACHE / "restore"
 
 MAX_STRETCH = 1.16     # front rows' bodies, shoulders to ankles, at most
 DENOISE = 0.5          # Real-ESRGAN general x4v3: 0 keeps the picture's grain, 1 smooths it all
-TONE_SIGMA = 6.0       # restored faces keep the original's colour broader than this (4x pixels)
+TONE_SIGMA = 6.0       # restored faces keep the original's shading broader than this (4x pixels)
+CHROMA_SIGMA = 10.0    # and its colour, smoothed this much (4x pixels)
 OUT_WIDTH = 1200       # sections
 OUT_HEIGHT = 480       # leads
 OPAQUE = 248           # the picture's alpha tops out at 253 (lossy WebP): this and above is solid
@@ -322,9 +323,21 @@ def restore_faces(small, big):
     m = cv2.GaussianBlur(changed.astype(np.float32), (0, 0), 3)
     # Not on the outline: GFPGAN saw the hair's soft edge against grey.
     m = (m * np.clip((big[..., 3] - 64) / 160, 0, 1))[..., None]
-    # The original's colour: broad tone and shading from the Lanczos copy, detail from GFPGAN.
+    # GFPGAN gives only the fine detail of light and shade (eyes, mouth, nose); all colour, and
+    # the broad shading, are the original's. It cannot move a skin tone or tint an eye.
+    lab = lambda x: cv2.cvtColor(np.clip(x, 0, 255).astype(np.float32) / 255.0, cv2.COLOR_RGB2LAB)
     blur = lambda x: cv2.GaussianBlur(x, (0, 0), TONE_SIGMA)
-    face = restored + blur(flat) - blur(restored)
+    orig, new = lab(flat), lab(restored)
+    orig[..., 0] += new[..., 0] - blur(new[..., 0]) - (orig[..., 0] - blur(orig[..., 0]))
+    # The picture's colour blotches smaller than a feature (a red smear round an eye) go: the
+    # colour is the original's skin colour around, smoothed over CHROMA_SIGMA (the backdrop
+    # and the robes, not warm, hardly count, so the skin keeps its own tone).
+    warm = (orig[..., 1] > 3) & (orig[..., 2] > 3)
+    wgt = (big[..., 3] / 255.0 * (0.03 + 0.97 * warm)).astype(np.float32)
+    norm = np.maximum(cv2.GaussianBlur(wgt, (0, 0), CHROMA_SIGMA), 1e-4)
+    for k in (1, 2):
+        orig[..., k] = cv2.GaussianBlur(orig[..., k] * wgt, (0, 0), CHROMA_SIGMA) / norm
+    face = cv2.cvtColor(orig, cv2.COLOR_LAB2RGB) * 255.0
     out = big.copy()
     out[..., :3] = big[..., :3] * (1 - m) + face * m
     return out, len(faces)
@@ -347,27 +360,34 @@ def save_png(path, rgba):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", default="all", choices=["pieces", "fix", "all"])
+    ap.add_argument("--stage", default="all", choices=["pieces", "fix", "all", "restore"],
+                    help="restore: only the last steps, from the fixed pieces of an earlier run")
     args = ap.parse_args()
     WORK.mkdir(parents=True, exist_ok=True)
-    src = load_source()
-    log("cutting the pieces")
-    pieces = cut_pieces(src)
-    for name, rgba in pieces.items():
-        save_png(WORK / f"1-{name}.png", rgba)
-        log(f"  {name}: {rgba.shape[1]}x{rgba.shape[0]}")
-    if args.stage == "pieces":
-        return
-    log("fixing the front rows")
-    for name in SECTIONS:
-        pieces[name], _ = fix_front_row(pieces[name], name)
-        save_png(WORK / f"2-{name}.png", pieces[name])
-    if args.stage == "fix":
-        return
+    if args.stage == "restore":
+        load = lambda f: np.asarray(Image.open(WORK / f)).astype(np.float32)
+        pieces = {n: load(f"2-{n}.png") for n in SECTIONS}
+        pieces.update({n: load(f"1-{n}.png") for n in LEADS})
+    else:
+        src = load_source()
+        log("cutting the pieces")
+        pieces = cut_pieces(src)
+        for name, rgba in pieces.items():
+            save_png(WORK / f"1-{name}.png", rgba)
+            log(f"  {name}: {rgba.shape[1]}x{rgba.shape[0]}")
+        if args.stage == "pieces":
+            return
+        log("fixing the front rows")
+        for name in SECTIONS:
+            pieces[name], _ = fix_front_row(pieces[name], name)
+            save_png(WORK / f"2-{name}.png", pieces[name])
+        if args.stage == "fix":
+            return
     log("upscaling and restoring the faces")
     OUT.mkdir(parents=True, exist_ok=True)
     manifest = {}
-    for name, rgba in pieces.items():
+    for name in SECTIONS + list(LEADS):
+        rgba = pieces[name]
         big = upscale(rgba)
         big, n = restore_faces(rgba, big)
         save_png(WORK / f"3-{name}.png", big)

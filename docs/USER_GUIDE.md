@@ -139,12 +139,12 @@ MIDI chords still come first: hold a chord and the choir sings it, whatever the 
 
 ## 6. The stage and the microphones
 
-Click the choir loft on the main page, or **MIX → Stage & Mics**, to see the choir from above, with the audience at the bottom.
+Click the choir loft on the main page, or **MIX → Stage & Mics**, to see the stage from the hall: the four sections on their risers (sopranos in pink, altos in gold, tenors in blue, basses in green), further back higher up and smaller. Each section's name shows how many singers it has at the current Choir Size; a section with nobody singing is faded.
 
 **Arrange the singers**
 
-- **Drag a section** to move it: left or right across the stage, and forward or back. Further back sounds further away: a little quieter, a little later and a little darker.
-- **Drag a section's edges** (the round handles) to make it wider or narrower. A narrow section sounds like one spot; a wide one surrounds you.
+- **Drag a section** (grab its singers) to move it: left or right across the stage, and up the picture to move it back. Further back sounds further away: a little quieter, a little later and a little darker.
+- **Drag a section's edges** (the round handles at the front corners of its risers) to make it wider or narrower. The coloured mark on the floor shows exactly how wide it stands. A narrow section sounds like one spot; a wide one surrounds you.
 - **Formation** buttons set all four at once:
   - **Blocks** (the default): sopranos and altos in front, tenors and basses behind.
   - **Across**: one wide row, left to right.
@@ -154,9 +154,9 @@ Click the choir loft on the main page, or **MIX → Stage & Mics**, to see the c
 
 **Put yourself on the stage**
 
-**YOU** (the gold marker beside the tree) is your own voice. It starts at the microphones: dry and up front, like a lead vocal, with its own **Lead Reverb** (FX page).
+**YOU** (the lead singer in front of the stage, beside the tree, facing the choir) is your own voice. It starts at the microphones: dry and up front, like a lead vocal, with its own **Lead Reverb** (FX page).
 
-- **Drag YOU onto the stage** to sing from there: in front of the choir, among the altos, at the back wall. You are then placed and heard by the microphones like a section, and you are in the hall with the choir: further back sounds further away and more in the room. You are never late: the front of the choir stays in time with you.
+- **Drag YOU onto the stage** to sing from there: in front of the choir, among the altos, at the back wall. On the stage he turns round to face the hall, and shows faintly through any singers standing in front of him. You are then placed and heard by the microphones like a section, and you are in the hall with the choir: further back sounds further away and more in the room. You are never late: the front of the choir stays in time with you.
 - **Double-click YOU**, or drag it off the front of the stage, to go back to the microphones. Double-clicking at the microphones puts you at the front centre of the stage.
 - **Lead on Stage**, **Lead Position** and **Lead Depth** can be automated, for a soloist who walks to the front for the last chorus.
 - Where you stand belongs to your song: presets don't move you.

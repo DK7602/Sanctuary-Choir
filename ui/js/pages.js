@@ -698,23 +698,22 @@
     const hint = el("p", "stage-hint", left);
     hint.title = "Space on the main page makes the whole stage wider or narrower.";
 
-    // Geometry: a fan-shaped loft seen from above, the conductor (and the tree) at the bottom.
-    const cx = W / 2, cy = H + 40, r0 = 125, r1 = 318, thetaMax = 1.02;
-    const toXY = (x, d) => {
-      const r = r0 + d * (r1 - r0), th = x * thetaMax;
-      return [cx + r * Math.sin(th), cy - r * Math.cos(th)];
-    };
-    const fromXY = (px, py) => {
-      const th = Math.atan2(px - cx, cy - py), r = Math.hypot(px - cx, cy - py);
-      return [th / thetaMax, (r - r0) / (r1 - r0)];
-    };
+    // Geometry: the stage seen from the hall. Depth 0 is its front edge, 1 the back wall;
+    // further back is higher up and smaller. YOU at the microphones stand in front of it.
+    const cx = W / 2, yF = 270, yB = 100, HALF = 318;
+    const scaleAt = (d) => 1 - 0.25 * d;
+    const yAt = (d) => yF - (yF - yB) * d;
+    const halfAt = (d) => HALF * scaleAt(d);
+    const toXY = (x, d) => [cx + x * halfAt(d), yAt(d)];
+    const depthAt = (py) => (yF - py) / (yF - yB);
     const ROW = 0.16;   // a section's depth on the risers
+    const NOMINAL = 0.42;   // the width a section's picture is drawn for (BLOCKS)
     let singers = [0, 0, 0, 0];
     const place = (s) => ({ x: Params.get(pos(s) + "Pan") || 0, w: (Params.get(pos(s) + "Width") || 0) / 100, d: (Params.get(pos(s) + "Depth") || 0) / 100 });
-    // Your own voice: at the microphones (beside the tree) or standing on the stage.
-    const [treeX, treeY] = toXY(0, -0.25);
+    // Your own voice: at the microphones (seen from behind, facing the choir) or on the stage.
+    const treeXY = [cx - 4, 240];
+    const MIC_SPOT = [cx + 62, 298];   // where YOU stand at the microphones (feet), by the tree
     const lead = () => ({ on: Params.get("leadOnStage") > 0.5, x: Params.get("leadPan") || 0, d: (Params.get("leadDepth") || 0) / 100 });
-    const leadXY = () => { const l = lead(); return l.on ? toXY(l.x, l.d) : [treeX + 64, treeY + 2]; };
     const LEAD_IDS = ["leadOnStage", "leadPan", "leadDepth"];
     const setLead = (on, x, d) => {
       LEAD_IDS.forEach((id) => Params.begin(id));
@@ -734,78 +733,165 @@
       hint.innerHTML = sections + "<b>YOU</b> sing from the stage, " + row + " " + side + ": <b>double-click</b> to go back to the mics.";
     }
 
-    function sector(c, x0, x1, d0, d1) {
-      const a0 = x0 * thetaMax - Math.PI / 2, a1 = x1 * thetaMax - Math.PI / 2;
-      const ra = r0 + Math.max(0, d0) * (r1 - r0), rb = r0 + Math.min(1, d1) * (r1 - r0);
+    // The art: each section on its risers, and the lead from the front and from behind. A
+    // small copy of each picture's alpha tells a click on a singer from one on the gap beside.
+    const ART = {};
+    ["sop", "alt", "ten", "bas", "lead-front", "lead-back"].forEach((name) => {
+      const img = new Image();
+      img.onload = () => {
+        const k = 4, mw = Math.ceil(img.naturalWidth / k), mh = Math.ceil(img.naturalHeight / k);
+        try {
+          const m = document.createElement("canvas");
+          m.width = mw; m.height = mh;
+          const mc = m.getContext("2d");
+          mc.drawImage(img, 0, 0, mw, mh);
+          const px = mc.getImageData(0, 0, mw, mh).data;
+          const alpha = new Uint8Array(mw * mh);
+          for (let i = 0; i < alpha.length; ++i) alpha[i] = px[i * 4 + 3];
+          ART[name] = { img, alpha, mw, mh };
+        } catch (e) {
+          ART[name] = { img, alpha: null, mw, mh };   // file:// pages may not read pixels back
+        }
+        draw();
+      };
+      img.src = "assets/stage/" + name + ".webp";
+    });
+    const solidAt = (art, r, px, py) => {
+      if (px < r.x || px > r.x + r.w || py < r.y || py > r.y + r.h) return false;
+      if (!art || !art.alpha) return true;
+      const u = Math.min(art.mw - 1, Math.floor((px - r.x) / r.w * art.mw)), v = Math.min(art.mh - 1, Math.floor((py - r.y) / r.h * art.mh));
+      return art.alpha[v * art.mw + u] > 40;
+    };
+
+    // Where each section's picture goes: its risers' front edge on the floor at the front of
+    // its depth, as high as perspective makes it there. The picture follows the width a
+    // little (stretched at most 15 %, and smaller when narrow); the floor mark under it
+    // shows the width exactly.
+    function sectionRect(s) {
+      const p = place(s), art = ART[SECTIONS[s].prefix];
+      const front = p.d - ROW / 2, half = halfAt(front);
+      const nominal = 2 * NOMINAL * half, want = 2 * p.w * half;
+      const ratio = want / nominal;
+      const stretch = Math.max(0.85, Math.min(1.15, ratio)), grow = Math.max(0.72, Math.min(1, ratio / stretch));
+      const aspect = art ? art.img.naturalHeight / art.img.naturalWidth : 0.46;
+      const w = nominal * stretch * grow, h = nominal * aspect * grow;
+      const [x, y] = toXY(p.x, front);
+      return { x: x - w / 2, y: y - h + 6, w, h, front };
+    }
+    function leadRect() {
+      const l = lead(), art = ART[l.on ? "lead-front" : "lead-back"];
+      const aspect = art ? art.img.naturalWidth / art.img.naturalHeight : 0.68;
+      if (!l.on) {
+        const h = 92;
+        return { x: MIC_SPOT[0] - h * aspect / 2, y: MIC_SPOT[1] - h, w: h * aspect, h };
+      }
+      const [x, y] = toXY(l.x, l.d);
+      const h = 74 * scaleAt(l.d);
+      return { x: x - h * aspect / 2, y: y - h + 2, w: h * aspect, h };
+    }
+
+    function drawStageFloor(c) {
+      // The back wall, lit from the front, and the stage floor.
+      const wall = c.createLinearGradient(0, 0, 0, yB);
+      wall.addColorStop(0, "rgba(10, 7, 4, 0)");
+      wall.addColorStop(1, "rgba(60, 40, 20, 0.35)");
+      c.fillStyle = wall;
+      c.fillRect(0, 0, W, yB);
+      const [blx, bly] = toXY(-1.06, 1), [brx] = toXY(1.06, 1), [flx, fly] = toXY(-1.06, 0), [frx] = toXY(1.06, 0);
       c.beginPath();
-      c.arc(cx, cy, rb, a0, a1);
-      c.arc(cx, cy, ra, a1, a0, true);
-      c.closePath();
+      c.moveTo(blx, bly); c.lineTo(brx, bly); c.lineTo(frx, fly); c.lineTo(flx, fly); c.closePath();
+      const floor = c.createLinearGradient(0, bly, 0, fly);
+      floor.addColorStop(0, "rgba(70, 48, 26, 0.35)");
+      floor.addColorStop(1, "rgba(120, 84, 44, 0.42)");
+      c.fillStyle = floor;
+      c.fill();
+      // Boards running back, and the edge of the stage.
+      c.strokeStyle = "rgba(232, 201, 138, 0.07)";
+      c.lineWidth = 1;
+      for (let k = -8; k <= 8; ++k) {
+        const [ax, ay] = toXY(k / 8 * 1.06, 1), [bx, by] = toXY(k / 8 * 1.06, 0);
+        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+      }
+      c.strokeStyle = "rgba(232, 201, 138, 0.5)";
+      c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(flx, fly); c.lineTo(frx, fly); c.stroke();
+      c.strokeStyle = "rgba(232, 201, 138, 0.22)";
+      c.beginPath(); c.moveTo(blx, bly); c.lineTo(brx, bly); c.stroke();
+      const spot = c.createRadialGradient(cx, yF - 60, 10, cx, yF - 60, 260);
+      spot.addColorStop(0, "rgba(255, 220, 160, 0.10)");
+      spot.addColorStop(1, "rgba(255, 220, 160, 0)");
+      c.fillStyle = spot;
+      c.fillRect(0, 0, W, H);
+      c.font = "600 9.5px Montserrat, sans-serif";
+      c.fillStyle = "rgba(216, 200, 168, 0.45)";
+      c.textAlign = "left";
+      c.fillText("BACK OF THE STAGE", blx + 4, bly - 6);
+      c.textAlign = "center";
     }
 
     function draw() {
       const c = hiDpiCanvas(canvas, W, H);
       c.clearRect(0, 0, W, H);
-      // The loft: risers from the front edge to the back wall.
-      for (let k = 0; k <= 4; ++k) {
-        const r = r0 + k / 4 * (r1 - r0);
-        c.beginPath();
-        c.arc(cx, cy, r, -Math.PI / 2 - thetaMax, -Math.PI / 2 + thetaMax);
-        c.strokeStyle = k === 0 || k === 4 ? "rgba(232, 201, 138, 0.45)" : "rgba(232, 201, 138, 0.14)";
-        c.lineWidth = k === 0 || k === 4 ? 1.5 : 1;
-        c.stroke();
-      }
-      [-1, 1].forEach((side) => {
-        const [ax, ay] = toXY(side, 0), [bx, by] = toXY(side, 1);
-        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by);
-        c.strokeStyle = "rgba(232, 201, 138, 0.3)"; c.stroke();
-      });
-      c.font = "600 10px Montserrat, sans-serif";
-      c.fillStyle = "rgba(216, 200, 168, 0.55)";
-      c.textAlign = "center";
-      c.fillText("BACK WALL", cx, cy - r1 - 6);
-
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = "high";
+      drawStageFloor(c);
       const close = Params.get("micClose") > -59.5, tree = Params.get("micTree") > -59.5, room = Params.get("micRoom") > -59.5;
-      // Sections, back ones first.
-      const order = [0, 1, 2, 3].sort((a, b) => place(b).d - place(a).d);
-      order.forEach((s) => {
-        const p = place(s), S = SECTIONS[s];
+
+      // Back to front: the sections, and YOU when on the stage.
+      const l = lead();
+      const items = [0, 1, 2, 3].map((s) => ({ s, front: place(s).d - ROW / 2 }));
+      if (l.on) items.push({ lead: true, front: l.d });
+      items.sort((a, b) => b.front - a.front);
+      const labels = [];
+      items.forEach((it) => {
+        if (it.lead) { drawLead(c); return; }
+        const s = it.s, p = place(s), S = SECTIONS[s], r = sectionRect(s), art = ART[S.prefix];
         const x0 = Math.max(-1, p.x - p.w), x1 = Math.min(1, p.x + p.w);
-        sector(c, x0, x1, p.d - ROW / 2, p.d + ROW / 2);
-        c.fillStyle = hexA(S.color, dragging && dragging.s === s ? 0.32 : 0.18);
-        c.fill();
-        c.strokeStyle = hexA(S.color, 0.85);
-        c.lineWidth = 1.5;
-        c.stroke();
-        // Singers as heads in rows.
-        const n = Math.max(1, singers[s] || 0);
-        const rows = n > 6 ? 2 : 1, perRow = Math.ceil(n / rows);
-        for (let k = 0; k < n; ++k) {
-          const rr = rows === 1 ? 0.5 : (Math.floor(k / perRow) + 0.5) / rows;
-          const i = k % perRow, m = rows === 1 ? n : (Math.floor(k / perRow) === rows - 1 ? n - perRow * (rows - 1) : perRow);
-          const fx = m === 1 ? 0.5 : (i + 0.5) / m;
-          const [hx, hy] = toXY(x0 + (x1 - x0) * fx, p.d - ROW / 2 + ROW * rr);
-          c.beginPath(); c.arc(hx, hy, 3.4, 0, Math.PI * 2);
-          c.fillStyle = singers[s] ? S.color : hexA(S.color, 0.3);
-          c.fill();
-        }
-        // Width handles on the edges.
-        [x0, x1].forEach((hx0) => {
-          const [hx, hy] = toXY(hx0, p.d);
-          c.beginPath(); c.arc(hx, hy, 5, 0, Math.PI * 2);
+        const held = dragging && dragging.s === s;
+        // The floor it covers, exactly.
+        const [ax, ay] = toXY(x0, r.front), [bx] = toXY(x1, r.front);
+        const mark = c.createLinearGradient(0, ay - 4, 0, ay + 6);
+        mark.addColorStop(0, hexA(S.color, 0));
+        mark.addColorStop(1, hexA(S.color, held ? 0.75 : 0.45));
+        c.fillStyle = mark;
+        c.fillRect(ax, ay - 4, bx - ax, 10);
+        c.save();
+        c.globalAlpha = singers[s] ? 1 : 0.4;
+        if (held) { c.shadowColor = S.glow; c.shadowBlur = 18; }
+        if (art) c.drawImage(art.img, r.x, r.y, r.w, r.h);
+        c.restore();
+        // Width handles at the front corners of its floor.
+        [ax, bx].forEach((hx) => {
+          c.beginPath(); c.arc(hx, ay + 1, 5, 0, Math.PI * 2);
           c.fillStyle = "#1b1209"; c.fill();
           c.strokeStyle = S.color; c.lineWidth = 1.5; c.stroke();
         });
-        const [lx, ly] = toXY(p.x, p.d + ROW / 2 + 0.07);
-        c.font = "700 10.5px Montserrat, sans-serif";
-        c.fillStyle = S.color;
-        c.fillText(["SOPRANOS", "ALTOS", "TENORS", "BASSES"][s], lx, ly);
         // A spot mic in front of each section.
-        const [mx, my] = toXY(p.x, p.d - ROW / 2 - 0.06);
-        micIcon(c, mx, my, 3.2, close);
+        micIcon(c, (ax + bx) / 2, ay + 13, 3.2, close);
+        labels.push({ s, x: r.x + r.w / 2, y: r.y + 4 });
       });
-      // The tree above the conductor and the room pair far out in the hall.
-      const [tx, ty] = toXY(0, -0.25);
+
+      // Names above the heads, kept apart when sections stand one behind the other.
+      c.font = "700 10.5px Montserrat, sans-serif";
+      labels.sort((a, b) => a.y - b.y);
+      const placed = [];
+      labels.forEach((L) => {
+        const S = SECTIONS[L.s], text = ["SOPRANOS", "ALTOS", "TENORS", "BASSES"][L.s] + (singers[L.s] ? "  " + singers[L.s] : "");
+        const tw = c.measureText(text).width + 14;
+        let y = L.y;
+        for (let pass = 0; pass < 4; ++pass)
+          placed.forEach((q) => { if (Math.abs(q.x - L.x) < (q.w + tw) / 2 && Math.abs(q.y - y) < 15) y = q.y + 15; });
+        placed.push({ x: L.x, y, w: tw });
+        c.fillStyle = "rgba(20, 13, 8, 0.78)";
+        c.beginPath();
+        c.roundRect ? c.roundRect(L.x - tw / 2, y - 11, tw, 14, 7) : c.rect(L.x - tw / 2, y - 11, tw, 14);
+        c.fill();
+        c.fillStyle = S.color;
+        c.fillText(text, L.x, y);
+      });
+
+      // The tree above the conductor's place and the room pair far out in the hall.
+      const [tx, ty] = treeXY;
       micIcon(c, tx - 9, ty + 5, 4, tree); micIcon(c, tx + 9, ty + 5, 4, tree); micIcon(c, tx, ty - 6, 4, tree);
       c.font = "600 9.5px Montserrat, sans-serif";
       c.fillStyle = tree ? "#ffe7b0" : "rgba(216, 200, 168, 0.4)";
@@ -814,29 +900,48 @@
       c.fillStyle = room ? "#ffe7b0" : "rgba(216, 200, 168, 0.4)";
       c.fillText("ROOM", 34, H - 12);
       c.fillText("ROOM", W - 34, H - 12);
+      // YOU always show: on the stage, faintly through any singers in front, named on top.
+      if (l.on) {
+        c.save();
+        c.globalAlpha = 0.35;
+        drawLead(c, true);
+        c.restore();
+        leadLabel(c);
+      } else {
+        drawLead(c);
+        leadLabel(c);
+      }
+      describeLead();
+    }
 
-      // You, in front of everyone.
-      const [lx, ly] = leadXY(), active = dragging && dragging.lead;
-      const glow = c.createRadialGradient(lx, ly, 2, lx, ly, 18);
-      glow.addColorStop(0, "rgba(255, 226, 160, 0.55)");
-      glow.addColorStop(1, "rgba(255, 226, 160, 0)");
-      c.fillStyle = glow;
-      c.beginPath(); c.arc(lx, ly, 18, 0, Math.PI * 2); c.fill();
-      const body = c.createRadialGradient(lx - 2, ly - 3, 1, lx, ly, 8);
-      body.addColorStop(0, "#fff3cf");
-      body.addColorStop(0.6, "#e8c27a");
-      body.addColorStop(1, "#9a6c2c");
-      c.fillStyle = body;
-      c.beginPath(); c.arc(lx, ly, active ? 8 : 7, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = "#1b1209"; c.lineWidth = 1.5; c.stroke();
+    // YOU: the lead singer, from behind at the microphones, from the front on the stage.
+    function drawLead(c, figureOnly) {
+      const l = lead(), r = leadRect(), art = ART[l.on ? "lead-front" : "lead-back"];
+      const active = dragging && dragging.lead;
+      const fx = r.x + r.w / 2, fy = r.y + r.h;
+      if (!figureOnly) {
+        const glow = c.createRadialGradient(fx, fy - 2, 2, fx, fy - 2, r.w * 0.9);
+        glow.addColorStop(0, "rgba(255, 226, 160, " + (active ? 0.6 : 0.42) + ")");
+        glow.addColorStop(1, "rgba(255, 226, 160, 0)");
+        c.fillStyle = glow;
+        c.beginPath(); c.ellipse(fx, fy - 2, r.w * 0.9, r.w * 0.28, 0, 0, Math.PI * 2); c.fill();
+      }
+      if (art) {
+        c.save();
+        if (active) { c.shadowColor = "rgba(255, 226, 160, 0.9)"; c.shadowBlur = 14; }
+        c.drawImage(art.img, r.x, r.y, r.w, r.h);
+        c.restore();
+      }
+    }
+    function leadLabel(c) {
+      const r = leadRect(), fx = r.x + r.w / 2, ly = r.y - 4;
       c.font = "700 9.5px Montserrat, sans-serif";
       c.fillStyle = "rgba(20, 13, 8, 0.85)";
       c.beginPath();
-      c.roundRect ? c.roundRect(lx - 14, ly + 10, 28, 13, 6) : c.rect(lx - 14, ly + 10, 28, 13);
+      c.roundRect ? c.roundRect(fx - 14, ly - 10, 28, 13, 6) : c.rect(fx - 14, ly - 10, 28, 13);
       c.fill();
       c.fillStyle = "#ffe7b0";
-      c.fillText("YOU", lx, ly + 20);
-      describeLead();
+      c.fillText("YOU", fx, ly);
     }
 
     function micIcon(c, x, y, r, on) {
@@ -849,44 +954,42 @@
     }
 
 
-    // Pointer: grab a section's body (move) or one of its edges (width).
+    // Pointer: grab a section's singers (move) or one of its corner handles (width), or YOU.
     let dragging = null;
     const local = (e) => {
       const r = canvas.getBoundingClientRect();
       return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
     };
     const hit = (px, py) => {
-      const [lx, ly] = leadXY();
-      if (Math.hypot(px - lx, py - ly) < 12) return { lead: true };
+      const lr = leadRect(), la = ART[lead().on ? "lead-front" : "lead-back"];
+      if (solidAt(la, lr, px, py) || (px >= lr.x && px <= lr.x + lr.w && py >= lr.y + lr.h - 14 && py <= lr.y + lr.h + 4)) return { lead: true };
       const order = [0, 1, 2, 3].sort((a, b) => place(a).d - place(b).d);   // front ones win
       for (const s of order) {
-        const p = place(s);
+        const p = place(s), front = p.d - ROW / 2;
         for (const [edge, ex] of [["left", Math.max(-1, p.x - p.w)], ["right", Math.min(1, p.x + p.w)]]) {
-          const [hx, hy] = toXY(ex, p.d);
-          if (Math.hypot(px - hx, py - hy) < 9) return { s, mode: edge };
+          const [hx, hy] = toXY(ex, front);
+          if (Math.hypot(px - hx, py - hy - 1) < 9) return { s, mode: edge };
         }
       }
-      const [x, d] = fromXY(px, py);
-      for (const s of order) {
-        const p = place(s);
-        if (x >= p.x - p.w - 0.03 && x <= p.x + p.w + 0.03 && Math.abs(d - p.d) <= ROW / 2 + 0.03) return { s, mode: "move" };
-      }
+      for (const s of order)
+        if (solidAt(ART[SECTIONS[s].prefix], sectionRect(s), px, py)) return { s, mode: "move" };
       return null;
     };
     canvas.addEventListener("pointerdown", (e) => {
       const [px, py] = local(e);
       const h = hit(px, py);
       if (!h) return;
+      canvas.setPointerCapture(e.pointerId);
       if (h.lead) {
-        dragging = h;
-        canvas.setPointerCapture(e.pointerId);
+        // Held by the feet, wherever he was grabbed.
+        const r = leadRect();
+        dragging = Object.assign(h, { offX: r.x + r.w / 2 - px, offY: r.y + r.h - py });
         LEAD_IDS.forEach((id) => Params.begin(id));
         draw();
         return;
       }
-      const [x, d] = fromXY(px, py), p = place(h.s);
-      dragging = Object.assign(h, { grabX: x - p.x, grabD: d - p.d });
-      canvas.setPointerCapture(e.pointerId);
+      const p = place(h.s);
+      dragging = Object.assign(h, { px0: px, py0: py, x0: p.x, d0: p.d });
       (h.mode === "move" ? ["Pan", "Depth"] : ["Width"]).forEach((k) => Params.begin(pos(h.s) + k));
       draw();
     });
@@ -897,22 +1000,26 @@
         canvas.style.cursor = !h ? "default" : h.lead || h.mode === "move" ? "grab" : "ew-resize";
         return;
       }
-      const [x, d] = fromXY(px, py);
       if (dragging.lead) {
-        // On the stage from its front edge back; below it, back at the microphones.
+        // On the stage from its front edge back; in front of it, back at the microphones.
+        const fx = px + dragging.offX, fy = py + dragging.offY, d = depthAt(fy);
         const on = d >= -0.1;
         Params.set("leadOnStage", on ? 1 : 0);
         if (on) {
-          Params.set("leadPan", Math.max(-1, Math.min(1, x)));
-          Params.set("leadDepth", Math.max(0, Math.min(100, d * 100)));
+          const dd = Math.max(0, Math.min(1, d));
+          Params.set("leadDepth", dd * 100);
+          Params.set("leadPan", Math.max(-1, Math.min(1, (fx - cx) / halfAt(dd))));
         }
         return;
       }
       const s = dragging.s;
       if (dragging.mode === "move") {
-        Params.set(pos(s) + "Pan", Math.max(-1, Math.min(1, x - dragging.grabX)));
-        Params.set(pos(s) + "Depth", Math.max(0, Math.min(100, (d - dragging.grabD) * 100)));
+        const d = Math.max(0, Math.min(1, dragging.d0 + (dragging.py0 - py) / (yF - yB)));
+        const x = dragging.x0 + (px - dragging.px0) / halfAt(d - ROW / 2);
+        Params.set(pos(s) + "Pan", Math.max(-1, Math.min(1, x)));
+        Params.set(pos(s) + "Depth", d * 100);
       } else {
+        const x = (px - cx) / halfAt(place(s).d - ROW / 2);
         Params.set(pos(s) + "Width", Math.max(2, Math.min(100, Math.abs(x - place(s).x) * 100)));
       }
     });

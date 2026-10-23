@@ -68,7 +68,7 @@
 - **MIDI parts and Program Change**: channels 1–4 sing exactly the soprano, alto, tenor and bass notes you write; Program Change picks a preset.
 - **Sung words for MIDI**: type "Kyrie eleison", "Alleluia" or "Glory to God" and the MIDI choir sings it, a syllable per note, with real vowels and sung consonants (church Latin or English).
 - **Scenes**: 8 stored sounds per song (verse, chorus, bridge), recalled with a click or by automating the Scene parameter.
-- **The stage and its microphones**: drag the sections around the choir loft (left/right, forward/back, wide/narrow) or pick a formation, and mix Close, Tree and Room microphones like a recording engineer. Drag yourself onto the stage too, to sing from among the choir and in the hall. Rendered takes follow without rendering again.
+- **The stage and its microphones**: drag the four sections around the stage, seen from the hall (left/right, forward/back, wide/narrow) or pick a formation, and mix Close, Tree and Room microphones like a recording engineer. Drag yourself onto the stage too, to sing from among the choir and in the hall. Rendered takes follow without rendering again.
 - **67 factory presets** in 8 categories (Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, Kids & Crowds) plus your own.
 
 ## Download

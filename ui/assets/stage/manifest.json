@@ -1,0 +1,32 @@
+{
+ "sop": {
+  "file": "sop.webp",
+  "w": 1200,
+  "h": 545
+ },
+ "ten": {
+  "file": "ten.webp",
+  "w": 1200,
+  "h": 564
+ },
+ "alt": {
+  "file": "alt.webp",
+  "w": 1200,
+  "h": 577
+ },
+ "bas": {
+  "file": "bas.webp",
+  "w": 1200,
+  "h": 661
+ },
+ "lead-front": {
+  "file": "lead-front.webp",
+  "w": 334,
+  "h": 480
+ },
+ "lead-back": {
+  "file": "lead-back.webp",
+  "w": 319,
+  "h": 480
+ }
+}

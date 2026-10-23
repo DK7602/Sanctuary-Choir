@@ -206,6 +206,7 @@ from behind). It writes `ui/assets/stage/{sop,alt,ten,bas,lead-front,lead-back}.
 tools/art/.venv/bin/python tools/art/build_stage_art.py                 # everything
 tools/art/.venv/bin/python tools/art/build_stage_art.py --stage pieces  # only cut (.work/stage/1-*.png)
 tools/art/.venv/bin/python tools/art/build_stage_art.py --stage fix     # cut and fix (.work/stage/2-*.png)
+tools/art/.venv/bin/python tools/art/build_stage_art.py --stage restore # only upscale and faces, from an earlier fix
 ```
 
 1. **Pieces.** Each section is a connected part of the picture's alpha. Each view of the
