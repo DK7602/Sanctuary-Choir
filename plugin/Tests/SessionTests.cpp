@@ -542,7 +542,8 @@ static void voicePackLoads()
 
 static int passCount (const LearnSession& s)
 {
-    const auto* list = s.getStatus().getProperty ("passes", {}).getArray();
+    const var status = s.getStatus();
+    const auto* list = status.getProperty ("passes", {}).getArray();
     return list != nullptr ? list->size() : 0;
 }
 
@@ -593,8 +594,9 @@ static void passesMakeAMultiTakeChoir()
         const String text = rig.session.getStatus().getProperty ("text", "").toString();
         std::printf ("  %s\n", text.toRawUTF8());
         check (text.contains ("2 PASSES"), "the take now has two passes");
-        const var info = (*rig.session.getStatus().getProperty ("passes", {}).getArray())[0];
-        check ((float) info.getProperty ("coverage", 0.0f) > 0.8f, "the pass sings what the take sings");
+        const var status = rig.session.getStatus();
+        const auto* list = status.getProperty ("passes", {}).getArray();
+        check (list != nullptr && ! list->isEmpty() && (float) (*list)[0].getProperty ("coverage", 0.0f) > 0.8f, "the pass sings what the take sings");
 
         // Playing the song: the pass comes with the input, sample for sample.
         LearnSession::BlockInfo block;
