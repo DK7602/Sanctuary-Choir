@@ -55,9 +55,14 @@ OVERLAYS = {"hall": [(190, 104, 505, 182)]}   # the Concert Hall mockup's venue 
 #   the choir picture: a body under a head SAM kept, a raised hand against the wall;
 # - props: stands, desks and mics in front of the singers are drawn over them (from the
 #   empty room), so the singers sway behind them instead of carrying holes that slide over
-#   the room.
+#   the room;
+# - front: (a point on the head of a singer in front, one on the head of the singer behind
+#   them), for overlaps the occlusion graph misses because a stand keeps the masks apart.
+#   The one in front is revealed first, so a smaller choir never shows someone cut off by
+#   a neighbour who is not there.
 ROOM_FIXES = {
-    "studio": dict(headgear=True, hidden=[(505, 505), (515, 535)], props=True),
+    "studio": dict(headgear=True, hidden=[(505, 505), (515, 535)], props=True,
+                   front=[((318, 269), (498, 185)), ((1176, 291), (965, 219))]),
     "gospel": dict(parts=[((1015, 300), [(1012, 300), (1010, 326), (1035, 322), (1058, 322), (1050, 336)]),
                           ((463, 318), [(452, 268), (447, 285)])]),
     "abbey-monks": dict(parts=[((903, 339), [(858, 378), (865, 385)])]),
@@ -265,6 +270,11 @@ def rescue_sam(tier, name, people, logits):
     return logits
 
 
+def _nearest_head(people, pt):
+    """The singer whose head is closest to a point of the choir picture."""
+    return int(np.argmin([np.hypot(p["head"][0] - pt[0], p["head"][1] - pt[1]) for p in people]))
+
+
 def _region_logits(mask):
     """A hard (logits, origin) window for a boolean mask."""
     ys, xs = np.nonzero(mask)
@@ -361,7 +371,7 @@ def worn_and_hidden(tier, name, people, logits, lab, fix, diff):
             if gain.any():
                 regions.append((i, gain))
     for n_, (owner_pt, pts) in enumerate(fix.get("parts", [])):
-        i = int(np.argmin([np.hypot(p["head"][0] - owner_pt[0], p["head"][1] - owner_pt[1]) for p in people]))
+        i = _nearest_head(people, owner_pt)
         key = f"p{n_}"
         xs, ys = [x for x, _ in pts], [y for _, y in pts]
         if key not in done:
@@ -530,6 +540,8 @@ def build(keys):
         rows = bs.assign_rows(people, lab, N)
         rel = bs.occlusion_graph(lab, people, rows, N)
         front_edges = [((i, j) if r["score"] > 0 else (j, i)) for (i, j), r in rel.items() if r["score"] != 0]
+        forced = [tuple(_nearest_head(people, pt) for pt in pair) for pair in fix.get("front", [])]
+        front_edges = [e for e in front_edges if e[::-1] not in forced] + [e for e in forced if e not in front_edges]
         order, _ = bs.reveal_order(people, rows, front_edges, N)
         rank = {i: n for n, i in enumerate(order)}
         cv2.imwrite(str(WORK / f"labels_{k}.png"), bs.label_overlay(tier, lab, people, order, rows, front_edges))
@@ -567,6 +579,9 @@ def build(keys):
             else:
                 a_, b_ = (i, j) if rank[i] < rank[j] else (j, i)
                 fronts[b_].add(a_)
+        for (a_, b_) in forced:
+            fronts[a_].discard(b_)
+            fronts[b_].add(a_)
         z = order[::-1]
         people_out = []
         sprites = {}

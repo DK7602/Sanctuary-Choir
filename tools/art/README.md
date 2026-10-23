@@ -174,7 +174,11 @@ The steps:
    Rooms in `ROOM_FIXES` get more: in the studio each head is segmented again with a box
    around it and points on the ears, so headphones belong to their singer, and hint
    points bring back a body seen again below a music stand's desk; elsewhere hint points
-   name a part SAM left out and whose it is (`parts`).
+   name a part SAM left out and whose it is (`parts`). Where a stand keeps two masks
+   apart, the occlusion graph sees no overlap; `front` names who stands in front of
+   whom (the studio's two women in front of the men beside them), so the one in front
+   is revealed first and a smaller choir never shows a singer cut off by a missing
+   neighbour.
 4. **Choir onto the empty room.** The two pictures of a room are not drawn identically
    (the abbey's choir picture is 4% larger). SIFT on the architecture outside the
    singers gives the transform, and every sprite is warped with it.
