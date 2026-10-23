@@ -3,7 +3,7 @@
 
 namespace sc
 {
-FFT::FFT (int order) : size (1 << order), bitRev ((size_t) size), twiddles ((size_t) size / 2)
+FFT::FFT (int orderIn) : size (1 << orderIn), order (orderIn), bitRev ((size_t) size), twiddles ((size_t) size / 2)
 {
     for (int i = 0; i < size; ++i)
     {
@@ -21,29 +21,36 @@ FFT::FFT (int order) : size (1 << order), bitRev ((size_t) size), twiddles ((siz
     }
 }
 
-void FFT::transform (std::complex<float>* data, bool inv) const
+void FFT::bitReverse (std::complex<float>* data) const
 {
     for (int i = 0; i < size; ++i)
         if (i < bitRev[(size_t) i])
             std::swap (data[i], data[bitRev[(size_t) i]]);
+}
 
-    for (int len = 2; len <= size; len <<= 1)
+void FFT::pass (std::complex<float>* data, int len, bool inv) const
+{
+    const int half = len >> 1, step = size / len;
+    for (int i = 0; i < size; i += len)
     {
-        const int half = len >> 1, step = size / len;
-        for (int i = 0; i < size; i += len)
+        for (int j = 0; j < half; ++j)
         {
-            for (int j = 0; j < half; ++j)
-            {
-                auto w = twiddles[(size_t) (j * step)];
-                if (inv)
-                    w = std::conj (w);
-                const auto u = data[i + j];
-                const auto v = data[i + j + half] * w;
-                data[i + j] = u + v;
-                data[i + j + half] = u - v;
-            }
+            auto w = twiddles[(size_t) (j * step)];
+            if (inv)
+                w = std::conj (w);
+            const auto u = data[i + j];
+            const auto v = data[i + j + half] * w;
+            data[i + j] = u + v;
+            data[i + j + half] = u - v;
         }
     }
+}
+
+void FFT::transform (std::complex<float>* data, bool inv) const
+{
+    bitReverse (data);
+    for (int len = 2; len <= size; len <<= 1)
+        pass (data, len, inv);
 }
 
 void FFT::inverse (std::complex<float>* data) const

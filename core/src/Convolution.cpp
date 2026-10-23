@@ -208,7 +208,7 @@ std::unique_ptr<ConvolutionRoom> ConvolutionRoom::create (const RoomImpulse& ir,
     setup (r->head, hb, 0, 16);
     if ((int64_t) n > 16 * (int64_t) hb)
         setup (r->tail, 8 * hb, 16 * (int64_t) hb, 1 << 20);
-    r->tailUnits = r->tail.parts > 0 ? r->tail.parts + 2 : 0;
+    r->tailUnits = r->tail.parts > 0 ? 2 * r->tail.fft->getOrder() + r->tail.parts + 4 : 0;
 
     const int ring = nextPow2 (32 * hb);
     r->ringMask = ring - 1;
@@ -286,15 +286,20 @@ bool ConvolutionRoom::partActive (int64_t t) const noexcept
     return t < activeLength;
 }
 
-void ConvolutionRoom::transformInput (Stage& s, int64_t end) noexcept
+void ConvolutionRoom::gatherInput (Stage& s, int64_t end) noexcept
 {
+    // Both inputs in one complex transform: a real, b imaginary.
     const int64_t start = end - s.size;
     for (int k = 0; k < s.size; ++k)
     {
         const size_t i = (size_t) ((start + k) & ringMask);
         s.work[(size_t) k] = { inA[i], inB[i] };
     }
-    s.fft->forward (s.work.data());
+}
+
+void ConvolutionRoom::storeInput (Stage& s) noexcept
+{
+    // Pull the two inputs' spectra apart into the ring of past blocks; a new sum starts.
     s.newest = (s.newest + 1) % s.parts;
     const size_t base = (size_t) s.newest * (size_t) s.bins;
     for (int m = 0; m < s.bins; ++m)
@@ -335,7 +340,7 @@ void ConvolutionRoom::accumulate (Stage& s, int part, float gain) noexcept
     }
 }
 
-void ConvolutionRoom::finish (Stage& s, int64_t outStart) noexcept
+void ConvolutionRoom::sumToWork (Stage& s) noexcept
 {
     // Both channels back in one inverse transform: left real, right imaginary.
     const float* lr = s.yRe[0].data();
@@ -349,39 +354,65 @@ void ConvolutionRoom::finish (Stage& s, int64_t outStart) noexcept
         const int k = s.size - m;
         s.work[(size_t) m] = { lr[k] + ri[k], rr[k] - li[k] };
     }
-    s.fft->inverse (s.work.data());
+}
+
+void ConvolutionRoom::writeOutput (Stage& s, int64_t outStart, float scale) noexcept
+{
     for (int k = 0; k < s.block; ++k)
     {
         const auto v = s.work[(size_t) (s.block + k)];
         const size_t i = (size_t) ((outStart + k) & ringMask);
-        outL[i] += v.real();
-        outR[i] += v.imag();
+        outL[i] += v.real() * scale;
+        outR[i] += v.imag() * scale;
     }
 }
 
 void ConvolutionRoom::runTailUnits (int upTo) noexcept
 {
+    // A period's work, in units of about the same size: the input's transform a pass at a
+    // time, one partition each, then the inverse a pass at a time.
     if (tailPeriodStart < 0)
         return;
+    const int order = tail.fft->getOrder();
+    const int multiply = order + 2, inverse = multiply + tail.parts, write = inverse + order + 1;
     upTo = std::min (upTo, tailUnits);
     for (; tailDone < upTo; ++tailDone)
     {
-        if (tailDone == 0)
+        const int u = tailDone;
+        if (u == 0)
         {
-            transformInput (tail, tailPeriodStart);
+            gatherInput (tail, tailPeriodStart);
+            tail.fft->bitReverse (tail.work.data());
         }
-        else if (tailDone <= tail.parts)
+        else if (u <= order)
         {
-            const int part = tailDone - 1;
+            tail.fft->pass (tail.work.data(), 1 << u, false);
+        }
+        else if (u == order + 1)
+        {
+            storeInput (tail);
+        }
+        else if (u < inverse)
+        {
+            const int part = u - multiply;
             const int64_t t = tail.offset + (int64_t) part * tail.block;
             if (partActive (t))
                 accumulate (tail, part, partGain (t + tail.block / 2));
+        }
+        else if (u == inverse)
+        {
+            sumToWork (tail);
+            tail.fft->bitReverse (tail.work.data());
+        }
+        else if (u < write)
+        {
+            tail.fft->pass (tail.work.data(), 1 << (u - inverse), true);
         }
         else
         {
             // This period's input reaches the output two tail blocks later, plus the head's
             // own latency, so the tail lines up with the head.
-            finish (tail, tailPeriodStart + tail.block + headBlock);
+            writeOutput (tail, tailPeriodStart + tail.block + headBlock, 1.0f / (float) tail.size);
         }
     }
 }
@@ -404,10 +435,14 @@ void ConvolutionRoom::process (const float* inL, const float* inR, float* oL, fl
 
         if (now % head.block == 0)
         {
-            transformInput (head, now);
+            gatherInput (head, now);
+            head.fft->forward (head.work.data());
+            storeInput (head);
             for (int p = 0; p < head.parts; ++p)
                 accumulate (head, p, partGain ((int64_t) p * head.block + head.block / 2));
-            finish (head, now);
+            sumToWork (head);
+            head.fft->inverse (head.work.data());
+            writeOutput (head, now, 1.0f);
         }
         if (tail.parts > 0 && now % tail.block == 0)
         {

@@ -19,10 +19,16 @@ public:
     /** In-place inverse transform, scaled by 1/N. */
     void inverse (std::complex<float>* data) const;
 
+    /** The same transform a piece at a time (to spread it over several audio blocks): the
+        bit-reversal, then pass (len) for len = 2, 4, ... size; an inverse is not scaled. */
+    int getOrder() const noexcept { return order; }
+    void bitReverse (std::complex<float>* data) const;
+    void pass (std::complex<float>* data, int len, bool inverse) const;
+
 private:
     void transform (std::complex<float>* data, bool inverse) const;
 
-    int size = 0;
+    int size = 0, order = 0;
     std::vector<int> bitRev;
     std::vector<std::complex<float>> twiddles;
 };

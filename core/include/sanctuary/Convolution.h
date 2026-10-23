@@ -75,9 +75,11 @@ private:
         int newest = 0;                           // ring slot of the newest input block
     };
 
-    void transformInput (Stage& s, int64_t end) noexcept;
+    void gatherInput (Stage& s, int64_t end) noexcept;
+    void storeInput (Stage& s) noexcept;
     void accumulate (Stage& s, int part, float gain) noexcept;
-    void finish (Stage& s, int64_t outStart) noexcept;
+    void sumToWork (Stage& s) noexcept;
+    void writeOutput (Stage& s, int64_t outStart, float scale) noexcept;
     float partGain (int64_t t) const noexcept;
     bool partActive (int64_t t) const noexcept;
     void runTailUnits (int upTo) noexcept;
@@ -97,8 +99,8 @@ private:
     int preMask = 0, prePos = 0;
     int64_t now = 0;           // input samples taken in
 
-    // The tail's spread-out work: unit 0 transforms the input, 1..parts multiply, the last
-    // writes the output.
+    // The tail's spread-out work (see runTailUnits): the input's transform pass by pass, a
+    // partition at a time, the inverse pass by pass, then the output.
     int tailDone = 0, tailUnits = 0;
     int64_t tailPeriodStart = -1;
 
