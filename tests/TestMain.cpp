@@ -374,6 +374,105 @@ static void checkSectionPitches (VocalType vt, const char* label)
 TEST (engineUnisonWords) { checkSectionPitches (VocalType::Words, "words"); }
 TEST (engineUnisonVowels) { checkSectionPitches (VocalType::Ah, "vowels"); }
 
+TEST (psolaMarksKeepTheirOctaveThroughFlips)
+{
+    // A creaky voice at 110 Hz that the tracker hears an octave down every other frame: the
+    // marks should still fall once per real period.
+    const double sr = 48000.0;
+    const float hz = 110.0f, period = (float) sr / hz;
+    PsolaAnalyzer an;
+    an.prepare (sr, 740, 48000);
+    std::vector<float> x ((size_t) sr);
+    for (size_t i = 0; i < x.size(); ++i)
+    {
+        const float ph = std::fmod ((float) i, period);
+        x[i] = 0.5f * std::exp (-ph / 60.0f) * std::sin (2.0f * kPi * 700.0f * ph / (float) sr);
+    }
+    int64_t nextFrame = 0;
+    for (size_t pos = 0; pos + 256 <= x.size(); pos += 256)
+    {
+        an.pushInput (x.data() + pos, 256);
+        for (; nextFrame + 600 <= an.getWritten(); nextFrame += 240)
+        {
+            PitchFrame f;
+            f.centre = nextFrame;
+            f.voiced = true;
+            f.hz = (nextFrame / 240) % 2 == 1 ? hz * 0.5f : hz;
+            f.midi = hzToMidi (f.hz);
+            f.clarity = 0.9f;
+            an.addPitchFrame (f);
+        }
+        an.updateMarks();
+    }
+    std::vector<int64_t> marks;
+    int64_t cursor = 0;
+    for (double t = 0.2 * sr; t < 0.8 * sr; t += 8.0)
+        if (const auto* m = an.nearestMark (t, cursor))
+            if (marks.empty() || m->pos != marks.back())
+                marks.push_back (m->pos);
+    int off = 0;
+    for (size_t k = 1; k < marks.size(); ++k)
+    {
+        const float d = (float) (marks[k] - marks[k - 1]);
+        if (d < 0.85f * period || d > 1.15f * period) ++off;
+    }
+    std::printf ("  creaky voice: %d marks, %d spaced off the real period\n", (int) marks.size(), off);
+    CHECK (marks.size() > 50);
+    CHECK (off == 0);
+}
+
+TEST (wordsChoirDoesNotCrackleOnMouthClicks)
+{
+    // Every singer copies the lead at its own small delay: a mouth click in the lead used to come
+    // back from the choir as a burst of small clicks (a crackle, plain with the lead muted).
+    const double sr = 48000.0;
+    const auto clean = test::singMelody (test::cMajorScale (48.0f, 0.6f), sr, Bass, 15.0f);
+    auto clicked = clean;
+    std::vector<int64_t> at;
+    for (int k = 0; k < 14; ++k)
+    {
+        const int64_t i = (int64_t) ((0.35 + 0.61 * k) * sr);
+        if (i + 400 >= (int64_t) clicked.size()) break;
+        at.push_back (i);
+        for (int n = 0; n < 200; ++n)   // a lip smack: a sharp spike ringing at 3.5 kHz
+            clicked[(size_t) (i + n)] += 0.25f * std::exp (-(float) n / 19.0f) * std::sin (2.0f * kPi * 3500.0f * (float) n / (float) sr + 0.3f);
+        clicked[(size_t) i] += 0.3f;
+        clicked[(size_t) i + 1] -= 0.2f;
+    }
+
+    auto render = [&] (const std::vector<float>& x)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Words, HarmonyMode::FullChoir);
+        p.style = Style::Gregorian;   // the widest spread of singer timing
+        p.choirSize = 96.0f;
+        p.humanize = 100.0f;
+        eng.setParams (p);
+        std::vector<float> r;
+        auto l = runEngine (eng, x, sr, &r);
+        for (size_t i = 0; i < l.size(); ++i) l[i] = 0.5f * (l[i] + r[i]);
+        Biquad h1, h2;
+        h1.highPass (sr, 3000.0);
+        h2.highPass (sr, 3000.0);
+        for (auto& v : l) v = h2.process (h1.process (v));
+        return l;
+    };
+    const auto a = render (clean), b = render (clicked);
+    // The choir's top band in the 40 ms after each click (the singers' delays), with and without.
+    double rise = 0.0;
+    for (int64_t i : at)
+    {
+        double ea = 1.0e-9, eb = 1.0e-9;
+        for (int64_t n = i; n < i + (int64_t) (0.04 * sr); ++n) { ea += a[(size_t) n] * a[(size_t) n]; eb += b[(size_t) n] * b[(size_t) n]; }
+        rise += 10.0 * std::log10 (eb / ea);
+    }
+    rise /= (double) at.size();
+    std::printf ("  words choir after a click: top band %+.1f dB (mean of %d clicks)\n", rise, (int) at.size());
+    CHECK (at.size() >= 10);
+    CHECK (rise < 1.0);   // +2.4 dB before the voice was softened
+}
+
 TEST (engineFullChoirHarmony)
 {
     const double sr = 48000.0;
@@ -2277,9 +2376,12 @@ TEST (passesSingInTheChoir)
     const std::vector<float> silent ((size_t) n, 0.0f);
     const auto same = render ({ take.data(), take.data() });
     const float lift = std::sqrt (3.0f);
-    double maxDiff = 0.0;
+    double maxDiff = 0.0, peak = 0.0;
     for (size_t i = a; i < b; ++i)
+    {
         maxDiff = std::max (maxDiff, (double) std::abs (same.channels[Tenor * 2][i] - lift * alone.channels[Tenor * 2][i]));
+        peak = std::max (peak, (double) std::abs (alone.channels[Tenor * 2][i]));
+    }
     const auto half = render ({ silent.data() });
     const double drop = 20.0 * std::log10 (rms (half.channels[Tenor * 2], a, b) / rms (alone.channels[Tenor * 2], a, b));
 
@@ -2301,7 +2403,7 @@ TEST (passesSingInTheChoir)
     const double level = 20.0 * std::log10 (rms (three.channels[Tenor * 2], a, b) / rms (alone.channels[Tenor * 2], a, b));
     std::printf ("  a pass like the take: %.1e apart; a silent pass: tenors %.1f dB; three passes: %.2f alike, level %+.1f dB\n",
                  maxDiff, drop, similarity, level);
-    CHECK (maxDiff < 1.0e-4);
+    CHECK (maxDiff < 1.0e-3 * peak);   // the same, but for rounding
     CHECK (drop < 0.0 && drop > -3.5);
     CHECK (similarity < 0.9);
     CHECK (std::abs (level) < 1.5);

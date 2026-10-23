@@ -15,6 +15,29 @@ struct PsolaMark
     bool voiced = false;
 };
 
+/** Takes mouth clicks and sharp spikes out of the voice the singers copy. Each singer reads the
+    lead at its own small delay, so one click in the lead would come back from the choir as a
+    burst of small clicks: a crackle. A spike in the top band well above the voice's own recent
+    peaks (its glottal pulses, a steady "s") is turned down above ~1.5 kHz for a few ms; the
+    look-ahead catches its start. The bands are a Linkwitz-Riley split, so with nothing to turn
+    down the voice comes out whole (only phase-shifted). */
+class ClickSoftener
+{
+public:
+    void prepare (double sampleRate);
+    void reset();
+    /** Takes one input sample; returns the softened sample from getLookahead() samples ago. */
+    float process (float x) noexcept;
+    int getLookahead() const noexcept { return lookahead; }
+
+private:
+    Biquad detect, low1, low2, high1, high2;
+    std::array<float, 256> lowDelay {}, highDelay {};
+    int lookahead = 64, pos = 0, holdLeft = 0;
+    float fastRel = 0.0f, slowAtt = 0.0f, slowRel = 0.0f, gainAtt = 0.0f, gainRel = 0.0f;
+    float fast = 0.0f, slow = 0.0f, hold = 1.0f, gain = 1.0f;
+};
+
 class PsolaAnalyzer
 {
 public:
@@ -68,6 +91,7 @@ private:
 
     double sr = 48000.0;
     int maxPeriod = 740, unvoicedHop = 240;
+    ClickSoftener softener;   // the ring holds the softened voice (the newest few samples raw)
     std::vector<float> ring;
     int64_t ringMask = 0, written = 0;
 
@@ -76,6 +100,8 @@ private:
 
     std::vector<PitchFrame> frames;
     int64_t frameMask = 0, frameCount = 0;
+    float heldHz = 0.0f;              // the octave the marks follow (see addPitchFrame)
+    int octaveRun = 0, unvoicedRun = 0;
 
     bool frozen = false;
     std::vector<float> frozenData;

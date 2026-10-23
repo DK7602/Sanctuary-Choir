@@ -11,6 +11,66 @@ static int64_t nextPow2 (int64_t v)
 }
 
 //==============================================================================
+void ClickSoftener::prepare (double sampleRate)
+{
+    const double sr = sampleRate;
+    detect.highPass (sr, 3000.0);
+    low1.lowPass (sr, 1500.0);
+    low2.lowPass (sr, 1500.0);
+    high1.highPass (sr, 1500.0);
+    high2.highPass (sr, 1500.0);
+    lookahead = clampv ((int) std::lround (sr * 0.0013), 8, (int) lowDelay.size() - 1);
+    auto coeff = [sr] (double seconds) { return (float) std::exp (-1.0 / (seconds * sr)); };
+    fastRel = coeff (0.0003);
+    slowAtt = 1.0f - coeff (0.012);   // the voice's recent peaks: rise slowly (a click doesn't count)...
+    slowRel = coeff (0.04);           // ...and fall slowly between glottal pulses
+    gainAtt = (float) std::exp (-3.0 / (double) lookahead);
+    gainRel = coeff (0.005);
+    reset();
+}
+
+void ClickSoftener::reset()
+{
+    for (auto* f : { &detect, &low1, &low2, &high1, &high2 })
+        f->reset();
+    lowDelay.fill (0.0f);
+    highDelay.fill (0.0f);
+    pos = holdLeft = 0;
+    fast = slow = 0.0f;
+    hold = gain = 1.0f;
+}
+
+float ClickSoftener::process (float x) noexcept
+{
+    const float a = std::abs (detect.process (x));
+    fast = std::max (a, fast * fastRel);
+    if (fast > slow) slow += (fast - slow) * slowAtt;
+    else             slow = std::max (fast, slow * slowRel);
+    constexpr float allowed = 4.0f;   // how far above the voice's own peaks a spike may stand
+    const float target = fast > 3.0e-5f ? std::min (1.0f, allowed * slow / fast) : 1.0f;
+
+    // Hold the lowest gain across the look-ahead either side, then glide: down within the
+    // look-ahead (so the spike's start is caught), back up over ~5 ms.
+    if (target <= hold)
+    {
+        hold = target;
+        holdLeft = 2 * lookahead;
+    }
+    else if (--holdLeft <= 0)
+    {
+        hold = target;
+    }
+    gain = hold + (gain - hold) * (hold < gain ? gainAtt : gainRel);
+
+    const int size = (int) lowDelay.size();
+    lowDelay[(size_t) pos] = low2.process (low1.process (x));
+    highDelay[(size_t) pos] = high2.process (high1.process (x));
+    const int old = (pos - lookahead + size) % size;
+    pos = (pos + 1) % size;
+    return lowDelay[(size_t) old] + gain * highDelay[(size_t) old];
+}
+
+//==============================================================================
 void PsolaAnalyzer::prepare (double sampleRate, int maxPer, int historySamples)
 {
     sr = sampleRate;
@@ -28,28 +88,64 @@ void PsolaAnalyzer::prepare (double sampleRate, int maxPer, int historySamples)
 
     frozenData.reserve ((size_t) (sr * 0.5) + (size_t) maxPeriod * 4);
     frozenMarks.reserve (2048);
+    softener.prepare (sr);
     reset();
 }
 
 void PsolaAnalyzer::reset()
 {
     std::fill (ring.begin(), ring.end(), 0.0f);
+    softener.reset();
     written = 0;
     markCount = 0;
     frameCount = 0;
+    heldHz = 0.0f;
+    octaveRun = unvoicedRun = 0;
     frozen = false;
 }
 
 void PsolaAnalyzer::pushInput (const float* x, int n)
 {
+    // Each sample goes in as it is, then comes back softened a moment later. Voices read far
+    // behind the newest input, so they only ever hear the softened voice.
+    const int la = softener.getLookahead();
     for (int i = 0; i < n; ++i)
-        ring[(size_t) ((written + i) & ringMask)] = x[i];
+    {
+        const int64_t w = written + i;
+        ring[(size_t) (w & ringMask)] = x[i];
+        const float y = softener.process (x[i]);
+        if (w >= la)
+            ring[(size_t) ((w - la) & ringMask)] = y;
+    }
     written += n;
 }
 
 void PsolaAnalyzer::addPitchFrame (const PitchFrame& f)
 {
-    frames[(size_t) (frameCount & frameMask)] = f;
+    // A voice that creaks or splits flips the tracker an octave up and down frame by frame.
+    // Marks that followed it would give every other grain twice (or half) the pulses: a rough,
+    // crackly choir. Keep to the octave the voice is in until a new one lasts (~15 ms).
+    PitchFrame g = f;
+    if (g.voiced && g.hz > 0.0f)
+    {
+        unvoicedRun = 0;
+        if (heldHz > 0.0f)
+        {
+            const float jump = std::log2 (g.hz / heldHz);
+            const float octaves = std::round (jump);
+            if (octaves != 0.0f && std::abs (jump - octaves) < 0.3f && ++octaveRun < 3)
+                g.hz *= std::exp2 (-octaves);
+            else
+                octaveRun = 0;
+        }
+        heldHz = g.hz;
+    }
+    else if (++unvoicedRun > 8)
+    {
+        heldHz = 0.0f;   // a new phrase starts wherever it starts
+        octaveRun = 0;
+    }
+    frames[(size_t) (frameCount & frameMask)] = g;
     ++frameCount;
 }
 
