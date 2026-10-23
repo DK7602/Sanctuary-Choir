@@ -313,6 +313,10 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     revInL.assign (kChunk, 0.0f);
     revInR.assign (kChunk, 0.0f);
     revOutL.assign (kChunk, 0.0f);
+    for (auto* v : { &roomL, &roomR, &roomZeros })
+        v->assign (kChunk, 0.0f);
+    room = fadingRoom = nullptr;
+    roomBlend = fadingGain = 0.0f;
     revOutR.assign (kChunk, 0.0f);
     scratch.assign (kChunk, 0.0f);
 
@@ -396,6 +400,8 @@ void ChoirEngine::reset()
     subLevel = 0.0f;
     glue.reset();
     reverb.reset();
+    room = fadingRoom = nullptr;   // the owner hands a fresh one back
+    roomBlend = fadingGain = 0.0f;
     limiter.reset();
     lastLevel = 0.0f;
     unvoicedTime = 10.0f;
@@ -446,6 +452,20 @@ const ChoirEngine::Replay* ChoirEngine::findReplay (int64_t t) const
             return &r;
     }
     return nullptr;
+}
+
+void ChoirEngine::setRoom (ConvolutionRoom* r) noexcept
+{
+    if (r != nullptr && std::abs (r->getSampleRate() - sr) > 0.5)
+        r = nullptr;   // made for another sample rate: being rebuilt
+    if (r == room)
+        return;
+    if (room != nullptr)
+    {
+        fadingRoom = room;
+        fadingGain = roomBlend;
+    }
+    room = r;
 }
 
 void ChoirEngine::setSampleSet (const SampleSet* set) noexcept
@@ -722,6 +742,11 @@ void ChoirEngine::setParams (const EngineParams& in)
     rs.brightness = clampv (p.brightness / 100.0f, 0.0f, 1.0f);
     rs.early = 0.25f + 0.75f * clampv (p.space / 100.0f, 0.0f, 1.0f);
     rs.width = 0.5f + 0.5f * clampv (p.space / 100.0f, 0.0f, 1.0f);
+    roomShape.decayScale = rs.decayScale;
+    roomShape.preDelayMs = rs.preDelayMs >= 0.0f ? rs.preDelayMs : 20.0f;
+    roomShape.brightness = rs.brightness;
+    roomShape.early = rs.early;
+    roomShape.width = rs.width;
     if (prepared)
     {
         reverb.setSettings (rs);
@@ -1972,7 +1997,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         leadPlacedL[(size_t) i] = pl;
         leadPlacedR[(size_t) i] = pr;
     }
-    reverb.process (revInL.data(), revInR.data(), revOutL.data(), revOutR.data(), c);
+    processReverb (c);
 
     for (int i = 0; i < c; ++i)
     {
@@ -1993,6 +2018,57 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         if (! isFiniteSample (outL[i])) outL[i] = 0.0f;   // last line of defence for the host
         if (outR != nullptr && ! isFiniteSample (outR[i])) outR[i] = 0.0f;
         outPeakAccum = std::max (outPeakAccum, std::max (std::abs (outL[i]), outR != nullptr ? std::abs (outR[i]) : 0.0f));
+    }
+}
+
+void ChoirEngine::processReverb (int c)
+{
+    // The measured room at the level the algorithmic hall had, so the Reverb knob means the same.
+    const float kRoomLevel = getMeasuredRoomLevel (params.venue);
+    const float blendFrom = roomBlend;
+    const float step = (float) c / (0.08f * (float) sr);
+    roomBlend = room != nullptr ? std::min (1.0f, roomBlend + step) : std::max (0.0f, roomBlend - step);
+
+    if (blendFrom < 1.0f || roomBlend < 1.0f)
+    {
+        reverb.process (revInL.data(), revInR.data(), revOutL.data(), revOutR.data(), c);
+        for (int i = 0; i < c; ++i)
+        {
+            const float g = 1.0f - (blendFrom + (roomBlend - blendFrom) * (float) (i + 1) / (float) c);
+            revOutL[(size_t) i] *= g;
+            revOutR[(size_t) i] *= g;
+        }
+    }
+    else
+    {
+        std::fill (revOutL.begin(), revOutL.begin() + c, 0.0f);
+        std::fill (revOutR.begin(), revOutR.begin() + c, 0.0f);
+    }
+
+    if (room != nullptr)
+    {
+        room->process (revInL.data(), revInR.data(), roomL.data(), roomR.data(), c, roomShape);
+        for (int i = 0; i < c; ++i)
+        {
+            const float g = kRoomLevel * (blendFrom + (roomBlend - blendFrom) * (float) (i + 1) / (float) c);
+            revOutL[(size_t) i] += roomL[(size_t) i] * g;
+            revOutR[(size_t) i] += roomR[(size_t) i] * g;
+        }
+    }
+    if (fadingRoom != nullptr)
+    {
+        // The room left behind rings out what it already heard, fading over 300 ms.
+        fadingRoom->process (roomZeros.data(), roomZeros.data(), roomL.data(), roomR.data(), c, roomShape);
+        const float from = fadingGain;
+        fadingGain = std::max (0.0f, fadingGain - (float) c / (0.3f * (float) sr));
+        for (int i = 0; i < c; ++i)
+        {
+            const float g = kRoomLevel * (from + (fadingGain - from) * (float) (i + 1) / (float) c);
+            revOutL[(size_t) i] += roomL[(size_t) i] * g;
+            revOutR[(size_t) i] += roomR[(size_t) i] * g;
+        }
+        if (fadingGain <= 0.0f)
+            fadingRoom = nullptr;
     }
 }
 

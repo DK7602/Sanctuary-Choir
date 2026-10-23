@@ -154,16 +154,19 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
     With a lead (the take), your voice is in the mix too (see mixdownStemsStreaming). */
 std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& params,
                                                 bool roomOnly, float tailSeconds = 4.0f,
-                                                const float* lead = nullptr, int64_t leadLength = 0);
+                                                const float* lead = nullptr, int64_t leadLength = 0,
+                                                const RoomImpulse* room = nullptr);
 
 /** The same mix a block at a time, for long takes: fill writes the 8 stem channels for
     [pos, pos + len) (zeros past the end), out takes each mixed stereo block and returns false
     to stop. Returns false if stopped. With a lead (leadLength samples: the learned take), your
     voice is in the mix too, at its Lead Vocal level and where it stands (at the microphones
-    or on the stage), lined up with the stems; without one the lead is left out. */
+    or on the stage), lined up with the stems; without one the lead is left out. With a room
+    (the measured response of params.venue), the hall is that room. */
 using StemFill = std::function<void (int64_t pos, int len, float* const* channels)>;
 using MixOut = std::function<bool (const float* left, const float* right, int len)>;
 bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParams& params, bool roomOnly,
                             float tailSeconds, const StemFill& fill, const MixOut& out,
-                            const float* lead = nullptr, int64_t leadLength = 0);
+                            const float* lead = nullptr, int64_t leadLength = 0,
+                            const RoomImpulse* room = nullptr);
 } // namespace sc

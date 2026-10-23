@@ -1,0 +1,55 @@
+Sanctuary Choir rooms - measured impulse responses
+==================================================
+
+Each venue's reverb is the measured response of a real room. The measurements
+come from these datasets, used under their Creative Commons Attribution licences.
+The licensors do not endorse Sanctuary Choir. The material is provided as is,
+without warranties of any kind.
+
+Grand Cathedral  (grand-cathedral.ogg)
+  the church of Santi Marcellino e Pietro, Cremona
+  From: ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application, by Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)
+  https://zenodo.org/records/14901751   DOI 10.5281/zenodo.14901751
+  Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
+  Used: source at the centre of the sanctuary, omnidirectional microphones 21 m down the nave, 5.4 m apart.
+  Changes: direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.5; high-pass 40 Hz; unit energy; extended to 15.5 s; stored rising 9.589 dB/s (taken out on loading); Ogg Vorbis q8.
+
+Stone Abbey  (stone-abbey.ogg)
+  the St. Nicholas Chapel (Nikolauskapelle), Aachen Cathedral
+  From: Room acoustic measurement and decay analysis data of the St. Nicholas Chapel, Aachen Cathedral, by Martin Zerwas and Selin Kayku (2026)
+  https://zenodo.org/records/23312556   DOI 10.5281/zenodo.23312556
+  Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
+  Used: source in the apse, the W (omnidirectional) channel at receivers R5 and R7 in the main hall, 4.2 m apart.
+  Changes: direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.0; high-pass 40 Hz; unit energy; extended to 11.7 s; stored rising 11.297 dB/s (taken out on loading); Ogg Vorbis q8.
+
+Wooden Chapel  (wooden-chapel.ogg)
+  the Brahmssaal, Detmold University of Music
+  From: Open Database of Spatial Room Impulse Responses at Detmold University of Music, by Sebastia Vicenc Amengual Gari, Banu Sahin, Dusty Eddy and Malte Kob (2020)
+  https://zenodo.org/records/4116247   DOI 10.5281/zenodo.4116247
+  Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
+  Used: source on the stage, the front capsule of the open array at audience positions R2 and R3.
+  Changes: direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.35; high-pass 40 Hz; unit energy; extended to 4.7 s; stored rising 31.853 dB/s (taken out on loading); Ogg Vorbis q8.
+
+Concert Hall  (concert-hall.ogg)
+  the Giovanni Arvedi Auditorium, Museo del Violino, Cremona
+  From: The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium, by Federico Miotello, Gioele Greco, Paolo Ostan, Francesca Del Gaudio, Luca Comanducci, Raffaele Malvermi, Mirco Pezzoli and Fabio Antonacci (2026)
+  https://zenodo.org/records/20098848   DOI 10.5281/zenodo.20098848
+  Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
+  Used: source S0 at the centre of the stage, capsule 1 of the arrays A406 and A413 in the fourth ring of seats, 4 m apart.
+  Changes: direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.5; high-pass 40 Hz; unit energy; extended to 6.3 s; stored rising 22.799 dB/s (taken out on loading); Ogg Vorbis q8.
+
+Gospel Church  (gospel-church.ogg)
+  the church of Santi Marcellino e Pietro, Cremona
+  From: ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application, by Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)
+  https://zenodo.org/records/14901751   DOI 10.5281/zenodo.14901751
+  Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
+  Used: source at the centre of the sanctuary, omnidirectional microphones 10 m down the nave, 5.4 m apart.
+  Changes: direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x0.45; high-pass 40 Hz; unit energy; extended to 4.6 s; stored rising 28.215 dB/s (taken out on loading); Ogg Vorbis q8.
+
+Studio Room  (studio-room.ogg)
+  BBC Maida Vale Studio 5 (live room)
+  From: BBC Maida Vale Impulse Response Dataset, by Gavin Kearney, Helena Daffern, Patrick Cairns, Anthony Hunt, Ben Lee, Jacob Cooper, Panos Tsagkarakis, Tomasz Rudzki and Daniel Johnston (2023), with BBC R&D
+  https://zenodo.org/records/10020866   DOI 10.5281/zenodo.10020866
+  Licence: CC BY 3.0  https://creativecommons.org/licenses/by/3.0/
+  Used: source at PA-3A, the W (omnidirectional) channel of the Eigenmike at performer positions PA-01 and PA-02, 2.25 m apart.
+  Changes: direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.0; high-pass 40 Hz; unit energy; extended to 1.2 s; stored rising 128.873 dB/s (taken out on loading); Ogg Vorbis q8.

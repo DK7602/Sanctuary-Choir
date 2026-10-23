@@ -8,6 +8,7 @@
 #pragma once
 
 #include "ChordDetector.h"
+#include "Convolution.h"
 #include "Effects.h"
 #include "Harmonizer.h"
 #include "Lyrics.h"
@@ -231,6 +232,10 @@ public:
     /** Recorded choir voices to sing the vowel modes (nullptr = the built-in synthesised voices).
         Call from the audio thread; the set must stay alive while it is in use. */
     void setSampleSet (const SampleSet* set) noexcept;
+    /** The venue's measured room (nullptr: the algorithmic reverb). Call from the audio thread.
+        The room must be new to this engine (it is not reset here), at the engine's sample rate,
+        and stay alive for a second after it is replaced: its tail fades out meanwhile. */
+    void setRoom (ConvolutionRoom* room) noexcept;
     /** Only render singers of these sections (bit mask, used to parallelise offline renders). */
     void setRenderSections (uint8_t mask) { renderMask = mask; }
 
@@ -383,6 +388,14 @@ private:
     ToneStage tone;
     GlueCompressor glue;
     ChoirReverb reverb;
+    // The measured room, when there is one: the algorithmic reverb hands over to it (and back)
+    // over 80 ms; a room replaced by another fades out over 300 ms.
+    ConvolutionRoom* room = nullptr;
+    ConvolutionRoom* fadingRoom = nullptr;
+    float fadingGain = 0.0f, roomBlend = 0.0f;
+    RoomShape roomShape;
+    std::vector<float> roomL, roomR, roomZeros;
+    void processReverb (int c);
     SafetyLimiter limiter;
     Smoothed volume, leadGain, choirGain, wetGain, dryChoirGain, leadSend, warmthAmt;
     std::array<Smoothed, NumSections> sectionGain;

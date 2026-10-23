@@ -2,6 +2,7 @@
 #include "TestSignals.h"
 
 #include <sanctuary/ChoirEngine.h>
+#include <sanctuary/Convolution.h>
 #include <sanctuary/ChordDetector.h>
 #include <sanctuary/FFT.h>
 #include <sanctuary/Learn.h>
@@ -373,6 +374,161 @@ static void checkSectionPitches (VocalType vt, const char* label)
 
 TEST (engineUnisonWords) { checkSectionPitches (VocalType::Words, "words"); }
 TEST (engineUnisonVowels) { checkSectionPitches (VocalType::Ah, "vowels"); }
+
+/** A made-up room: decaying noise with a few early reflections, the direct sound left out. */
+static RoomImpulse testRoom (double sr, float seconds, float rt60, uint32_t seed)
+{
+    RoomImpulse ir;
+    ir.sampleRate = sr;
+    Rng rng (seed);
+    const auto n = (size_t) (seconds * sr);
+    for (auto* ch : { &ir.left, &ir.right })
+    {
+        ch->assign (n, 0.0f);
+        for (size_t i = (size_t) (0.004 * sr); i < n; ++i)
+            (*ch)[i] = (rng.uni() * 2.0f - 1.0f) * std::pow (10.0f, -3.0f * (float) i / (float) sr / rt60);
+        (*ch)[(size_t) (0.011 * sr)] += 0.8f;
+        (*ch)[(size_t) (0.023 * sr)] -= 0.5f;
+    }
+    // Unit energy, as the shipped rooms are.
+    double e = 0.0;
+    for (size_t i = 0; i < n; ++i) e += 0.5 * ((double) ir.left[i] * ir.left[i] + (double) ir.right[i] * ir.right[i]);
+    for (auto* ch : { &ir.left, &ir.right })
+        for (auto& v : *ch) v = (float) (v / std::sqrt (e));
+    return ir;
+}
+
+TEST (convolutionRoomMatchesDirectConvolution)
+{
+    // Head and tail partitions together must be one plain convolution, the room answering
+    // getLatency() samples late; host blocks of any size.
+    const double sr = 48000.0;
+    const auto ir = testRoom (sr, 0.4f, 0.5f, 3);
+    auto room = ConvolutionRoom::create (ir, sr);
+    CHECK (room != nullptr);
+    const int lat = room->getLatency();
+    Rng rng (9);
+    const size_t n = (size_t) (0.7 * sr);
+    std::vector<float> l (n), r (n), ol (n), orr (n);
+    for (size_t i = 0; i < n; ++i) { l[i] = rng.uni() * 2.0f - 1.0f; r[i] = rng.uni() * 2.0f - 1.0f; }
+    RoomShape shape;   // as measured, no pre-delay
+    for (size_t pos = 0, k = 0; pos < n; ++k)
+    {
+        const int len = (int) std::min<size_t> (n - pos, (size_t) (k % 3 == 0 ? 37 : (k % 3 == 1 ? 64 : 100)));
+        room->process (l.data() + pos, r.data() + pos, ol.data() + pos, orr.data() + pos, len, shape);
+        pos += (size_t) len;
+    }
+    // Direct: out L = (L + c R) * hL, out R = (R + c L) * hR, late by lat; with no early
+    // shaping only once the 85 ms ramp of the Space knob is flat (early = 1 is flat).
+    const float c = ConvolutionRoom::kCrossFeed;
+    double err = 0.0, ref = 0.0;
+    for (size_t t = (size_t) lat + 2000; t < n; t += 7)
+    {
+        double yl = 0.0, yr = 0.0;
+        for (size_t k = 0; k < ir.left.size() && k + (size_t) lat <= t; ++k)
+        {
+            const size_t i = t - (size_t) lat - k;
+            yl += (double) ir.left[k] * (l[i] + c * r[i]);
+            yr += (double) ir.right[k] * (r[i] + c * l[i]);
+        }
+        err += (yl - ol[t]) * (yl - ol[t]) + (yr - orr[t]) * (yr - orr[t]);
+        ref += yl * yl + yr * yr;
+    }
+    const double db = 10.0 * std::log10 (err / ref);
+    std::printf ("  partitioned convolution vs direct: %.1f dB error, latency %d samples\n", db, lat);
+    CHECK (db < -90.0);
+    CHECK (lat == 256);
+}
+
+TEST (convolutionRoomDecayKnobStretchesTheRoom)
+{
+    const double sr = 48000.0;
+    const auto ir = testRoom (sr, 6.0f, 1.5f, 5);
+    float measured[3] {};
+    const float scales[3] = { 0.5f, 1.0f, 2.0f };
+    for (int k = 0; k < 3; ++k)
+    {
+        auto room = ConvolutionRoom::create (ir, sr);
+        RoomShape shape;
+        shape.decayScale = scales[k];
+        const size_t n = (size_t) (5.5 * sr);
+        std::vector<float> in (n, 0.0f), zero (n, 0.0f), ol (n), orr (n);
+        in[0] = 1.0f;
+        for (size_t pos = 0; pos < n; pos += 64)
+            room->process (in.data() + pos, zero.data() + pos, ol.data() + pos, orr.data() + pos, 64, shape);
+        measured[k] = measureDecayTime (ol.data(), (int64_t) n, sr);
+    }
+    std::printf ("  decay knob 50/100/200%%: %.2f / %.2f / %.2f s (room %.2f s)\n", measured[0], measured[1], measured[2], 1.5);
+    CHECK_NEAR (measured[1], 1.5, 0.15);
+    CHECK_NEAR (measured[0], 0.75, 0.1);
+    CHECK_NEAR (measured[2], 3.0, 0.3);
+}
+
+TEST (convolutionRoomSpreadsItsWork)
+{
+    // A cathedral-sized room in 64-sample host blocks: no block may carry a burst of work.
+    const double sr = 48000.0;
+    const auto ir = testRoom (sr, 12.0f, 5.0f, 7);
+    auto room = ConvolutionRoom::create (ir, sr);
+    RoomShape shape;
+    shape.decayScale = 2.0f;
+    Rng rng (2);
+    std::vector<float> l (64), r (64), ol (64), orr (64);
+    std::vector<double> times;
+    for (int b = 0; b < 3000; ++b)
+    {
+        for (int i = 0; i < 64; ++i) { l[(size_t) i] = rng.uni() - 0.5f; r[(size_t) i] = rng.uni() - 0.5f; }
+        const auto a = std::chrono::steady_clock::now();
+        room->process (l.data(), r.data(), ol.data(), orr.data(), 64, shape);
+        times.push_back (std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - a).count());
+    }
+    std::sort (times.begin(), times.end());
+    const double median = times[times.size() / 2], p99 = times[times.size() * 99 / 100];
+    std::printf ("  12 s room at 200%% decay, 64-sample blocks: median %.0f us, 99th percentile %.0f us (budget 1333 us)\n", median, p99);
+    CHECK (p99 < 1333.0 * 0.5);
+}
+
+TEST (engineSingsInTheMeasuredRoom)
+{
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 60.0f, 1.0f, 1.5f } }, sr, Tenor, 0.0f);
+    auto run = [&] (ConvolutionRoom* first, ConvolutionRoom* second)
+    {
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::Unison);
+        p.reverb = 100.0f;
+        p.wetOnly = true;
+        eng.setParams (p);
+        std::vector<float> outL (x.size()), outR (x.size());
+        for (size_t pos = 0; pos + 256 <= x.size(); pos += 256)
+        {
+            eng.setRoom (pos < x.size() / 2 ? first : second);
+            eng.process (x.data() + pos, nullptr, outL.data() + pos, outR.data() + pos, 256);
+        }
+        return outL;
+    };
+    const auto ir = testRoom (sr, 2.0f, 1.2f, 11), ir2 = testRoom (sr, 2.0f, 0.6f, 12);
+    auto a = ConvolutionRoom::create (ir, sr), b = ConvolutionRoom::create (ir2, sr), a2 = ConvolutionRoom::create (ir, sr);
+    const auto fdn = run (nullptr, nullptr), measured = run (a.get(), a.get()), switched = run (a2.get(), b.get());
+    auto rms = [] (const std::vector<float>& v, size_t from, size_t to)
+    {
+        double e = 0.0;
+        for (size_t i = from; i < to; ++i) e += (double) v[i] * v[i];
+        return std::sqrt (e / (double) (to - from));
+    };
+    const size_t s0 = (size_t) (0.4 * sr), s1 = (size_t) (1.2 * sr);
+    const double level = 20.0 * std::log10 (rms (measured, s0, s1) / rms (fdn, s0, s1));
+    float jump = 0.0f;
+    for (size_t i = x.size() / 2 - 2000; i < x.size() / 2 + 20000; ++i)
+        jump = std::max (jump, std::abs (switched[i] - switched[i - 1]));
+    float typical = 0.0f;
+    for (size_t i = s0; i < s1; ++i)
+        typical = std::max (typical, std::abs (measured[i] - measured[i - 1]));
+    std::printf ("  measured room vs algorithmic hall: %+.1f dB; switching rooms: largest step %.4f (in the room %.4f)\n", level, jump, typical);
+    CHECK (std::abs (level) < 12.0);   // a made-up room, not the venue's: only roughly the same
+    CHECK (jump < 1.5f * typical);
+}
 
 TEST (psolaMarksKeepTheirOctaveThroughFlips)
 {

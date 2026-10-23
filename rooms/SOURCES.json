@@ -1,0 +1,176 @@
+[
+  {
+    "venue": "Grand Cathedral",
+    "file": "grand-cathedral.ogg",
+    "emphasisDbPerSecond": 9.589,
+    "dataset": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application",
+    "place": "the church of Santi Marcellino e Pietro, Cremona",
+    "authors": "Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)",
+    "record": "https://zenodo.org/records/14901751",
+    "doi": "10.5281/zenodo.14901751",
+    "archive": "ChurchIR.zip",
+    "licence": "CC-BY-4.0",
+    "members": [
+      "OMNI/SC_ML_OMNI_7.wav",
+      "OMNI/SC_MR_OMNI_7.wav"
+    ],
+    "channels": [
+      0,
+      0
+    ],
+    "sha256": [
+      "4c692c5462a132f29190898214fe6f9be1b702456cdf939112e241c928cdb6e4",
+      "a432f789facc467d8cff2f70897a50270a516e6053813c834cff11f6f585c868"
+    ],
+    "positions": "source at the centre of the sanctuary, omnidirectional microphones 21 m down the nave, 5.4 m apart",
+    "processing": "direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.5; high-pass 40 Hz; unit energy; extended to 15.5 s; stored rising 9.589 dB/s (taken out on loading); Ogg Vorbis q8",
+    "t30_measured_s": 3.76,
+    "t30_s": 5.01,
+    "retrieved": "2026-10-23"
+  },
+  {
+    "venue": "Stone Abbey",
+    "file": "stone-abbey.ogg",
+    "emphasisDbPerSecond": 11.297,
+    "dataset": "Room acoustic measurement and decay analysis data of the St. Nicholas Chapel, Aachen Cathedral",
+    "place": "the St. Nicholas Chapel (Nikolauskapelle), Aachen Cathedral",
+    "authors": "Martin Zerwas and Selin Kayku (2026)",
+    "record": "https://zenodo.org/records/23312556",
+    "doi": "10.5281/zenodo.23312556",
+    "archive": "impulse_responses.zip",
+    "licence": "CC-BY-4.0",
+    "members": [
+      "Nikolauskapelle_Source2_BRIR/S2-Do_R5.wav",
+      "Nikolauskapelle_Source2_BRIR/S2-Do_R7.wav"
+    ],
+    "channels": [
+      0,
+      0
+    ],
+    "sha256": [
+      "a7bada29bb25ac93002229a3b91d8391e0b581184291b38535826aacd547b6fb",
+      "81c749021f2e361627185eb5d8b362e4f480cc1181e7b8a3f76d806c934282b5"
+    ],
+    "positions": "source in the apse, the W (omnidirectional) channel at receivers R5 and R7 in the main hall, 4.2 m apart",
+    "processing": "direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.0; high-pass 40 Hz; unit energy; extended to 11.7 s; stored rising 11.297 dB/s (taken out on loading); Ogg Vorbis q8",
+    "t30_measured_s": 4.27,
+    "t30_s": 4.25,
+    "retrieved": "2026-10-23"
+  },
+  {
+    "venue": "Wooden Chapel",
+    "file": "wooden-chapel.ogg",
+    "emphasisDbPerSecond": 31.853,
+    "dataset": "Open Database of Spatial Room Impulse Responses at Detmold University of Music",
+    "place": "the Brahmssaal, Detmold University of Music",
+    "authors": "Sebastia Vicenc Amengual Gari, Banu Sahin, Dusty Eddy and Malte Kob (2020)",
+    "record": "https://zenodo.org/records/4116247",
+    "doi": "10.5281/zenodo.4116247",
+    "archive": "DetmoldSRIR_v01.zip",
+    "licence": "CC-BY-4.0",
+    "members": [
+      "SetA_SingleSources/Data/Brahmssaal/OpenArray/C1S1R2.wav",
+      "SetA_SingleSources/Data/Brahmssaal/OpenArray/C1S1R3.wav"
+    ],
+    "channels": [
+      0,
+      0
+    ],
+    "sha256": [
+      "3cb796726e0a2d7559492b614d6b94e3db80a81da919898d378013fd451073e3",
+      "9f2c2b175f10f82903da1e341b12913a7976b111856157b1bbff90cb951bddb2"
+    ],
+    "positions": "source on the stage, the front capsule of the open array at audience positions R2 and R3",
+    "processing": "direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.35; high-pass 40 Hz; unit energy; extended to 4.7 s; stored rising 31.853 dB/s (taken out on loading); Ogg Vorbis q8",
+    "t30_measured_s": 1.25,
+    "t30_s": 1.51,
+    "retrieved": "2026-10-23"
+  },
+  {
+    "venue": "Concert Hall",
+    "file": "concert-hall.ogg",
+    "emphasisDbPerSecond": 22.799,
+    "dataset": "The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium",
+    "place": "the Giovanni Arvedi Auditorium, Museo del Violino, Cremona",
+    "authors": "Federico Miotello, Gioele Greco, Paolo Ostan, Francesca Del Gaudio, Luca Comanducci, Raffaele Malvermi, Mirco Pezzoli and Fabio Antonacci (2026)",
+    "record": "https://zenodo.org/records/20098848",
+    "doi": "10.5281/zenodo.20098848",
+    "archive": "arvedi_auditorium_dataset.zip",
+    "licence": "CC-BY-4.0",
+    "members": [
+      "arvedi_auditorium_dataset/rirs/rir-S0-A406.wav",
+      "arvedi_auditorium_dataset/rirs/rir-S0-A413.wav"
+    ],
+    "channels": [
+      0,
+      0
+    ],
+    "sha256": [
+      "f22902aefbcc54f013ce896e16312f713b2e3c84171e70a78fb4ffc03416f538",
+      "b3e8280a6dd66be3b1efb64ef33927a3111306bfb682fde70620979b04f522b5"
+    ],
+    "positions": "source S0 at the centre of the stage, capsule 1 of the arrays A406 and A413 in the fourth ring of seats, 4 m apart",
+    "processing": "direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.5; high-pass 40 Hz; unit energy; extended to 6.3 s; stored rising 22.799 dB/s (taken out on loading); Ogg Vorbis q8",
+    "t30_measured_s": 1.52,
+    "t30_s": 2.11,
+    "retrieved": "2026-10-23"
+  },
+  {
+    "venue": "Gospel Church",
+    "file": "gospel-church.ogg",
+    "emphasisDbPerSecond": 28.215,
+    "dataset": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application",
+    "place": "the church of Santi Marcellino e Pietro, Cremona",
+    "authors": "Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)",
+    "record": "https://zenodo.org/records/14901751",
+    "doi": "10.5281/zenodo.14901751",
+    "archive": "ChurchIR.zip",
+    "licence": "CC-BY-4.0",
+    "members": [
+      "OMNI/SC_ML_OMNI_3.wav",
+      "OMNI/SC_MR_OMNI_3.wav"
+    ],
+    "channels": [
+      0,
+      0
+    ],
+    "sha256": [
+      "c011b65dcdd0dbf346fd69916322396b68de8b67c70a5fe07d3eece50f882141",
+      "384f5c6de9489f015cde82f8dd8e13e042425b543bbf6a904537df222d230033"
+    ],
+    "positions": "source at the centre of the sanctuary, omnidirectional microphones 10 m down the nave, 5.4 m apart",
+    "processing": "direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x0.45; high-pass 40 Hz; unit energy; extended to 4.6 s; stored rising 28.215 dB/s (taken out on loading); Ogg Vorbis q8",
+    "t30_measured_s": 3.75,
+    "t30_s": 1.7,
+    "retrieved": "2026-10-23"
+  },
+  {
+    "venue": "Studio Room",
+    "file": "studio-room.ogg",
+    "emphasisDbPerSecond": 128.873,
+    "dataset": "BBC Maida Vale Impulse Response Dataset",
+    "place": "BBC Maida Vale Studio 5 (live room)",
+    "authors": "Gavin Kearney, Helena Daffern, Patrick Cairns, Anthony Hunt, Ben Lee, Jacob Cooper, Panos Tsagkarakis, Tomasz Rudzki and Daniel Johnston (2023), with BBC R&D",
+    "record": "https://zenodo.org/records/10020866",
+    "doi": "10.5281/zenodo.10020866",
+    "archive": "MV5.zip",
+    "licence": "CC-BY-3.0",
+    "members": [
+      "MV5/AS1/AS1/TOA/MV5_AS1_Eigen_R_PA-01_S_PA-3A_N_3OA.wav",
+      "MV5/AS1/AS1/TOA/MV5_AS1_Eigen_R_PA-02_S_PA-3A_N_3OA.wav"
+    ],
+    "channels": [
+      0,
+      0
+    ],
+    "sha256": [
+      "0263871eec5f6acf9cedb39f5a7924478c27cbb46ce04837781103bb80b7e732",
+      "4ad7f9eaf6d019a9452fc62fd035dc472706c7c537dc2d21662070d4845abe49"
+    ],
+    "positions": "source at PA-3A, the W (omnidirectional) channel of the Eigenmike at performer positions PA-01 and PA-02, 2.25 m apart",
+    "processing": "direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.0; high-pass 40 Hz; unit energy; extended to 1.2 s; stored rising 128.873 dB/s (taken out on loading); Ogg Vorbis q8",
+    "t30_measured_s": 0.37,
+    "t30_s": 0.37,
+    "retrieved": "2026-10-23"
+  }
+]

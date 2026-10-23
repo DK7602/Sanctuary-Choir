@@ -1,6 +1,7 @@
 add_library(sanctuary_core STATIC
     src/ChoirEngine.cpp
     src/ChordDetector.cpp
+    src/Convolution.cpp
     src/Effects.cpp
     src/FFT.cpp
     src/Harmonizer.cpp

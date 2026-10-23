@@ -968,7 +968,7 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
 
 bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParams& paramsIn, bool roomOnly,
                             float tailSeconds, const StemFill& fill, const MixOut& out,
-                            const float* lead, int64_t leadLength)
+                            const float* lead, int64_t leadLength, const RoomImpulse* roomImpulse)
 {
     ScopedFlushDenormals noDenormals;
 
@@ -987,6 +987,8 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
     ChoirEngine engine;
     engine.prepare (sampleRate, block);
     engine.setParams (params);
+    const auto room = roomImpulse != nullptr ? ConvolutionRoom::create (*roomImpulse, sampleRate) : nullptr;
+    engine.setRoom (room.get());
 
     const int64_t total = length + (int64_t) (tailSeconds * sampleRate);
     std::vector<float> zeros ((size_t) block, 0.0f), left ((size_t) block), right ((size_t) block), leadBlock ((size_t) block, 0.0f);
@@ -1024,7 +1026,8 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
 }
 
 std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& params,
-                                                bool roomOnly, float tailSeconds, const float* lead, int64_t leadLength)
+                                                bool roomOnly, float tailSeconds, const float* lead, int64_t leadLength,
+                                                const RoomImpulse* room)
 {
     std::array<std::vector<float>, 2> result;
     if (stems.isEmpty())
@@ -1046,7 +1049,7 @@ std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, cons
             result[0].insert (result[0].end(), l, l + len);
             result[1].insert (result[1].end(), r, r + len);
             return true;
-        }, lead, leadLength);
+        }, lead, leadLength, room);
     return result;
 }
 } // namespace sc

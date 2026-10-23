@@ -20,6 +20,9 @@
 //                          input, and the Words choir sings from every pass ("demo" with
 //                          --synth-demo: the demo melody sung again)
 //     --synth-demo         ignore the input and sing a demo melody (writes it next to the output)
+//     --venue NAME         cathedral | abbey | chapel | concert | gospel | studio  (default cathedral)
+//     --rooms DIR          the venues' measured rooms as WAV (<slug>.wav, from tools/rooms/build_rooms.py
+//                          --wav); without it the algorithmic reverb plays the venue
 #include "TestSignals.h"
 
 #include <sanctuary/Learn.h>
@@ -44,7 +47,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--real-voices 100] [--energy 50] [--sub 0] [--lead-stage X,D] [--pass FILE] [--synth-demo]\n"
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--real-voices 100] [--energy 50] [--sub 0] [--lead-stage X,D] [--pass FILE] [--venue cathedral|abbey|chapel|concert|gospel|studio] [--rooms DIR] [--synth-demo]\n"
                               "  --scale also takes auto (major or minor, heard); --lead-stage puts your voice on the stage (X -1..1, D 0..1)\n", argv[0]);
         return 2;
     }
@@ -53,7 +56,7 @@ int main (int argc, char** argv)
     EngineParams p;
     bool learn = false, demo = false;
     std::string words;
-    std::string stemsDir, voicesDir;
+    std::string stemsDir, voicesDir, roomsDir;
     std::vector<std::string> passPaths;
 
     const std::map<std::string, int> voices { { "ah", 0 }, { "oh", 1 }, { "oo", 2 }, { "ee", 3 }, { "eh", 4 }, { "mm", 5 }, { "words", 6 } };
@@ -90,6 +93,8 @@ int main (int argc, char** argv)
         else if (a == "--lead") p.leadDb = std::stof (next());
         else if (a == "--stems") stemsDir = next();
         else if (a == "--voices") voicesDir = next();
+        else if (a == "--rooms") roomsDir = next();
+        else if (a == "--venue") p.venue = (Venue) indexOf ({ { "cathedral", 0 }, { "abbey", 1 }, { "chapel", 2 }, { "concert", 3 }, { "gospel", 4 }, { "studio", 5 } }, next(), 0);
         else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
         else if (a == "--words") words = next();
         else if (a == "--real-voices") p.realVoices = std::stof (next());
@@ -174,6 +179,25 @@ int main (int argc, char** argv)
     }
     const SampleSet* voicesPtr = recorded.isEmpty() ? nullptr : &recorded;
 
+    // The venue's measured room.
+    RoomImpulse roomImpulse;
+    if (! roomsDir.empty())
+    {
+        test::Audio ra;
+        std::string e;
+        const std::string path = roomsDir + "/" + getVenueSlug (p.venue) + ".wav";
+        if (! test::readWav (path, ra, e) || ra.channels.empty())
+        {
+            std::fprintf (stderr, "error: %s: %s\n", path.c_str(), e.c_str());
+            return 1;
+        }
+        roomImpulse.sampleRate = ra.sampleRate;
+        roomImpulse.left = ra.channels[0];
+        roomImpulse.right = ra.channels[std::min<size_t> (1, ra.channels.size() - 1)];
+        std::printf ("room: %s (%.1f s)\n", path.c_str(), (double) ra.length() / ra.sampleRate);
+    }
+    const RoomImpulse* roomPtr = roomImpulse.left.empty() ? nullptr : &roomImpulse;
+
     const double sr = in.sampleRate;
     const int64_t n = in.length();
     std::vector<float> mono ((size_t) n, 0.0f);
@@ -243,7 +267,7 @@ int main (int argc, char** argv)
         std::printf ("\n");
         // On the stage your voice goes through the engine with the choir, in its place;
         // otherwise it is added dry, as it was recorded.
-        auto mix = mixdownStems (stems, p, false, 4.0f, p.leadOnStage ? mono.data() : nullptr, p.leadOnStage ? n : 0);
+        auto mix = mixdownStems (stems, p, false, 4.0f, p.leadOnStage ? mono.data() : nullptr, p.leadOnStage ? n : 0, roomPtr);
         const float lead = p.leadOnStage || p.leadDb <= -59.5f ? 0.0f : dbToGain (p.leadDb);
         for (int c = 0; c < 2; ++c)
             for (int64_t i = 0; i < n && i < (int64_t) mix[(size_t) c].size(); ++i)
@@ -275,6 +299,8 @@ int main (int argc, char** argv)
         eng.prepare (sr, 512);
         eng.setParams (p);
         eng.setSampleSet (voicesPtr);
+        const auto room = roomPtr != nullptr ? ConvolutionRoom::create (*roomPtr, sr) : nullptr;
+        eng.setRoom (room.get());
         const int lat = eng.getLatencySamples();
         const int64_t total = n + lat + (int64_t) (sr * 4.0);
         if (! words.empty())

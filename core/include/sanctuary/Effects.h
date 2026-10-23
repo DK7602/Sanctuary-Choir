@@ -7,6 +7,11 @@ namespace sc
 {
 enum class Venue : int { GrandCathedral = 0, StoneAbbey, WoodenChapel, ConcertHall, GospelChurch, StudioRoom, Count };
 const char* const* getVenueNames();
+/** File names of the venues' measured rooms ("grand-cathedral" for <slug>.ogg/.wav). */
+const char* getVenueSlug (Venue v);
+/** Level of a venue's measured room (unit energy) that matches the algorithmic hall's, so a
+    preset's Reverb amount sounds the same with either. */
+float getMeasuredRoomLevel (Venue v);
 
 /** Stereo feedback-delay-network reverb with early reflections, voiced as sacred spaces. */
 class ChoirReverb

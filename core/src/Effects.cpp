@@ -9,6 +9,24 @@ const char* const* getVenueNames()
     return names;
 }
 
+const char* getVenueSlug (Venue v)
+{
+    static const char* slugs[] = { "grand-cathedral", "stone-abbey", "wooden-chapel", "concert-hall", "gospel-church", "studio-room" };
+    static_assert (sizeof (slugs) / sizeof (slugs[0]) == (size_t) Venue::Count);
+    const int i = (int) v;
+    return i >= 0 && i < (int) Venue::Count ? slugs[i] : "";
+}
+
+float getMeasuredRoomLevel (Venue v)
+{
+    // 0.42 is unit energy against the halls on average; the rest, per room, measured with the
+    // same choir through both (Tree mics, Reverb 100%), so each venue keeps the level it had.
+    static const float trimDb[] = { -5.8f, 0.5f, -1.5f, 0.7f, -2.6f, 7.9f };
+    static_assert (sizeof (trimDb) / sizeof (trimDb[0]) == (size_t) Venue::Count);
+    const int i = clampv ((int) v, 0, (int) Venue::Count - 1);
+    return 0.42f * dbToGain (trimDb[i]);
+}
+
 struct VenueSpec { float size, rt60, hfRatio, preDelayMs, earlySpanMs, earlyLevel; };
 
 static VenueSpec venueSpec (Venue v)
