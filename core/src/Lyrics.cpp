@@ -625,8 +625,12 @@ LyricScript LyricScript::make (const Lyrics& lyrics)
                 for (int k = 0; k < prev->numCoda; ++k)
                     if (k != skip)
                         addPhone (e.start, e.numStart, prev->coda[(size_t) k]);
+            for (int k = 0; k < e.numStart; ++k)
+                e.onsetAt += e.start[(size_t) k].seconds;
             for (int k = 0; k < s.numOnset; ++k)
                 addPhone (e.start, e.numStart, s.onset[(size_t) k]);
+            e.onset = s.onset;
+            e.numOnset = s.numOnset;
         }
         for (int k = 0; k < s.numCoda; ++k)
             addPhone (e.end, e.numEnd, s.coda[(size_t) k]);

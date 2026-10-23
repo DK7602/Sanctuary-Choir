@@ -1,6 +1,6 @@
 // Builds the Sanctuary voice pack from the VocalSet singing dataset (CC BY 4.0).
 //
-// usage: sanctuary_voicepack <VocalSet FULL folder> <output folder>
+// usage: sanctuary_voicepack <VocalSet FULL folder> <output folder> [<Annotated-VocalSet folder>]
 //
 // Cuts every clean, steady held note out of each singer's long tones, scales and arpeggios,
 // sorts it into a choir section by voice and pitch (women: sopranos/altos, men: tenors/basses,
@@ -16,13 +16,20 @@
 //   breathy/, belt/   the same three, sung breathy or belted;
 //   vibrato/, fullvoice/   the same three in the singers' own classical voice, with its vibrato:
 //             sung softly (slow piano scales and arpeggios, pianissimo long tones) and in full
-//             voice (slow forte scales and arpeggios, forte long tones).
+//             voice (slow forte scales and arpeggios, forte long tones);
+//   syllables/   with Annotated-VocalSet's note and lyric times: the syllables of the three
+//             songs every singer sang in straight tone (Dona nobis pacem, Caro mio ben, Row row
+//             row your boat), each cut from its consonants to the start of its vowel, named
+//             ..._on<consonants>.wav ("ond", "onkxr" for k-r), so typed words open with a real
+//             singer's consonant.
 #include "TestSignals.h"
 
 #include <sanctuary/Learn.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -35,9 +42,9 @@ namespace fs = std::filesystem;
 namespace
 {
 enum Technique { Straight = 0, Breathy, Belt, Vibrato, Full, NumTechniques };
-enum Kind { Sustain = 0, Onset, Legato, NumKinds };
+enum Kind { Sustain = 0, Onset, Legato, SyllableCut, NumKinds };
 const char* kTechniqueDirs[] = { "", "breathy", "belt", "vibrato", "fullvoice" };
-const char* kKindDirs[] = { "", "short", "legato" };
+const char* kKindDirs[] = { "", "short", "legato", "syllables" };
 const char* kSectionDirs[] = { "Sopranos", "Altos", "Tenors", "Basses" };
 const char* kVowelDirs[] = { "ah", "oh", "oo", "ee", "eh" };
 
@@ -53,6 +60,7 @@ struct Cut
     float root = 0.0f, seconds = 0.0f, wobble = 0.0f;
     float to = 0.0f, crossing = 0.0f;   // legato: the next note, and when the pitch is halfway there (s)
     float attack = 0.0f;                // onsets: seconds to reach 70% of the note's level
+    std::string phones;                 // syllables: the consonants, phone names joined by x
     bool longTone = false;
     std::vector<float> audio;
     double sampleRate = 44100.0;
@@ -287,6 +295,157 @@ void cutFile (const fs::path& file, const std::string& singer, bool female, bool
     }
 }
 
+//==============================================================================
+// Syllables from the songs. Each lyric (as Annotated-VocalSet writes it) to the consonants it
+// opens with and the vowel it holds, sung the way these singers sing them: Latin, Italian,
+// English. Syllables opening on a vowel (melismas, "a", "o") have nothing to give.
+struct SungSyllable { const char* song; const char* lyric; const char* phones; int vowel; };
+const SungSyllable kSongSyllables[] = {
+    { "dona", "do", "d", 1 }, { "dona", "na", "n", 0 }, { "dona", "no", "n", 1 }, { "dona", "bis", "b", 3 },
+    { "dona", "pa", "p", 0 }, { "dona", "cem", "ch", 4 },
+    { "caro", "ca", "k", 0 }, { "caro", "ro", "r", 1 }, { "caro", "mio", "m", 3 }, { "caro", "ben", "b", 4 },
+    { "caro", "cre", "kxr", 4 }, { "caro", "di", "d", 3 }, { "caro", "mi'al", "m", 3 }, { "caro", "men", "m", 4 },
+    { "caro", "sen", "s", 4 }, { "caro", "te", "t", 4 }, { "caro", "lan", "l", 0 }, { "caro", "cor", "k", 1 },
+    { "row", "row", "r", 1 }, { "row", "your", "y", 1 }, { "row", "boat", "b", 1 }, { "row", "gent", "j", 4 },
+    { "row", "ly", "l", 3 }, { "row", "down", "d", 0 }, { "row", "stream", "sxtxr", 3 }, { "row", "mer", "m", 4 },
+    { "row", "ri", "r", 3 }, { "row", "life", "l", 0 }, { "row", "but", "b", 0 }, { "row", "dream", "dxr", 3 },
+};
+
+std::vector<std::string> splitCsv (const std::string& line)
+{
+    std::vector<std::string> f;
+    std::string cur;
+    std::stringstream ss (line);
+    while (std::getline (ss, cur, ','))
+        f.push_back (cur);
+    return f;
+}
+
+/** One song sung by one singer: its annotated notes cut into syllables. */
+void cutSongSyllables (const fs::path& wav, const fs::path& csv, const std::string& song, const std::string& singer,
+                       bool female, bool countertenor, std::vector<Cut>& out)
+{
+    test::Audio in;
+    std::string err;
+    std::ifstream f (csv);
+    if (! f || ! test::readWav (wav.string(), in, err))
+        return;
+    const auto& x = in.channels[0];
+    const double sr = in.sampleRate;
+    struct Row { double start = 0, end = 0; std::string type, lyric; float midi = 0; };
+    std::vector<Row> rows;
+    std::string line;
+    std::getline (f, line);   // the header
+    while (std::getline (f, line))
+    {
+        const auto c = splitCsv (line);
+        if (c.size() < 16)
+            continue;
+        Row r;
+        r.start = std::atof (c[1].c_str());
+        r.end = std::atof (c[2].c_str());
+        r.type = c[4];
+        r.midi = (float) std::atof (c[11].c_str());
+        r.lyric = c[15];
+        rows.push_back (r);
+    }
+    auto at = [sr] (double t) { return (int64_t) std::llround (t * sr); };
+    const int64_t win = at (0.01);
+    for (size_t k = 0; k < rows.size(); ++k)
+    {
+        const Row& r = rows[k];
+        if (r.type != "Sound" || r.midi < 30.0f)
+            continue;
+        const SungSyllable* sy = nullptr;
+        for (const auto& s : kSongSyllables)
+            if (song == s.song && r.lyric == s.lyric)
+                sy = &s;
+        if (sy == nullptr)
+            continue;
+        const int64_t sound = at (r.start);
+        const float vowelRms = rmsBetween (x, sound + at (0.04), sound + at (0.14));
+        if (vowelRms <= 1.0e-4f)
+            continue;
+        int64_t start = -1;
+        const bool fromSilence = k == 0 || rows[k - 1].type == "Rest";
+        if (fromSilence)
+        {
+            // Back from the vowel to where the singer starts to sound (an unvoiced consonant
+            // comes before the voiced note).
+            for (int64_t i = sound; i >= std::max<int64_t> (win, sound - at (0.3)); i -= win / 2)
+                if (rmsBetween (x, i - win, i) < 0.06f * vowelRms)
+                {
+                    start = i - win / 2;
+                    break;
+                }
+            if (start < 0)
+                start = sound - at (0.2);
+        }
+        else
+        {
+            // Between two notes: the consonant is where the voice dips; start inside it.
+            const int64_t from = rows[k - 1].type == "Transition" ? at (rows[k - 1].start) : sound - at (0.15);
+            float lowest = 1.0e9f;
+            for (int64_t i = std::max<int64_t> (0, from); i + win <= sound + at (0.02); i += win / 4)
+            {
+                const float e = rmsBetween (x, i, i + win);
+                if (e < lowest) { lowest = e; start = i; }
+            }
+            if (start < 0 || lowest > 0.7f * vowelRms)
+                continue;   // no consonant to be heard
+        }
+        start = std::max<int64_t> (0, start);
+        const int64_t end = std::min<int64_t> ((int64_t) x.size(), sound + at (0.13));
+        const float secs = (float) ((double) (end - start) / sr);
+        if (secs < 0.07f || secs > 0.5f)
+            continue;
+        // The consonant must be in the cut: before the vowel speaks, a hiss or a burst for an
+        // unvoiced one (s, t, k, p, ch), a dip for a voiced one (m, n, l, r, d, b...).
+        {
+            const int64_t fr = at (0.01);
+            std::vector<float> e, z;
+            for (int64_t i = start; i + fr <= end; i += fr)
+            {
+                e.push_back (rmsBetween (x, i, i + fr));
+                int crossings = 0;
+                for (int64_t j = i + 1; j < i + fr; ++j)
+                    crossings += (x[(size_t) j] >= 0.0f) != (x[(size_t) (j - 1)] >= 0.0f);
+                z.push_back ((float) crossings / (float) fr);
+            }
+            if (e.size() < 6)
+                continue;
+            const size_t n = e.size();
+            const float vowelE = (e[n - 1] + e[n - 2] + e[n - 3]) / 3.0f, vowelZ = (z[n - 1] + z[n - 2] + z[n - 3]) / 3.0f;
+            size_t v = 0;
+            while (v < n && ! (e[v] >= 0.5f * vowelE && z[v] < 2.0f * vowelZ + 0.01f))
+                ++v;
+            const char first = sy->phones[0];
+            const bool unvoiced = first == 's' || first == 't' || first == 'k' || first == 'p' || (first == 'c' && sy->phones[1] == 'h');
+            bool heard = false;
+            if (unvoiced)
+            {
+                float zMax = 0.0f;
+                for (size_t i = 0; i < v; ++i) zMax = std::max (zMax, z[i]);
+                heard = v >= 3 && zMax >= 2.5f * vowelZ;
+            }
+            else
+            {
+                float eMin = 1.0e9f;
+                for (size_t i = 0; i < v; ++i) eMin = std::min (eMin, e[i]);
+                heard = v >= 2 && eMin <= 0.6f * vowelE;
+            }
+            if (! heard)
+                continue;
+        }
+        Cut c = makeCut (singer, female, countertenor, sy->vowel, Straight, SyllableCut, sr);
+        c.root = r.midi;
+        c.seconds = secs;
+        c.phones = sy->phones;
+        c.audio.assign (x.begin() + start, x.begin() + end);
+        out.push_back (std::move (c));
+    }
+}
+
 /** Keep up to `count` takes from list (already in order of preference), one per singer first. */
 std::vector<const Cut*> pick (const std::vector<const Cut*>& list, int count)
 {
@@ -311,10 +470,11 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s <VocalSet FULL folder> <output folder>\n", argv[0]);
+        std::fprintf (stderr, "usage: %s <VocalSet FULL folder> <output folder> [<Annotated-VocalSet folder>]\n", argv[0]);
         return 2;
     }
     const fs::path src = argv[1], dst = argv[2];
+    const fs::path annotated = argc > 3 ? fs::path (argv[3]) : fs::path();
 
     struct Source { const char* folder; int technique; Wanted want; };
     const Source sources[] = {
@@ -361,12 +521,20 @@ int main (int argc, char** argv)
                     cutFile (f.path(), tag, female, countertenor, vowel, source.technique, source.want, cuts);
             }
         }
+        if (! annotated.empty())
+            for (const char* song : { "dona", "caro", "row" })
+            {
+                const std::string stem = tag + "_" + song + "_straight";
+                cutSongSyllables (singerDir.path() / "excerpts" / "straight" / (stem + ".wav"),
+                                  annotated / "extended 1" / "without file header" / "straight" / (stem + ".csv"),
+                                  song, tag, female, countertenor, cuts);
+            }
     }
     int found[NumTechniques][NumKinds] = {};
     for (const auto& c : cuts)
         ++found[c.technique][c.kind];
     for (int t = 0; t < NumTechniques; ++t)
-        std::printf ("%-8s cut: %d held, %d onsets, %d moves\n", t == 0 ? "straight" : kTechniqueDirs[t], found[t][Sustain], found[t][Onset], found[t][Legato]);
+        std::printf ("%-8s cut: %d held, %d onsets, %d moves, %d syllables\n", t == 0 ? "straight" : kTechniqueDirs[t], found[t][Sustain], found[t][Onset], found[t][Legato], found[t][SyllableCut]);
 
     // Per section, vowel, technique and kind, group the takes into bins and keep the best few
     // of each: held notes per semitone (long tones first, then the steadiest), onsets per
@@ -378,7 +546,7 @@ int main (int argc, char** argv)
             for (int technique = 0; technique < NumTechniques; ++technique)
                 for (int kind = 0; kind < NumKinds; ++kind)
                 {
-                    std::map<std::pair<int, int>, std::vector<const Cut*>> bins;
+                    std::map<std::tuple<int, int, std::string>, std::vector<const Cut*>> bins;
                     for (const auto& c : cuts)
                     {
                         if (c.vowel != vowel || c.technique != technique || c.kind != kind)
@@ -387,7 +555,7 @@ int main (int argc, char** argv)
                         const float hi = kind == Legato ? std::max (c.root, c.to) : c.root;
                         for (int s : sectionsFor (c.female, c.countertenor, lo, hi))
                             if (s == section)
-                                bins[{ (int) std::lround (c.root), kind == Legato ? (int) std::lround (c.to - c.root) : 0 }].push_back (&c);
+                                bins[{ (int) std::lround (c.root), kind == Legato ? (int) std::lround (c.to - c.root) : 0, c.phones }].push_back (&c);
                     }
                     if (bins.empty())
                         continue;
@@ -402,6 +570,7 @@ int main (int argc, char** argv)
                     // everything in memory: fewer of them.
                     const int perBin = kind == Sustain ? (technique == Straight ? kHeldStraight : kHeldOther)
                                      : kind == Onset ? (technique == Straight ? 3 : hasVibrato (technique) ? 2 : 1)
+                                     : kind == SyllableCut ? 2
                                                      : (technique == Straight ? 2 : 1);
                     int counter = 0;
                     for (auto& [key, list] : bins)
@@ -418,6 +587,9 @@ int main (int argc, char** argv)
                             if (kind == Legato)
                                 std::snprintf (name, sizeof (name), "%s_%s_%03d_m%04d_to%04d_x%03d.wav", c->singer.c_str(), kVowelDirs[vowel], ++counter,
                                                (int) std::lround (c->root * 100.0f), (int) std::lround (c->to * 100.0f), (int) std::lround (c->crossing * 1000.0f));
+                            else if (kind == SyllableCut)
+                                std::snprintf (name, sizeof (name), "%s_%s_%03d_m%04d_on%s.wav", c->singer.c_str(), kVowelDirs[vowel], ++counter,
+                                               (int) std::lround (c->root * 100.0f), c->phones.c_str());
                             else
                                 std::snprintf (name, sizeof (name), "%s_%s_%03d_m%04d.wav", c->singer.c_str(), kVowelDirs[vowel], ++counter,
                                                (int) std::lround (c->root * 100.0f));
@@ -431,7 +603,7 @@ int main (int argc, char** argv)
                     }
                 }
     for (int t = 0; t < NumTechniques; ++t)
-        std::printf ("%-8s kept: %d held, %d onsets, %d moves\n", t == 0 ? "straight" : kTechniqueDirs[t], written[t][Sustain], written[t][Onset], written[t][Legato]);
+        std::printf ("%-8s kept: %d held, %d onsets, %d moves, %d syllables\n", t == 0 ? "straight" : kTechniqueDirs[t], written[t][Sustain], written[t][Onset], written[t][Legato], written[t][SyllableCut]);
     std::printf ("%.0f s of audio\n", seconds);
     return 0;
 }

@@ -10,6 +10,7 @@
 // recordings, in place of the vowel synthesiser.
 #pragma once
 
+#include "Lyrics.h"
 #include "Theory.h"
 
 #include <memory>
@@ -29,6 +30,7 @@ struct SampleZone
     int64_t crossing = 0;        // a move: where the pitch is halfway there
     int64_t loopStart = 0, loopEnd = 0, crossfade = 0;   // held notes: the sustain loop
     int singer = -1;             // who sang it, if known: a choir member keeps to one singer
+    uint32_t phones = 0;         // a syllable: the consonants it opens with (SampleSet::phonesKey)
 
     int64_t length() const noexcept { return (int64_t) pcm.size(); }
     float seconds() const noexcept { return (float) ((double) pcm.size() / sampleRate); }
@@ -40,6 +42,7 @@ struct SampleLayer
     std::vector<SampleZone> zones;    // held notes
     std::vector<SampleZone> onsets;   // notes sung from silence, cut short: how a note begins
     std::vector<SampleZone> moves;    // one note moving to the next
+    std::vector<SampleZone> syllables;   // a sung syllable's consonants and the start of its vowel
 
     bool empty() const noexcept { return zones.empty(); }
     /** Index of the held note to play for a pitch. variant (the choir member) picks between
@@ -50,6 +53,9 @@ struct SampleLayer
     int nearestOnset (float midi, int variant, int singer = -1) const noexcept;
     /** Index of a move from about `from` to `to` over the same interval, or -1 if none. */
     int nearestMove (float from, float to, int variant, int singer = -1) const noexcept;
+    /** Index of a syllable opening with exactly these consonants (SampleSet::phonesKey), near
+        the pitch, or -1 if none. */
+    int nearestSyllable (uint32_t phones, float midi, int variant, int singer = -1) const noexcept;
 };
 
 /** What a choir member is singing, for its SamplePlayer. */
@@ -60,9 +66,11 @@ struct SampleNote
     float noteMidi = -1.0f;   // that note (MIDI, A4 = 69), or < 0 when the pitch follows a voice freely
     int serial = 0;           // changes with every new note
     bool detached = false;    // the new note starts after a gap: sung afresh, not slid into
+    int syllable = -1;        // typed words: a recorded syllable (index in the layer's syllables)
+    int syllableSerial = 0;   // ... sung, consonant first, each time this changes
 };
 
-enum class SampleKind { Held, Onset, Move };
+enum class SampleKind { Held, Onset, Move, Syllable };
 
 /** How a recording was sung. The first three match Singing; the classical voice (vibrato,
     soft or in full voice) is mixed in by the engine. */
@@ -83,6 +91,7 @@ struct SampleNoteInfo
     float toMidi = 0.0f;          // a move: the pitch it arrives at
     float crossingSeconds = 0.0f; // a move: when the pitch is halfway there
     int singer = -1;
+    uint32_t phones = 0;          // a syllable: the consonants it opens with
 };
 
 class SampleSet
@@ -127,10 +136,13 @@ public:
     /** Pitch written in a file name as "m6312" (= MIDI 63.12), or -1 if none: such files are
         already cut to one note and need no analysis. */
     static float rootFromPath (const std::string& path);
-    /** The rest of what the Sanctuary Voices file names say: "breathy" or "belt" in the path,
-        a "short" (onset) or "legato" (move) folder, a move's "to6500" and "x152" (ms), and the
-        singer ("f3", "m11"). */
+    /** The rest of what the Sanctuary Voices file names say: the take ("breathy", "belt",
+        "vibrato", "fullvoice") in the path, a "short" (onset), "legato" (move) or "syllables"
+        folder, a move's "to6500" and "x152" (ms), a syllable's consonants ("ond", "onkxr" for
+        k-r: phone names joined by x), and the singer ("f3", "m11"). */
     static NoteInfo infoFromPath (const std::string& path);
+    /** Up to three consonants packed into one number (0 = none). */
+    static uint32_t phonesKey (const Phone* phones, int count) noexcept;
 
 private:
     static uint64_t nextId() noexcept;
@@ -184,7 +196,7 @@ private:
     int cur = -1;
     const SampleZone* next = nullptr;   // the held note an onset or a move hands over to
     double handover = 0.0;              // ... at this position in the current head's zone
-    int lastSerial = 0;
+    int lastSerial = 0, lastSyllableSerial = 0;
     float lastNote = -1.0f;
     const SampleLayer* lastLayer = nullptr;
 };

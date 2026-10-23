@@ -8,8 +8,10 @@ Rebuilds `voices/SanctuaryVoices` from the [VocalSet](https://zenodo.org/records
    ```bash
    g++ -std=c++20 -O2 -Icore/include -Itests tools/voicepack/BuildVoicePack.cpp tests/TestSignals.cpp \
        build/core/libsanctuary_core.a -o voicepack -lpthread
-   ./voicepack /path/to/VocalSet/FULL /tmp/pack_wav
+   ./voicepack /path/to/VocalSet/FULL /tmp/pack_wav "/path/to/Annotated VocalSet"
    ```
+
+   The third folder is [Annotated-VocalSet](https://zenodo.org/records/7061507) (CC BY 4.0, 412 MB): its note and lyric times let the tool cut syllables out of the songs. Without it the pack has no `syllables/`.
 
    It sorts everything into sections by voice and pitch (women: sopranos/altos, men: tenors/basses, the countertenor `male9`: altos, from G#3 to C5) and writes, under `<Section>/<vowel>/`:
 
@@ -21,6 +23,7 @@ Rebuilds `voices/SanctuaryVoices` from the [VocalSet](https://zenodo.org/records
    | `breathy/`, `belt/` | the same three, from the breathy and belted scales and arpeggios | 2 held, 1 onset, 1 slide |
    | `vibrato/` | the same three in the singers' own classical voice, sung softly: slow piano scales and arpeggios, pianissimo long tones | 2 held, 2 onsets, 1 slide |
    | `fullvoice/` | the classical voice in full voice: slow forte scales and arpeggios, forte long tones | 2 held, 2 onsets, 1 slide |
+   | `syllables/` | the syllables of *Dona nobis pacem*, *Caro mio ben* and *Row, row, row your boat* sung in straight tone, each from its consonants to the start of its vowel, `..._on<consonants>.wav` (phone names joined by `x`: `onkxr` = k, r). A cut is kept only if its consonant is there: a hiss or burst before the vowel for an unvoiced one, a dip for a voiced one | 2 per semitone and consonant |
 
    VocalSet's classical voice carries its vibrato (about 45 cents of pitch deviation against 15 for straight tone, measured from Annotated-VocalSet): a note counts as steady there when its centre does not drift between its two halves.
 
@@ -28,4 +31,4 @@ Rebuilds `voices/SanctuaryVoices` from the [VocalSet](https://zenodo.org/records
 3. Resample to 32 kHz and encode to Ogg Vorbis (quality 5) into `voices/SanctuaryVoices`, keeping the folder layout, for example with
    `ffmpeg -i in.wav -af aresample=resampler=soxr:precision=28 -ar 32000 -c:a libvorbis -q:a 5 out.ogg`. Keep `CREDITS.txt`.
 
-The pack holds about 10,000 recordings, 4,950 s in all: about 86 MB on disk and about 320 MB in memory once loaded (32 kHz keeps everything up to 16 kHz and a quarter of the memory 44.1 kHz would take). Loading takes a few seconds on several threads. Every instance of the plug-in in a project shares one copy.
+The pack holds about 10,450 recordings, 5,050 s in all: about 89 MB on disk and about 320 MB in memory once loaded (32 kHz keeps everything up to 16 kHz and a quarter of the memory 44.1 kHz would take). Loading takes a few seconds on several threads. Every instance of the plug-in in a project shares one copy.

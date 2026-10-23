@@ -198,6 +198,7 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
 - **Sung words** (Settings → **SUNG WORDS**): type words and the MIDI choir sings them.
   - Type "Kyrie eleison", "Alleluia" or "Glory to God", or pick one of the ready texts.
   - Each new note or chord you play sings the next syllable, with its vowel and its consonants. The page shows how the words are split and lights up the syllable being sung.
+  - With Sanctuary Voices, a syllable opening on a consonant the singers were recorded singing (D, B, M, N, L, R, P, T, K, S, Ch, J, Y, and Cr, Str, Dr) is sung from those recordings: a real singer's consonant, then the held vowel. The others are shaped on the voices as before.
   - Latin is sung the church way: Ky-ri-e, Chri-ste, ex-cel-sis ("ek-shel-sis"), gra-ti-a ("gra-tsi-a"). Anything else is read as English.
   - Write **-** inside a word to split the syllables yourself (Ho-san-na). Write **_** to hold a syllable over one more note: *A _ _ men* sings "A" across three notes, then "men".
   - The words start again from the top when you change them or your DAW starts playing, and they loop at the end. In Parts mode each part keeps its own place, so the sopranos can sing a melisma while the basses move on.

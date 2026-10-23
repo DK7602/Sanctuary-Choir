@@ -33,6 +33,12 @@ written in its file name (m6312 = MIDI note 63.12). Alongside them:
             sung softly (slow piano scales and arpeggios, pianissimo long
             tones);
   fullvoice/  the classical voice in full voice (slow forte scales and
-            arpeggios, forte long tones).
+            arpeggios, forte long tones);
+  syllables/  syllables of the songs the singers sang in straight tone
+            (Dona nobis pacem, Caro mio ben, Row row row your boat), each cut
+            from its consonants to the start of its vowel with the note and
+            lyric times of Annotated-VocalSet (CC BY 4.0,
+            https://zenodo.org/records/7061507); on<consonants> names them
+            (onkxr = k then r).
 Singers are named by VocalSet's anonymous ids (f1-f9, m1-m11).
 Rebuild with tools/voicepack.

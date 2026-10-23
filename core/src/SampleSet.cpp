@@ -109,6 +109,14 @@ int SampleLayer::nearestOnset (float midi, int variant, int singer) const noexce
     return pickZone (onsets, cost, 1.0f, 2.5f, variant, singer);
 }
 
+int SampleLayer::nearestSyllable (uint32_t phones, float midi, int variant, int singer) const noexcept
+{
+    if (phones == 0)
+        return -1;
+    auto cost = [phones, midi] (const SampleZone& z) { return z.phones == phones ? std::abs (z.rootMidi - midi) : 1.0e9f; };
+    return pickZone (syllables, cost, 1.0f, 5.0f, variant, singer);
+}
+
 int SampleLayer::nearestMove (float from, float to, int variant, int singer) const noexcept
 {
     // A step the same way, as close in size as possible (a recorded third for a third; a step
@@ -161,7 +169,10 @@ void SampleSet::addNote (int section, int vowel, const float* x, int64_t n, doub
     z.sampleRate = sampleRate;
     z.rootMidi = rootMidi;
     z.singer = info.singer;
+    z.phones = info.phones;
     Kind kind = info.kind;
+    if (kind == Kind::Syllable && z.phones == 0)
+        kind = Kind::Onset;   // no consonants named: a plain onset
     if (kind == Kind::Move)
     {
         z.toMidi = info.toMidi;
@@ -176,7 +187,7 @@ void SampleSet::addNote (int section, int vowel, const float* x, int64_t n, doub
     for (int64_t i = 0; i < n; ++i)
         z.pcm[(size_t) i] = (int16_t) std::lround (x[i] / peak * 32767.0f);
     auto& layer = layers[(size_t) section][(size_t) vowel][(size_t) take];
-    (kind == Kind::Onset ? layer.onsets : kind == Kind::Move ? layer.moves : layer.zones).push_back (std::move (z));
+    (kind == Kind::Onset ? layer.onsets : kind == Kind::Move ? layer.moves : kind == Kind::Syllable ? layer.syllables : layer.zones).push_back (std::move (z));
 }
 
 namespace
@@ -223,6 +234,14 @@ void SampleSet::finalise()
             {
                 fadeEdges (z, 0.002, 0.03);
                 level (z, rmsOf (z, z.length() * 55 / 100, z.length() - (int64_t) (0.03 * z.sampleRate)));
+            }
+            // Syllables: levelled by the vowel they open into (the consonant keeps its own level
+            // against it).
+            std::sort (layer.syllables.begin(), layer.syllables.end(), byPitch);
+            for (auto& z : layer.syllables)
+            {
+                fadeEdges (z, 0.002, 0.025);
+                level (z, rmsOf (z, z.length() * 60 / 100, z.length() - (int64_t) (0.025 * z.sampleRate)));
             }
             // Moves: levelled by the notes either side of the move.
             std::sort (layer.moves.begin(), layer.moves.end(), byPitch);
@@ -379,14 +398,46 @@ SampleSet::NoteInfo SampleSet::infoFromPath (const std::string& path)
         if (t == "breathy") info.take = Take::Breathy;
         else if (t == "belt" || t == "belted") info.take = Take::Belt;
         else if (t == "vibrato") info.take = Take::Vibrato;
+        else if (t == "syllables") info.kind = Kind::Syllable;
         else if (t == "fullvoice") info.take = Take::Full;
         else if (t == "short" || t == "onset" || t == "onsets") info.kind = Kind::Onset;
         else if (t == "legato" || t == "moves") info.kind = Kind::Move;
         else if ((t.size() == 6 || t.size() == 7) && t[0] == 't' && t[1] == 'o' && digits (t, 2)) info.toMidi = (float) std::atoi (t.c_str() + 2) / 100.0f;
         else if (t.size() >= 2 && t.size() <= 5 && t[0] == 'x' && digits (t, 1)) info.crossingSeconds = (float) std::atoi (t.c_str() + 1) / 1000.0f;
         else if (t.size() >= 2 && t.size() <= 3 && (t[0] == 'f' || t[0] == 'm') && digits (t, 1)) info.singer = (t[0] == 'f' ? 100 : 200) + std::atoi (t.c_str() + 1);
+        else if (t.size() > 2 && t[0] == 'o' && t[1] == 'n')
+        {
+            // A syllable's consonants: "onkxr" = k, r.
+            Phone ph[3];
+            int count = 0;
+            bool ok = true;
+            size_t from = 2;
+            while (ok && from <= t.size())
+            {
+                const size_t to = std::min (t.find ('x', from), t.size());
+                const std::string name = t.substr (from, to - from);
+                int found = -1;
+                for (int k = 0; k < (int) Phone::Count; ++k)
+                    if (name == phoneName ((Phone) k))
+                        found = k;
+                ok = found >= 0 && count < 3;
+                if (ok)
+                    ph[count++] = (Phone) found;
+                from = to + 1;
+            }
+            if (ok && count > 0)
+                info.phones = phonesKey (ph, count);
+        }
     }
     return info;
+}
+
+uint32_t SampleSet::phonesKey (const Phone* phones, int count) noexcept
+{
+    uint32_t key = 0;
+    for (int i = 0; i < std::min (count, 3); ++i)
+        key |= (uint32_t) ((int) phones[i] + 1) << (8 * i);
+    return key;
 }
 
 int SampleSet::vowelFromPath (const std::string& path)
@@ -542,6 +593,25 @@ void SamplePlayer::render (const SampleLayer& layer, const SampleNote& note, con
                 h = Head{};
             cur = -1;
             next = nullptr;
+        }
+    }
+
+    // Typed words: a syllable that opens with a recorded consonant is sung from the recording
+    // (the consonant, then the start of its vowel) and hands over to the held note.
+    if (note.syllableSerial != lastSyllableSerial)
+    {
+        lastSyllableSerial = note.syllableSerial;
+        if (note.syllable >= 0 && note.syllable < (int) layer.syllables.size())
+        {
+            const SampleZone& z = layer.syllables[(size_t) note.syllable];
+            Head head;
+            head.zone = &z;
+            head.mode = Mode::Onset;
+            start (head, current() != nullptr ? 0.012f : 0.0f, outRate, true);
+            next = &layer.zones[(size_t) layer.nearest (target, variant, z.singer)];
+            handover = (double) z.length() - 0.05 * z.sampleRate;
+            lastSerial = note.serial;
+            lastNote = target;
         }
     }
 

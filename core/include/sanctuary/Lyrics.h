@@ -86,6 +86,10 @@ struct LyricScript
         std::array<Segment, 16> start {};
         std::array<Segment, 8> end {};
         uint8_t numStart = 0, numEnd = 0;
+        std::array<Phone, 4> onset {};   // this syllable's own opening consonants
+        uint8_t numOnset = 0;
+        float onsetAt = 0.0f;            // seconds into `start` where they begin (after the
+                                         // syllable before has closed)
     };
 
     static LyricScript make (const Lyrics& lyrics);

@@ -244,6 +244,8 @@ struct ChoirEngine::Singer
     // Typed words
     int syllable = -1;           // the syllable count it is singing (-1 = none)
     float sylAge = 0.0f;         // seconds into it
+    bool sylDecided = false;     // whether its consonants are sung from a recording is decided
+    bool sylRecorded = false;    // ... and they are
     bool ending = false;         // let go: singing the syllable's closing consonants
     float endAge = 0.0f, endLevel = 0.0f;
     int vowelOverride = -1;      // the vowel its synth is set to for the words (-1 = the Vocal Type)
@@ -1365,6 +1367,7 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
         s.syllable = syl;
         s.sylAge = 0.0f;
         s.ending = false;
+        s.sylDecided = s.sylRecorded = false;
     }
     else
     {
@@ -1790,6 +1793,25 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                     a1 = LyricScript::at (*entry, age + dt, s.ending);
                     if (sampleSet != nullptr)
                         layer = sampleSet->layerFor (formantSection (s.section), entry->vowel, takeFor (s));
+                    // Consonants the voices were recorded singing: a real singer sings them (then
+                    // the vowel takes over), in place of the synthesised ones.
+                    if (layer != nullptr && ! s.ending && ! entry->hold && entry->numOnset > 0 && ! s.sylDecided && s.sylAge + dt >= entry->onsetAt)
+                    {
+                        s.sylDecided = true;
+                        const float at = (s.targetMidi >= 0.0f ? s.targetMidi : hzToMidi (s.sampleNote.hz)) + ens.zoneOffset;
+                        const int k = layer->nearestSyllable (SampleSet::phonesKey (entry->onset.data(), entry->numOnset), at, s.index);
+                        if (k >= 0)
+                        {
+                            s.sampleNote.syllable = k;
+                            ++s.sampleNote.syllableSerial;
+                            s.sylRecorded = true;
+                        }
+                    }
+                    if (s.sylRecorded && ! s.ending)
+                    {
+                        if (age >= entry->onsetAt) a0 = Articulation {};
+                        if (age + dt >= entry->onsetAt) a1 = Articulation {};
+                    }
                     if (s.vowelOverride != (int) entry->vowel)
                     {
                         setSingerVowel (s, entry->vowel);

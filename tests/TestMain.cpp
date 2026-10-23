@@ -582,6 +582,23 @@ TEST (lyricsSingTheirConsonants)
     CHECK (std::abs (vowelPa - vowelA) < 3.0f);
 }
 
+TEST (lyricsKnowEachSyllablesOwnConsonants)
+{
+    // A recorded consonant replaces only the syllable's own onset, not the end of the one
+    // before: the script says which consonants open it and when.
+    const auto dona = LyricScript::make (Lyrics::parse ("Dona nobis"));
+    CHECK (dona.entries.size() == 4);
+    CHECK (dona.entries[0].numOnset == 1 && dona.entries[0].onset[0] == Phone::D && dona.entries[0].onsetAt == 0.0f);
+    const auto sanctus = LyricScript::make (Lyrics::parse ("Sanctus"));
+    CHECK (sanctus.entries.size() == 2);
+    if (sanctus.entries.size() == 2)
+    {
+        const auto& tus = sanctus.entries[1];
+        CHECK (tus.numOnset >= 1 && tus.onset[0] == Phone::T);
+        CHECK (tus.onsetAt > 0.02f);   // "sanc" closes on its k first
+    }
+}
+
 TEST (lyricsStepOneSyllablePerNote)
 {
     // Each new chord sings the next syllable (a chord's notes arriving together count once);
@@ -842,6 +859,54 @@ TEST (recordedSingingStylesFallBack)
     CHECK (belt == natural);   // nothing belted: natural singing
     CHECK (set.layerFor (Tenor, VocalType::Oo, Take::Breathy) == natural);   // never another vowel's breathy take
     if (airy != nullptr) CHECK_NEAR (airy->zones[0].rootMidi, 62.0, 0.01);
+}
+
+TEST (recordedSyllablesSingTheirConsonant)
+{
+    // A held note, and a syllable: 60 ms of hiss, then the vowel. Told to sing the syllable,
+    // the player opens with the hiss and then holds the note; otherwise there is none.
+    const double sr = 48000.0;
+    SampleSet set;
+    const auto held = testTone (sr, 2.0, 60.0f, 60.0f, 99.0, 0.0);
+    set.addNote (Tenor, 0, held.data(), (int64_t) held.size(), sr, 60.0f);
+    std::vector<float> syl ((size_t) (0.2 * sr));
+    Rng rng (7);
+    for (size_t i = 0; i < syl.size(); ++i)
+        syl[i] = i < (size_t) (0.06 * sr) ? 0.3f * (rng.uni() * 2.0f - 1.0f) : held[i];
+    const Phone s[] = { Phone::S };
+    SampleNoteInfo info = SampleSet::infoFromPath ("Tenors/ah/syllables/m3_ah_001_m6000_ons.wav");
+    CHECK (info.kind == SampleKind::Syllable && info.phones == SampleSet::phonesKey (s, 1));
+    set.addNote (Tenor, 0, syl.data(), (int64_t) syl.size(), sr, 60.0f, info);
+    set.finalise();
+    const auto* layer = set.layerFor (Tenor, VocalType::Ah);
+    CHECK (layer != nullptr && layer->syllables.size() == 1);
+    if (layer == nullptr || layer->syllables.empty()) return;
+    CHECK (layer->nearestSyllable (SampleSet::phonesKey (s, 1), 61.0f, 0) == 0);
+    const Phone t[] = { Phone::T };
+    CHECK (layer->nearestSyllable (SampleSet::phonesKey (t, 1), 60.0f, 0) < 0);
+    const Phone kr[] = { Phone::K, Phone::R };
+    CHECK (SampleSet::infoFromPath ("Altos/eh/syllables/f2_eh_004_m6432_onkxr.wav").phones == SampleSet::phonesKey (kr, 2));
+    CHECK (SampleSet::infoFromPath ("Altos/eh/short/f2_eh_004_m6432.wav").kind == SampleKind::Onset);
+
+    auto sing = [&] (bool withSyllable)
+    {
+        SamplePlayer player;
+        std::vector<float> y ((size_t) (0.6 * sr), 0.0f), amp (64, 0.5f);
+        SampleNote note;
+        note.hz = note.noteHz = midiToHz (60.0f);
+        note.noteMidi = 60.0f;
+        note.serial = 1;
+        if (withSyllable) { note.syllable = 0; note.syllableSerial = 1; }
+        for (size_t i = 0; i + 64 <= y.size(); i += 64)
+            player.render (*layer, note, amp.data(), y.data() + i, 64, sr, 0, 0.0f);
+        return y;
+    };
+    const auto withIt = sing (true), without = sing (false);
+    const float hissWith = bandDb (withIt, sr, 0.005, 0.05, 6000.0f, 12000.0f), hissWithout = bandDb (without, sr, 0.005, 0.05, 6000.0f, 12000.0f);
+    const float noteLater = medianPitch (withIt, sr, 0.3, 0.55);
+    std::printf ("  hiss at the start: %.1f dB with the syllable, %.1f dB without; then the note at %.2f\n", hissWith, hissWithout, noteLater);
+    CHECK (hissWith > hissWithout + 20.0f);
+    CHECK_NEAR (noteLater, 60.0, 0.3);
 }
 
 TEST (classicalVoicesJoinWithTheStyle)
