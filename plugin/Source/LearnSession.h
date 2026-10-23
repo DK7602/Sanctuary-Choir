@@ -2,7 +2,8 @@
 //
 // Captures the input in sync with the host timeline (or loads a file), analyses it on a
 // background thread, and plays back either the learned harmony (live singers) or rendered
-// stems in sync with the host.
+// stems in sync with the host. More passes of the same part can be added to a take: they are
+// lined up with it, and the Words choir sings from all of them.
 #pragma once
 
 #include "TakeExport.h"
@@ -12,6 +13,7 @@
 #include <sanctuary/Learn.h>
 
 #include <mutex>
+#include <optional>
 
 namespace sanctuary
 {
@@ -54,8 +56,10 @@ public:
     /** Records the block when learning; may replace the input with the preview take. */
     void processInput (float* const* channels, int numChannels, int numSamples, BlockInfo& info);
 
-    /** Decides how the engine should sing for this block: rendered stems, the learned score, or live. */
-    const sc::StemPlayback* preparePlayback (const BlockInfo& info, int numSamples, const sc::ScoreSource*& scoreOut);
+    /** Decides how the engine should sing for this block: rendered stems, the learned score, or
+        live. Singing from the score, the take's other passes come with it (for setPasses). */
+    const sc::StemPlayback* preparePlayback (const BlockInfo& info, int numSamples, const sc::ScoreSource*& scoreOut,
+                                             const float* const*& passesOut, int& numPassesOut);
 
     //==============================================================================
     // Message thread commands
@@ -67,6 +71,12 @@ public:
     void render();
     void cancelWork();
     void togglePreview();
+    /** Records another pass of the take's part (in time with the song, like LEARN), or stops
+        the one being recorded. */
+    void togglePass();
+    void loadPassFile (const juce::File& file);
+    void removePass (int index);
+    int getNumPasses() const;
     /** Settings that change the harmony were edited: re-harmonise (cheap). */
     void harmonySettingsChanged();
     /** Settings that change the rendered sound were edited. */
@@ -116,12 +126,25 @@ public:
 private:
     struct PlaybackData;
     struct ScoreAdapter;
+    struct Pass
+    {
+        std::shared_ptr<const std::vector<float>> audio;   // on the take's timeline
+        sc::PassAlignment info;
+    };
 
     void timerCallback() override;
     void finishRecording();
     void releaseCapture();
     void startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter,
-                        std::vector<float> band = {}, std::vector<sc::BandChord> bandChords = {});
+                        std::vector<float> band = {}, std::vector<sc::BandChord> bandChords = {},
+                        std::vector<Pass> passes = {});
+    void beginCapture (bool pass);
+    void addPass (std::vector<float> audio, double rate, std::optional<int64_t> hint);
+    void setPasses (std::vector<Pass> passes);
+    std::unique_ptr<PlaybackData> copyOfCurrent() const;
+    Phase restingPhase() const;
+    void notify (const juce::String& text);
+    bool readAudioFile (const juce::File& file, std::vector<float>& mono);
     void reharmonise();
     sc::HarmonySettings currentHarmonySettings() const;
     juce::File exportFolder();
@@ -154,6 +177,9 @@ private:
     std::atomic<int64_t> lastCapturePos { 0 };
     int64_t armedLoudSamples = 0;
     double captureSampleRate = 48000.0;
+    bool recordingPass = false;   // the capture is another pass of the take, not a new take
+    bool passAlongPreview = false; // ... sung along with the take playing from its start
+    bool aligningPass = false;
 
     // Published playback data (raw pointer for the audio thread; ownership on the message thread).
     std::atomic<PlaybackData*> live { nullptr };
@@ -163,6 +189,8 @@ private:
     std::unique_ptr<ScoreAdapter> adapter;
     std::array<std::vector<float>, sc::NumSections * 2> stemScratch;
     sc::StemPlayback stemPlayback;
+    std::array<std::vector<float>, sc::kMaxExtraPasses> passScratch;
+    std::array<const float*, sc::kMaxExtraPasses> passPointers {};
 
     // Preview transport (play the learned take through the choir without the host)
     std::atomic<bool> previewPlaying { false };
@@ -175,6 +203,8 @@ private:
     std::atomic<bool> workDone { false };
     std::function<void()> onWorkDone;   // runs on the message thread after the worker finishes
     juce::String lastError;
+    juce::String notice;    // a one-off message for the page (a pass that could not be used)
+    int noticeId = 0;
     double lastRenderSeconds = 0.0;
     int renderedSingers = 0;
     bool renderStale = false;
@@ -210,6 +240,7 @@ private:
     mutable std::mutex encodeLock;
     mutable std::weak_ptr<const std::vector<float>> encodedTake;
     mutable juce::MemoryBlock encodedFlac;
+    mutable std::vector<std::pair<std::weak_ptr<const std::vector<float>>, juce::MemoryBlock>> encodedPasses;
     std::atomic<int64_t> engineToTakeOffset { 0 };
 };
 } // namespace sanctuary

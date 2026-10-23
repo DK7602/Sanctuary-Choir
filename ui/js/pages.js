@@ -254,7 +254,12 @@
     };
 
     const take = el("div", "group", left);
+    take.style.position = "relative";
     el("h3", "", take, "LEARNED TAKE");
+    const passesBtn = el("button", "pill", take, "MULTI-TAKE");
+    passesBtn.style.cssText = "position:absolute;right:12px;top:7px;height:24px";
+    passesBtn.title = "Sing the part again: the Words choir sings from every pass";
+    passesBtn.addEventListener("click", () => info.openPasses && info.openPasses());
     const btns = el("div", "take-btns", take);
     btns.style.cssText = "display:flex;gap:10px;flex-wrap:wrap";
     const preview = el("button", "big-btn", btns, "\u25b6  PREVIEW");
@@ -279,6 +284,9 @@
       preview.disabled = !l.hasTake;
       preview.textContent = l.previewing ? "\u25a0  STOP PREVIEW" : "\u25b6  PREVIEW";
       exp.disabled = !l.hasTake;
+      const passCount = (l.passes || []).length;
+      passesBtn.textContent = passCount ? "MULTI-TAKE · " + (passCount + 1) + " PASSES" : "MULTI-TAKE";
+      passesBtn.classList.toggle("on", passCount > 0 || !!l.recordingPass);
       takeInfo.textContent = l.hasTake ? (l.text || "") : "No take yet. Press LEARN and sing, or LOAD a vocal file.";
     };
 
@@ -955,5 +963,183 @@
     };
   }
 
-  window.SCPages = { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords };
+
+  //==========================================================================
+  // MULTI-TAKE CHOIR: more passes of the learned take. Each one is lined up with the take and
+  // the Words choir sings from all of them.
+  const PASS_COLORS = ["#f0cf84", "#d98b5a", "#b9c4d4", "#a98fd6"];
+
+  function buildPasses(page, info) {
+    const { hiDpiCanvas } = window.SCW;
+    page.innerHTML = "";
+    el("h2", "", page, "MULTI-TAKE CHOIR");
+    const close = el("button", "page-close", page, "✕");
+    close.title = "Back";
+    close.addEventListener("click", () => info.close && info.close());
+
+    const intro = el("div", "passes-intro", page);
+    const introText = el("p", "", intro);
+    introText.innerHTML = "Sing the part again, up to four times in all. Each pass is lined up with your take, note by note, and the "
+      + "<b>Words</b> choir sings from every one: real doubles with their own breaths, timing and colour, not copies of one voice.";
+    const modeNote = el("div", "passes-mode", intro);
+    const modeText = el("span", "", modeNote, "Passes are sung in WORDS mode");
+    const useWords = el("button", "pill", modeNote, "USE WORDS");
+    useWords.title = "Switch Vocal Type to Words (Your Voice)";
+    useWords.addEventListener("click", () => Params.set("vocalType", 6));
+
+    const cardRow = el("div", "passes-cards", page);
+    const cards = [0, 1, 2, 3].map((i) => {
+      const c = el("div", "group pass-card", cardRow);
+      const rgb = [1, 3, 5].map((k) => parseInt(PASS_COLORS[i].slice(k, k + 2), 16)).join(",");
+      c.style.setProperty("--pc", PASS_COLORS[i]);
+      c.style.setProperty("--pc-edge", "rgba(" + rgb + ",0.6)");
+      c.style.setProperty("--pc-wash", "rgba(" + rgb + ",0.08)");
+      const head = el("div", "pass-head", c);
+      el("span", "pass-num", head, String(i + 1));
+      const title = el("h3", "", head, i === 0 ? "THE TAKE" : "PASS " + (i + 1));
+      const wave = el("canvas", "pass-wave", c);
+      const text = el("p", "pass-text", c);
+      const btns = el("div", "pill-row pass-btns", c);
+      return { c, title, wave, text, btns, key: "" };
+    });
+
+    const lower = el("div", "passes-lower", page);
+    const spread = el("div", "group passes-spread", lower);
+    const spreadHead = el("div", "", spread);
+    spreadHead.style.cssText = "display:flex;align-items:baseline;justify-content:space-between";
+    el("h3", "", spreadHead, "WHO SINGS FROM WHICH PASS").style.margin = "0";
+    const spreadNote = el("span", "passes-note", spreadHead);
+    const spreadCanvas = el("canvas", "passes-canvas", spread);
+    const how = el("div", "group passes-how", lower);
+    el("h3", "", how, "HOW");
+    const howText = el("p", "", how);
+
+    // A waveform-like drawing for each pass (its own shape, so the four look like four singers).
+    function drawWave(canvas, i, on) {
+      const w = 224, h = 44;
+      const ctx = hiDpiCanvas(canvas, w, h);
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      ctx.clearRect(0, 0, w, h);
+      if (!on) {
+        ctx.strokeStyle = "rgba(232, 201, 138, 0.25)";
+        ctx.setLineDash([4, 5]);
+        ctx.beginPath(); ctx.moveTo(4, h / 2); ctx.lineTo(w - 4, h / 2); ctx.stroke();
+        return;
+      }
+      let seed = 17 + i * 101;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      ctx.fillStyle = PASS_COLORS[i];
+      ctx.shadowColor = PASS_COLORS[i];
+      ctx.shadowBlur = 6;
+      const phrases = [[0.02, 0.3], [0.36, 0.64], [0.7, 0.97]];
+      for (let x = 0; x < w; x += 3) {
+        const t = x / w;
+        const ph = phrases.find(([a, b]) => t >= a + (i * 0.007) && t <= b - (i * 0.005));
+        if (!ph) continue;
+        const env = Math.sin(Math.PI * (t - ph[0]) / (ph[1] - ph[0]));
+        const a = (0.35 + 0.65 * env) * (0.55 + 0.45 * rnd()) * (h / 2 - 3);
+        ctx.fillRect(x, h / 2 - a, 2, a * 2);
+      }
+    }
+
+    function drawSpread(passes) {
+      const w = 600, h = 118;
+      const ctx = hiDpiCanvas(spreadCanvas, w, h);
+      spreadCanvas.style.width = w + "px";
+      spreadCanvas.style.height = h + "px";
+      ctx.clearRect(0, 0, w, h);
+      const total = Math.round(Params.get("choirSize") / 100 * (info.maxSingers || 40));
+      const per = Math.max(1, Math.round(total / 4));
+      ctx.font = "600 10px Montserrat, sans-serif";
+      ctx.textBaseline = "middle";
+      SECTIONS.forEach((sec, k) => {
+        const y = 15 + k * 28;
+        ctx.fillStyle = sec.color;
+        ctx.fillText(sec.name, 0, y);
+        for (let j = 0; j < per; j++) {
+          const pass = passes > 1 ? (j + k) % passes : 0;
+          const x = 92 + j * Math.min(26, (w - 104) / Math.max(1, per - 1));
+          ctx.beginPath();
+          ctx.arc(x, y, 8, 0, Math.PI * 2);
+          ctx.fillStyle = PASS_COLORS[pass];
+          ctx.shadowColor = PASS_COLORS[pass];
+          ctx.shadowBlur = 5;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = "#1b1209";
+          ctx.textAlign = "center";
+          ctx.fillText(String(pass + 1), x, y + 0.5);
+          ctx.textAlign = "left";
+        }
+      });
+    }
+
+    let last = {};
+    function show(l) {
+      l = l || {};
+      last = l;
+      const passes = (l.passes || []).length;
+      const words = Math.round(Params.get("vocalType")) === 6;
+      const busy = ["recording", "analysing", "rendering"].includes(l.phase);
+      modeNote.classList.toggle("hidden", words);
+      cards.forEach((card, i) => {
+        const pass = i === 0 ? null : (l.passes || [])[i - 1];
+        const filled = i === 0 ? !!l.hasTake : !!pass;
+        const next = i === passes + 1 && !!l.hasTake;
+        const recording = next && !!l.recordingPass;
+        const aligning = next && !!l.aligningPass;
+        const state = i === 0 ? (filled ? "take" : "none") : filled ? "pass" : recording ? (l.armed ? "armed" : "rec") : aligning ? "align" : next ? "next" : "later";
+        card.c.classList.toggle("filled", filled);
+        card.c.classList.toggle("empty", !filled);
+        card.c.classList.toggle("recording", state === "rec" || state === "armed");
+        card.c.classList.toggle("aligning", state === "align");
+        card.c.classList.toggle("later", state === "later" || state === "none");
+        const key = state + "|" + (pass ? pass.coverage + "," + pass.drift : "") + "|" + (i === 0 ? l.seconds : "") + "|" + busy;
+        if (key === card.key) return;
+        card.key = key;
+        drawWave(card.wave, i, filled || state === "rec");
+        card.btns.innerHTML = "";
+        const btn = (label, tip, fn, cls) => {
+          const b = el("button", "pill" + (cls ? " " + cls : ""), card.btns, label);
+          b.title = tip;
+          b.addEventListener("click", fn);
+          return b;
+        };
+        const fmt = (sec) => Math.floor(sec / 60) + ":" + String(Math.floor(sec % 60)).padStart(2, "0");
+        if (state === "take") {
+          card.text.innerHTML = "<b>" + fmt(l.seconds || 0) + "</b> · the part as you learned it";
+        } else if (state === "none") {
+          card.text.textContent = "LEARN or LOAD a take first.";
+        } else if (state === "pass") {
+          card.text.innerHTML = "Sings <b>" + Math.round((pass.coverage || 0) * 100) + "%</b> of the take, lined up to within "
+            + (pass.drift || 0).toFixed(2) + " s";
+          btn("REMOVE", "Take this pass away", () => SC.send({ type: "cmd", name: "removePass", index: i - 1 })).disabled = busy;
+        } else if (state === "rec" || state === "armed") {
+          card.text.innerHTML = state === "armed" ? "<b>Armed</b>: press play in your DAW and sing the part again." : "<b>Recording</b>: sing the part again.";
+          btn("■ STOP", "Finish this pass", () => SC.send({ type: "cmd", name: "pass" }), "on");
+        } else if (state === "align") {
+          card.text.innerHTML = "<b>Lining up</b> with your take…";
+        } else if (state === "next") {
+          card.text.textContent = "Sing the part again, or load another recording of it.";
+          btn("● RECORD", "Record another pass (in your DAW, from before the take)", () => SC.send({ type: "cmd", name: "pass" })).disabled = busy;
+          btn("LOAD…", "Load another recording of the same part", () => SC.send({ type: "cmd", name: "loadPass" })).disabled = busy;
+        } else {
+          card.text.textContent = "After pass " + i + ".";
+        }
+      });
+      spreadNote.textContent = passes ? (passes + 1) + " PASSES · " + (passes === 1 ? "HALF" : passes === 2 ? "A THIRD" : "A QUARTER") + " OF EACH SECTION ON EACH"
+        : "ONE PASS: EVERYONE SINGS FROM THE TAKE";
+      drawSpread(passes + 1);
+      howText.innerHTML = info.standalone
+        ? "Press <b>RECORD</b> and sing along with your take, which plays through the choir from the top; <b>STOP</b> when you're done. Or <b>LOAD</b> another recording of the part."
+        : "Press <b>RECORD</b>, play your song from before the take and sing the part again; it stops with your DAW. Or <b>LOAD</b> another recording of the part.";
+    }
+    info.onStatus = (st) => show((st && st.learn) || {});
+    Params.on("vocalType", () => show(last));
+    Params.on("choirSize", () => drawSpread((last.passes || []).length + 1));
+    show({});
+  }
+
+  window.SCPages = { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords, buildPasses };
 })();

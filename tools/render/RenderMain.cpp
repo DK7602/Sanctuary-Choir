@@ -16,6 +16,9 @@
 //     --singing NAME       natural | breathy | belt  (recorded voices: their breathy or belted takes)
 //     --words TEXT         ignore the input: play chords over MIDI, one per syllable, and sing TEXT
 //     --real-voices PCT    Words mode: how far each singer takes on a real singer's voice (default 100)
+//     --pass FILE          learn mode: another pass of the same part (up to 3); lined up with the
+//                          input, and the Words choir sings from every pass ("demo" with
+//                          --synth-demo: the demo melody sung again)
 //     --synth-demo         ignore the input and sing a demo melody (writes it next to the output)
 #include "TestSignals.h"
 
@@ -41,7 +44,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--real-voices 100] [--synth-demo]\n", argv[0]);
+        std::fprintf (stderr, "usage: %s input.wav output.wav [--learn] [--voice ah|words|...] [--harmony full|...] [--style sacred|...] [--key auto|C|...] [--size 70] [--reverb 65] [--lead 0] [--stems DIR] [--voices DIR] [--ensemble choir|children|gang|congregation] [--rhythm 0-14] [--mics C,T,R] [--formation blocks|across|mencentre|mixed] [--singing natural|breathy|belt] [--words TEXT] [--real-voices 100] [--pass FILE] [--synth-demo]\n", argv[0]);
         return 2;
     }
 
@@ -50,6 +53,7 @@ int main (int argc, char** argv)
     bool learn = false, demo = false;
     std::string words;
     std::string stemsDir, voicesDir;
+    std::vector<std::string> passPaths;
 
     const std::map<std::string, int> voices { { "ah", 0 }, { "oh", 1 }, { "oo", 2 }, { "ee", 3 }, { "eh", 4 }, { "mm", 5 }, { "words", 6 } };
     const std::map<std::string, int> modes { { "full", 0 }, { "gospel", 1 }, { "open", 2 }, { "unison", 3 }, { "thirds", 4 }, { "organum", 5 }, { "upper", 6 }, { "lower", 7 }, { "drone", 8 } };
@@ -76,6 +80,7 @@ int main (int argc, char** argv)
         else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
         else if (a == "--words") words = next();
         else if (a == "--real-voices") p.realVoices = std::stof (next());
+        else if (a == "--pass") passPaths.push_back (next());
         else if (a == "--singing") p.singing = (Singing) indexOf ({ { "natural", 0 }, { "breathy", 1 }, { "belt", 2 } }, next(), 0);
         else if (a == "--rhythm") p.rhythmPattern = std::clamp (std::stoi (next()), 0, kNumRhythmPatterns - 1);
         else if (a == "--mics")
@@ -178,8 +183,45 @@ int main (int argc, char** argv)
         const auto score = harmoniseTake (take, hs);
         std::printf ("%s\n", score.describe().c_str());
 
+        // More passes of the part, each lined up with the input.
+        std::vector<std::vector<float>> passes;
+        for (const auto& path : passPaths)
+        {
+            if ((int) passes.size() >= kMaxExtraPasses)
+                break;
+            std::vector<float> raw;
+            if (path == "demo" && demo)
+            {
+                auto notes = test::amazingGrace();
+                for (size_t k = 0; k < notes.size(); ++k)
+                    notes[k].seconds *= 1.0f + 0.04f * (float) ((((int) k + (int) passes.size()) % 5) - 2);
+                raw = test::singMelody (notes, sr, Tenor, 30.0f, 21 + 12 * (uint32_t) passes.size());
+            }
+            else
+            {
+                test::Audio pa;
+                std::string e;
+                if (! test::readWav (path, pa, e) || std::abs (pa.sampleRate - sr) > 1.0)
+                {
+                    std::fprintf (stderr, "error: %s: %s\n", path.c_str(), e.empty() ? "not at the input's sample rate" : e.c_str());
+                    return 1;
+                }
+                raw.assign ((size_t) pa.length(), 0.0f);
+                for (const auto& ch : pa.channels)
+                    for (size_t i = 0; i < raw.size(); ++i)
+                        raw[i] += ch[i] / (float) pa.channels.size();
+            }
+            PassAlignment info;
+            passes.push_back (alignPass (mono.data(), n, raw.data(), (int64_t) raw.size(), sr, nullptr, &info));
+            std::printf ("pass %d: starts at %+.2f s, sings %.0f%% of the take, moved up to %.2f s, %+.1f dB\n", (int) passes.size() + 1,
+                         (double) info.offset / sr, info.coverage * 100.0, info.drift, info.gainDb);
+        }
+        std::vector<const float*> passAudio;
+        for (const auto& pa : passes)
+            passAudio.push_back (pa.data());
+
         RenderedStems stems;
-        if (! renderTake (mono.data(), n, sr, p, score, stems, [] (float f) { std::printf ("\rrendering %3d%%", (int) (f * 100)); std::fflush (stdout); }, nullptr, voicesPtr))
+        if (! renderTake (mono.data(), n, sr, p, score, stems, [] (float f) { std::printf ("\rrendering %3d%%", (int) (f * 100)); std::fflush (stdout); }, nullptr, voicesPtr, passAudio))
         {
             std::fprintf (stderr, "render failed\n");
             return 1;

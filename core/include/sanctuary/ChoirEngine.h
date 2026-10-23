@@ -11,6 +11,7 @@
 #include "Effects.h"
 #include "Harmonizer.h"
 #include "Lyrics.h"
+#include "Passes.h"
 #include "Psola.h"
 #include "SampleSet.h"
 #include "VoicePrints.h"
@@ -192,6 +193,16 @@ public:
         from the start of the text whenever it changes or the host starts playing. Call from the
         audio thread; the script must stay alive while it is in use. */
     void setLyrics (const LyricScript* script) noexcept;
+    /** More passes of the input (the same part sung again, lined up with it) for this block:
+        in Words mode the singers are spread over the input and the passes, so the choir sings
+        real doubles (other voices ignore them). Same timeline as the input; call before
+        process(), the pointers are read during that call only. A different count spreads the
+        singers again. */
+    void setPasses (const float* const* passes, int count) noexcept
+    {
+        passInputs = passes;
+        passCount = passes != nullptr ? std::clamp (count, 0, kMaxExtraPasses) : 0;
+    }
     /** Side-chain audio for this block (the band, keys or a backing track), or nullptr. Call
         before process(); the pointers are used during that call only. */
     void setSidechain (const float* left, const float* right) noexcept { scL = left; scR = right; }
@@ -237,6 +248,10 @@ private:
     void updateSingerControl (Singer& s, const ControlFrame& cf, float dt);
     void refreshVowelFormants();
     void setSingerVowel (Singer& s, VocalType vt);
+    /** The PSOLA analyser a singer sings from (the input's or a pass's), and how far behind the
+        input's that one's timeline runs. */
+    const PsolaAnalyzer& sourceOf (const Singer& s, int64_t& base) const noexcept;
+    void spreadOverPasses();
     void articulate (Singer& s, const Articulation& a0, const Articulation& a1, float* x, int n);
     /** Words mode: the singer's voice print, at the Voices amount. */
     void applyVoicePrint (Singer& s);
@@ -260,6 +275,17 @@ private:
 
     PitchTracker tracker;
     PsolaAnalyzer analyzer;
+
+    // The other passes (multi-take): each analysed like the input, from when it was added.
+    struct PassSource
+    {
+        PitchTracker tracker;
+        PsolaAnalyzer analyzer;
+        int64_t base = 0;   // input samples written when this pass started
+    };
+    std::array<PassSource, kMaxExtraPasses> passSources;
+    const float* const* passInputs = nullptr;
+    int passCount = 0, activePasses = 0;
     LiveHarmonizer harmonizer;
     KeyTracker keyTracker;
     GlottalTables glottal;

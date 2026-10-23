@@ -69,6 +69,22 @@ Other buttons:
 
 The learned take is saved inside your project. If you reopen the project at another sample rate, Sanctuary converts the take so it stays in tune and in time.
 
+### Multi-take choir: sing the part again
+
+In **Words** mode the choir sings your own voice. One take gives every singer the same breaths, the same timing and the same colour; real choirs sound bigger because every singer is a different performance. So sing the part again, up to four times in all, and the Words choir sings from every pass.
+
+Open **Settings → Multi-Take** after LEARN:
+
+1. Press **● RECORD** on the next empty card.
+   - In your DAW: press play from a bar or two before the take and sing the part again, on the same track. It stops when your DAW stops, like LEARN.
+   - In the standalone app: your take plays through the choir from the top for you to sing along with. Press **■ STOP** when you're done.
+2. Sanctuary lines the pass up with your take, note by note ("LINING UP PASS 2 WITH YOUR TAKE..."). Sing it as you normally would: it follows your timing, and a pass that's a little early, late or quieter is fine. The card then shows how much of the take the pass sings and how far it had to be moved.
+3. In each section the singers take the passes in turn: with three passes, a third of the sopranos sing from each one, and the same for every section. *Who sings from which pass* shows it.
+
+**LOAD…** adds another recording of the same part from a file instead. **REMOVE** takes a pass away. A pass that leaves out most of the part, or sings a different one, is turned down ("That pass does not follow the take").
+
+The passes are saved with the project, and taking them away or adding one makes RENDER glow in Words mode. They only change the Words choir: the vowel modes sound the same with or without them. **Use Words** on the page switches Vocal Type to Words. A new take starts again with one pass.
+
 ### Chords & Stems: change a chord, drag the parts into your DAW
 
 Click the plaque after LEARN (*LEARNED 0:43 · ...*), or **Settings → Chords & Stems**. The page shows the take's chords in a lane, with your melody underneath and where the take starts in the song (e.g. *starts at bar 17*).

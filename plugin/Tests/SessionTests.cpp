@@ -540,6 +540,150 @@ static void voicePackLoads()
     }
 }
 
+static int passCount (const LearnSession& s)
+{
+    const auto* list = s.getStatus().getProperty ("passes", {}).getArray();
+    return list != nullptr ? list->size() : 0;
+}
+
+static void passesMakeAMultiTakeChoir()
+{
+    std::printf ("More passes of the take: recorded with the song or along with the take, loaded, saved, rendered\n");
+    const double rate = 48000.0;
+    const int64_t songStart = 2 * 48000;
+    std::vector<sc::test::SungNote> notes;
+    for (int r = 0; r < 2; ++r)
+        for (const auto& n : sc::test::cMajorScale (60.0f, 0.35f))
+            notes.push_back (n);
+    const auto take = sc::test::singMelody (notes, rate, 1);
+    // The same part sung again: the notes a little longer or shorter, another voice.
+    auto again = [&] (int seed)
+    {
+        auto other = notes;
+        for (size_t k = 0; k < other.size(); ++k)
+            other[k].seconds *= 1.0f + 0.05f * (float) ((((int) k + seed) % 5) - 2);
+        return sc::test::singMelody (other, rate, 1, 30.0f, (uint32_t) seed);
+    };
+
+    MemoryBlock beforePass, withPass;
+    {
+        Rig rig (rate);
+        rig.params.vocalType = sc::VocalType::Words;
+        rig.session.standalone = false;
+        rig.session.startRecording();
+        rig.singInSong (take, songStart, 120.0, rate);
+        rig.session.stopRecording();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "the take is learned in time with the song");
+        {
+            MemoryOutputStream out (beforePass, false);
+            rig.session.writeState (out);
+        }
+
+        // Another pass, from half a second before the take started in the song.
+        rig.session.togglePass();
+        check ((bool) rig.session.getStatus().getProperty ("recordingPass", false), "PASS records");
+        std::vector<float> pass ((size_t) (rate * 0.5), 0.0f);
+        const auto sung = again (21);
+        pass.insert (pass.end(), sung.begin(), sung.end());
+        rig.singInSong (pass, songStart - (int64_t) (rate * 0.5), 120.0, rate);
+        check (rig.session.getStatus().getProperty ("text", "").toString().contains ("RECORDING PASS 2"), "shown as the second pass");
+        rig.session.togglePass();
+        check ((bool) rig.session.getStatus().getProperty ("aligningPass", false), "lined up with the take in the background");
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned" && passCount (rig.session) == 1; }), "the pass is added");
+        const String text = rig.session.getStatus().getProperty ("text", "").toString();
+        std::printf ("  %s\n", text.toRawUTF8());
+        check (text.contains ("2 PASSES"), "the take now has two passes");
+        const var info = (*rig.session.getStatus().getProperty ("passes", {}).getArray())[0];
+        check ((float) info.getProperty ("coverage", 0.0f) > 0.8f, "the pass sings what the take sings");
+
+        // Playing the song: the pass comes with the input, sample for sample.
+        LearnSession::BlockInfo block;
+        block.hostPlaying = true;
+        block.hasPosition = true;
+        block.hostPosition = songStart + (int64_t) rate;
+        const sc::ScoreSource* score = nullptr;
+        const float* const* passes = nullptr;
+        int numPasses = 0;
+        rig.session.preparePlayback (block, 512, score, passes, numPasses);
+        float peak = 0.0f;
+        for (int i = 0; i < 512 && numPasses == 1; ++i)
+            peak = std::max (peak, std::abs (passes[0][i]));
+        check (score != nullptr && numPasses == 1 && peak > 0.01f, "the pass plays with the take");
+
+        {
+            MemoryOutputStream out (withPass, false);
+            rig.session.writeState (out);
+        }
+        // Undo and redo adding the pass: the same take, so nothing is learned again.
+        MemoryInputStream undo (beforePass, false);
+        rig.session.readState (undo);
+        check (phaseName (rig.session) == "learned" && passCount (rig.session) == 0, "undo takes the pass away");
+        MemoryInputStream redo (withPass, false);
+        rig.session.readState (redo);
+        check (phaseName (rig.session) == "learned" && passCount (rig.session) == 1, "redo brings it back");
+
+        // Rendered with the pass; taking it away puts the Words choir's render out of date.
+        rig.session.render();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "rendered"; }), "rendered with two passes");
+        rig.session.removePass (0);
+        check (passCount (rig.session) == 0, "the pass is removed");
+        check ((bool) rig.session.getStatus().getProperty ("stale", false) && phaseName (rig.session) == "learned", "the render is out of date");
+    }
+    {
+        // The project reopened: the pass comes back with the take.
+        Rig rig (rate);
+        rig.params.vocalType = sc::VocalType::Words;
+        MemoryInputStream in (withPass, false);
+        rig.session.readState (in);
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned again from the project");
+        check (passCount (rig.session) == 1, "with its pass");
+    }
+    {
+        // No song: the pass is sung along with the take, which plays through the choir.
+        Rig rig (rate);
+        rig.params.vocalType = sc::VocalType::Words;
+        rig.session.startRecording();
+        rig.sing (take);
+        rig.session.stopRecording();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned");
+        rig.session.togglePass();
+        check ((bool) rig.session.getStatus().getProperty ("previewing", false), "the take plays to sing along with");
+        rig.sing (again (33));
+        rig.session.togglePass();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned" && passCount (rig.session) == 1; }), "the pass is added");
+        check (! (bool) rig.session.getStatus().getProperty ("previewing", false), "and the take stops playing");
+
+        // One more from a file, 0.8 s late and quieter.
+        std::vector<float> late ((size_t) (rate * 0.8), 0.0f);
+        const auto sung = again (44);
+        late.insert (late.end(), sung.begin(), sung.end());
+        for (auto& v : late) v *= 0.5f;
+        const File file = rig.exports.getChildFile ("pass3.wav");
+        rig.exports.createDirectory();
+        {
+            WavAudioFormat wav;
+            std::unique_ptr<OutputStream> stream = std::make_unique<FileOutputStream> (file);
+            auto writer = wav.createWriterFor (stream, AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (1).withBitsPerSample (24));
+            const float* ch[] = { late.data() };
+            check (writer != nullptr && writer->writeFromFloatArrays (ch, 1, (int) late.size()), "pass written to a file");
+        }
+        rig.session.loadPassFile (file);
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned" && passCount (rig.session) == 2; }), "a pass loaded from a file");
+
+        // Only the first few notes: not the same part.
+        const int before = (int) rig.session.getStatus().getProperty ("noticeId", 0);
+        std::vector<float> part (take.begin(), take.begin() + (long) (take.size() / 4));
+        part.resize (take.size(), 0.0f);
+        rig.session.togglePass();
+        rig.sing (part);
+        rig.session.togglePass();
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned" && (int) rig.session.getStatus().getProperty ("noticeId", 0) > before; }),
+               "a pass that leaves out most of the part is turned down");
+        std::printf ("  %s\n", rig.session.getStatus().getProperty ("notice", "").toString().toRawUTF8());
+        check (passCount (rig.session) == 2, "and not added");
+    }
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI juce;
@@ -550,6 +694,7 @@ int main()
     reloadWaitsForVoicesAndSkipsSameTake();
     learnRecordsTheBand();
     chordLaneAndDragOut();
+    passesMakeAMultiTakeChoir();
     std::printf ("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

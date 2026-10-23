@@ -157,7 +157,9 @@
       ["Kids & Crowds", "Church Sing-Along"],
     ].map(([category, name]) => ({ name, category, factory: true }));
     let presetIndex = 0;
-    const learn = { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", progress: 0, hasTake: false, hasStems: false, stale: false, previewing: false };
+    const learn = { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", progress: 0, hasTake: false, hasStems: false, stale: false, previewing: false,
+                    seconds: 16, passes: [], maxPasses: 3, recordingPass: false, aligningPass: false, notice: "", noticeId: 0 };
+    const learnedText = () => "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES" + (learn.passes.length ? "  \u00b7  " + (learn.passes.length + 1) + " PASSES" : "");
     let learnTimer = null;
 
     const voices = { loading: false, name: "Sanctuary Voices", text: "4 SECTIONS \u00b7 5 VOWELS \u00b7 753 NOTES", error: "", bundled: true, usingBundled: true };
@@ -248,27 +250,45 @@
       });
     }
 
-    function startLearnSim() {
+    function startLearnSim(pass) {
       clearInterval(learnTimer);
-      learn.phase = "recording"; learn.armed = false;
+      learn.phase = "recording"; learn.armed = false; learn.recordingPass = !!pass;
       let secs = 0;
       learnTimer = setInterval(() => {
         secs += 0.25;
-        learn.text = "LEARNING 0:" + String(Math.floor(secs)).padStart(2, "0") + "  - press LEARN to finish";
+        const time = "0:" + String(Math.floor(secs)).padStart(2, "0");
+        learn.text = pass ? "RECORDING PASS " + (learn.passes.length + 2) + "  " + time + "  - press STOP to finish" : "LEARNING " + time + "  - press LEARN to finish";
         status();
       }, 250);
       status();
     }
     function stopLearnSim() {
       clearInterval(learnTimer);
-      learn.phase = "analysing"; learn.text = "LISTENING TO YOUR TAKE..."; status();
+      if (learn.recordingPass) { addPassSim(); return; }
+      learn.phase = "analysing"; learn.text = "LISTENING TO YOUR TAKE..."; learn.passes = []; status();
       setTimeout(() => {
         learn.phase = "learned"; learn.hasTake = true; learn.stale = learn.hasStems;
-        learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES";
+        learn.text = learnedText();
         makeLane();
         status();
         sendLane();
       }, 1400);
+    }
+    // More passes of the take: lined up, then the Words choir's render is out of date.
+    function addPassSim() {
+      learn.recordingPass = false;
+      learn.phase = "analysing"; learn.aligningPass = true; learn.text = "LINING UP PASS " + (learn.passes.length + 2) + " WITH YOUR TAKE..."; status();
+      setTimeout(() => {
+        learn.aligningPass = false;
+        learn.passes.push({ coverage: [0.97, 0.94, 0.99][learn.passes.length] || 0.95, drift: [0.14, 0.21, 0.09][learn.passes.length] || 0.1 });
+        passesChanged();
+      }, 1100);
+    }
+    function passesChanged() {
+      learn.phase = learn.hasStems && !learn.stale ? "rendered" : "learned";
+      if (learn.hasStems && values.vocalType === 6) { learn.stale = true; learn.phase = "learned"; }
+      learn.text = learnedText() + (learn.hasStems && learn.stale ? "  \u00b7  RENDER TO UPDATE" : "");
+      status();
     }
     function renderSim() {
       if (!learn.hasTake) { emit("toast", { text: "Learn or load a vocal take first" }); return; }
@@ -280,7 +300,7 @@
         if (learn.progress >= 1) {
           clearInterval(learnTimer);
           learn.phase = "rendered"; learn.hasStems = true; learn.stale = false; exportState = "stale";
-          learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES  \u00b7  " + Math.round(values.choirSize / 100 * 40) + " SINGERS RENDERED IN 3.1 S";
+          learn.text = learnedText() + "  \u00b7  " + Math.round(values.choirSize / 100 * 40) + " SINGERS RENDERED IN 3.1 S";
         }
         status();
       }, 120);
@@ -295,13 +315,22 @@
         setParam(msg.id, msg.value);
         if (learn.hasStems && ["harmonyMode", "key", "scale", "style", "vocalType", "choirSize"].includes(msg.id)) {
           learn.stale = true; if (learn.phase === "rendered") learn.phase = "learned";
-          learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES  \u00b7  RENDER TO UPDATE";
+          learn.text = learnedText() + "  \u00b7  RENDER TO UPDATE";
           status();
         }
       } else if (msg.type === "cmd") {
         switch (msg.name) {
-          case "learn": learn.phase === "recording" ? stopLearnSim() : startLearnSim(); break;
-          case "clear": clearInterval(learnTimer); Object.assign(learn, { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", hasTake: false, hasStems: false, stale: false }); exportState = "none"; status(); sendLane(); break;
+          case "learn": learn.phase === "recording" ? stopLearnSim() : startLearnSim(false); break;
+          case "clear": clearInterval(learnTimer); Object.assign(learn, { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", hasTake: false, hasStems: false, stale: false, passes: [], recordingPass: false }); exportState = "none"; status(); sendLane(); break;
+          case "pass":
+            if (learn.phase === "recording") { if (learn.recordingPass) stopLearnSim(); }
+            else if (!learn.hasTake) { learn.notice = "Learn or load a take first"; learn.noticeId++; status(); }
+            else if (learn.passes.length < 3) startLearnSim(true);
+            break;
+          case "loadPass":
+            if (learn.hasTake && learn.passes.length < 3) { emit("toast", { text: "In the plugin this opens a file browser for another recording of the part" }); setTimeout(addPassSim, 300); }
+            break;
+          case "removePass": learn.passes.splice(msg.index, 1); passesChanged(); break;
           case "lane": sendLane(); break;
           case "chordOptions": if (laneSpans) chordOptions(msg.s, msg.e); break;
           case "chordLock": case "chordUnlock": {
@@ -310,7 +339,7 @@
               const v = msg.name === "chordUnlock" ? null : vocab.find((c) => c[1] === msg.root && c[2].join() === msg.iv.join());
               Object.assign(sp, v ? { name: v[0], root: v[1], iv: v[2], locked: true } : { name: sp.original, locked: false });
               const o = vocab.find((c) => c[0] === sp.name); if (o) { sp.root = o[1]; sp.iv = o[2]; }
-              if (learn.hasStems) { learn.stale = true; learn.phase = "learned"; learn.text = "LEARNED 0:16 \u00b7 C MAJOR \u00b7 4 PHRASES \u00b7 16 NOTES  \u00b7  RENDER TO UPDATE"; }
+              if (learn.hasStems) { learn.stale = true; learn.phase = "learned"; learn.text = learnedText() + "  \u00b7  RENDER TO UPDATE"; }
               status(); sendLane();
             }
             break;

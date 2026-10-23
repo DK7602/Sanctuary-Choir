@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const { Params, BigKnob, Dropdown, Menu, hiDpiCanvas, stageRect, noteName } = window.SCW;
-  const { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords } = window.SCPages;
+  const { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords, buildPasses } = window.SCPages;
 
   // Each venue has its own room and choir; monks sing Gregorian chant in the abbey.
   const ROOMS = ["cathedral", "abbey", "chapel", "hall", "gospel", "studio"];
@@ -315,12 +315,12 @@
   //==========================================================================
   // Tabs and pages
   // Pages opened from another page (not a tab) keep that page's tab lit.
-  const SUB_PAGES = { take: "settings", stage: "mix", words: "settings" };
+  const SUB_PAGES = { take: "settings", stage: "mix", words: "settings", passes: "settings" };
   function setTab(tab) {
     if (!SUB_PAGES[tab] && !SUB_PAGES[state.tab]) state.returnTab = state.tab;
     state.tab = tab;
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === (SUB_PAGES[tab] || tab)));
-    ["mix", "fx", "settings", "take", "stage", "words"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
+    ["mix", "fx", "settings", "take", "stage", "words", "passes"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
     if (tab === "take") SC.send({ type: "cmd", name: "lane" });
     SC.send({ type: "cmd", name: "tab", value: tab });
     Menu.close();
@@ -426,12 +426,15 @@
     $("loftHit").addEventListener("click", () => setTab("stage"));
     buildFx($("page-fx"));
     const settingsInfo = { version: info.version, latencyMs: info.latencyMs, liveChoirMs: info.liveChoirMs, standalone: !!info.standalone,
-                           openTake: () => setTab("take"), openWords: () => setTab("words") };
+                           openTake: () => setTab("take"), openWords: () => setTab("words"), openPasses: () => setTab("passes") };
     buildSettings($("page-settings"), settingsInfo);
     state.settingsInfo = settingsInfo;
     const wordsInfo = { close: () => setTab("settings") };
     buildWords($("page-words"), wordsInfo);
     state.wordsInfo = wordsInfo;
+    const passesInfo = { close: () => setTab("settings"), standalone: !!info.standalone, maxSingers: info.maxSingers };
+    buildPasses($("page-passes"), passesInfo);
+    state.passesInfo = passesInfo;
     const takeInfo = { toast, close: () => setTab(state.returnTab && !SUB_PAGES[state.returnTab] ? state.returnTab : "settings"), visible: () => state.tab === "take" };
     buildTake($("page-take"), takeInfo);
     state.takeInfo = takeInfo;
@@ -559,6 +562,12 @@
     plaque.title = plaque.classList.contains("clickable") ? "See the chords, choose others, and drag the stems into your DAW" : "";
     if (state.settingsInfo && state.settingsInfo.onStatus) state.settingsInfo.onStatus(st);
     if (state.wordsInfo && state.wordsInfo.onStatus) state.wordsInfo.onStatus(st);
+    if (state.passesInfo && state.passesInfo.onStatus) state.passesInfo.onStatus(st);
+    // One-off messages from the take (a pass that could not be used).
+    if (typeof l.noticeId === "number") {
+      if (state.noticeId !== undefined && l.noticeId > state.noticeId && l.notice) toast(l.notice, 5500);
+      state.noticeId = l.noticeId;
+    }
     if (state.takeInfo && state.takeInfo.onTakeStatus) state.takeInfo.onTakeStatus(st);
     clearTimeout(state.plaqueTimer);
     if (!busy) state.plaqueTimer = setTimeout(() => onStatus(state.status), 7100);
@@ -570,10 +579,10 @@
     if (SC.isPlugin || $("previewPanel")) return;
     // [file, label, beats per second, Choir Size while it plays]
     const demos = [["demo-input.mp3", "Solo voice", 2], ["demo-ah.mp3", "Recorded choir \u00b7 Ah", 2, 70], ["demo-gospel.mp3", "Gospel choir \u00b7 Words", 2, 45],
-                   ["demo-gospel-plain.mp3", "Words \u00b7 your voice only", 2, 45], ["demo-kyrie.mp3", "Sung words \u00b7 Kyrie", 1.25, 80]];
+                   ["demo-passes.mp3", "Words \u00b7 four passes", 2, 45], ["demo-gospel-plain.mp3", "Words \u00b7 your voice only", 2, 45], ["demo-kyrie.mp3", "Sung words \u00b7 Kyrie", 1.25, 80]];
     const panel = document.createElement("div");
     panel.id = "previewPanel";
-    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. "Your voice only" is the gospel choir with Real Voices at 0, every singer your own voice. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
+    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. "Four passes" is the same choir singing from the take and three more passes of it. "Your voice only" is the gospel choir with Real Voices at 0, every singer your own voice. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
     const row = panel.querySelector(".pp-demos");
     const audio = new Audio();
     audio.preload = "none";

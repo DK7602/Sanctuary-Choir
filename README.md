@@ -55,6 +55,7 @@
 - **Your own choir**: record a few held notes per section and the vowel modes sing with those real voices ([guide](docs/RECORDING_YOUR_CHOIR.md)).
 - **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
 - **Real voices in Words mode**: each singer takes on the vocal tract, tone and vibrato of one of 19 real singers (measured from VocalSet), so the choir sounds like different people singing your words. No AI involved.
+- **Multi-take choir**: sing the part two to four times and the Words choir sings from every pass, lined up note by note with your take (dynamic time warping on the voice's sound, then a time-stretch that leaves the pitch alone). Real doubles with their own breaths and timing, not copies of one voice.
 - **Chord Speed** and a one-click **key lock** for the detected key.
 - **Chord lane**: after LEARN, see every chord of the take over your melody. Click one for ranked alternatives (with how well each fits the melody), pick one, and the harmony around it is worked out again. Chosen chords are kept with the project.
 - **Drag-out stems and MIDI**: drag the parts (SATB on channels 1–4, melody, named chords) as MIDI, or the rendered Full Choir and section stems as 24-bit WAVs, straight into your DAW. They line up when dropped at the start of the song. Or save them all to a folder.
@@ -115,7 +116,7 @@ input ─► YIN pitch tracker ─► harmoniser ─────────► 
 
 | Folder | What's inside |
 | --- | --- |
-| `core/` | The DSP engine in plain C++20 (no framework). Pitch tracking, PSOLA, vowel synthesis, music theory and voice leading, harmoniser, reverb, Learn analysis and offline rendering. |
+| `core/` | The DSP engine in plain C++20 (no framework). Pitch tracking, PSOLA, vowel synthesis, music theory and voice leading, harmoniser, reverb, Learn analysis, lining up extra passes, and offline rendering. |
 | `plugin/` | The JUCE wrapper: parameters, presets, the Learn session (timeline capture, background analysis/render, playback, saving takes with the project) and the WebView editor. |
 | `ui/` | The interface: HTML/CSS/JS drawn over artwork taken from the design mockups. Opening `ui/index.html` through a local web server runs it in a browser with a simulated engine. |
 | `tools/art/` | Scripts that turn the mockups into the UI skin and the singer sprites. |

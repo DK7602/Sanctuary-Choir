@@ -395,6 +395,27 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
                                   }
                               });
     }
+    else if (name == "pass")
+        learn.togglePass();
+    else if (name == "loadPass")
+    {
+        if (! learn.hasTake())
+        {
+            toast ("Learn or load a take first");
+            return;
+        }
+        chooser = std::make_unique<FileChooser> ("Load another pass of the take", File::getSpecialLocation (File::userMusicDirectory),
+                                                 "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+                              [this] (const FileChooser& fc)
+                              {
+                                  const auto file = fc.getResult();
+                                  if (file.existsAsFile())
+                                      processor.getLearn().loadPassFile (file);
+                              });
+    }
+    else if (name == "removePass")
+        learn.removePass ((int) message.getProperty ("index", -1));
     else if (name == "voicesLoad")
     {
         chooser = std::make_unique<FileChooser> ("Choose the folder with your choir recordings", processor.getVoices().getFolder().exists()

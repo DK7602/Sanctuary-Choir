@@ -227,6 +227,8 @@ struct ChoirEngine::Singer
     float silentFor = 1.0f;      // seconds since the singer last sang
     bool wasSinging = false;
 
+    int source = 0;              // Words mode: 0 sings the input, k the k-th extra pass
+
     // Words mode: the real singer this one sounds like (a voice print)
     int print = -1, printRound = 0;
     float printFormant = 1.0f;   // formant scale, at the Voices amount
@@ -266,6 +268,13 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     const int maxSingerDelay = (int) (sr * 0.075);
     const int echoHistory = (int) (sr * (kMaxEchoSeconds + 1.0));
     analyzer.prepare (sr, maxPeriod, latency + maxSingerDelay + kChunk * 2 + echoHistory);
+    for (auto& ps : passSources)
+    {
+        ps.tracker.prepare (sr, ts);
+        ps.analyzer.prepare (sr, maxPeriod, latency + maxSingerDelay + kChunk * 2 + echoHistory);
+        ps.base = 0;
+    }
+    activePasses = 0;
 
     glottal.prepare (sr);
 
@@ -337,6 +346,13 @@ void ChoirEngine::reset()
     shapedVoice = -2;
     tracker.reset();
     analyzer.reset();
+    for (auto& ps : passSources)
+    {
+        ps.tracker.reset();
+        ps.analyzer.reset();
+        ps.base = 0;
+    }
+    activePasses = 0;
     harmonizer.reset();
     keyTracker.reset();
     controlCount = 0;
@@ -787,7 +803,9 @@ void ChoirEngine::allocateSingers()
                     singer.vowelOverride = -1;
                     const float delayMs = singer.rDelay * style.timingMs * params.humanize / 100.0f;
                     singer.delay = singer.pendingDelay = (int) (delayMs * 0.001f * (float) sr);
-                    singer.psola.reset ((double) (analyzer.getWritten() - latency - activeEchoOffset - singer.delay));
+                    int64_t base = 0;
+                    const auto& an = sourceOf (singer, base);
+                    singer.psola.reset ((double) (an.getWritten() - latency - activeEchoOffset - singer.delay));
                 }
                 singer.active = true;
             }
@@ -881,6 +899,35 @@ void ChoirEngine::applyVoicePrint (Singer& s)
         }
     }
     s.printEqOn = true;
+}
+
+const PsolaAnalyzer& ChoirEngine::sourceOf (const Singer& s, int64_t& base) const noexcept
+{
+    if (s.source > 0 && s.source <= activePasses)
+    {
+        const auto& ps = passSources[(size_t) s.source - 1];
+        base = ps.base;
+        return ps.analyzer;
+    }
+    base = 0;
+    return analyzer;
+}
+
+void ChoirEngine::spreadOverPasses()
+{
+    // Each section's singers take the input and the passes in turn, starting from a different
+    // one in each section, so every pass is heard in every section.
+    for (auto& sp : singers)
+    {
+        Singer& s = *sp;
+        const int source = activePasses > 0 ? (s.index + s.section) % (activePasses + 1) : 0;
+        if (source == s.source)
+            continue;
+        s.source = source;
+        int64_t base = 0;
+        const auto& an = sourceOf (s, base);
+        s.psola.reset ((double) (an.getWritten() - latency - activeEchoOffset - s.delay));
+    }
 }
 
 void ChoirEngine::setSingerVowel (Singer& s, VocalType vt)
@@ -1110,7 +1157,9 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
     if (s.pendingDelay != s.delay && s.gate < 0.001f && s.amp < 0.001f)
     {
         s.delay = s.pendingDelay;
-        s.psola.reset ((double) (analyzer.getWritten() - latency - activeEchoOffset - s.delay));
+        int64_t base = 0;
+        const auto& an = sourceOf (s, base);
+        s.psola.reset ((double) (an.getWritten() - latency - activeEchoOffset - s.delay));
     }
 
     const int sec = s.section;
@@ -1265,6 +1314,22 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         keyTonic = seed % 12;
     }
 
+    // Passes added or taken away: start the new ones from here, and spread the singers again.
+    // Only Words singers sing from the passes, so other voices leave them unanalysed.
+    const int wantedPasses = params.vocalType == VocalType::Words ? passCount : 0;
+    if (wantedPasses != activePasses)
+    {
+        for (int k = activePasses; k < wantedPasses; ++k)
+        {
+            auto& ps = passSources[(size_t) k];
+            ps.tracker.reset();
+            ps.analyzer.reset();
+            ps.base = analyzer.getWritten();
+        }
+        activePasses = wantedPasses;
+        spreadOverPasses();
+    }
+
     // Reconfigure on parameter changes that affect the singers.
     allocateSingers();
     const bool styleChanged = params.style != lastStyle || params.ensemble != lastEnsemble || params.singing != lastSinging;
@@ -1304,6 +1369,14 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
             analyzer.captureFreeze (analyzer.getWritten() - latency, (int) (0.25 * sr));
         else
             analyzer.releaseFreeze();
+        for (int k = 0; k < activePasses; ++k)
+        {
+            auto& an = passSources[(size_t) k].analyzer;
+            if (params.freeze)
+                an.captureFreeze (an.getWritten() - latency, (int) (0.25 * sr));
+            else
+                an.releaseFreeze();
+        }
     }
 
     // Song position for the rhythm effects: the host's while it plays, otherwise free running.
@@ -1375,6 +1448,21 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 
     analyzer.pushInput (mono.data(), c);
     analyzer.updateMarks();
+
+    // The other passes: analysed the same way, sample for sample with the input.
+    for (int k = 0; k < activePasses; ++k)
+    {
+        auto& ps = passSources[(size_t) k];
+        float pass[kChunk];
+        const float* src = passInputs != nullptr ? passInputs[k] : nullptr;
+        for (int i = 0; i < c; ++i)
+            pass[i] = src != nullptr && isFiniteSample (src[offset + i]) ? src[offset + i] : 0.0f;
+        ps.tracker.push (pass, c);
+        for (int f = 0; f < ps.tracker.getNumNewFrames(); ++f)
+            ps.analyzer.addPitchFrame (ps.tracker.getNewFrame (f));
+        ps.analyzer.pushInput (pass, c);
+        ps.analyzer.updateMarks();
+    }
     const int64_t chunkStart = analyzer.getWritten() - c;
     const int64_t tOut = chunkStart - choirLatency();
     const int64_t tWords = chunkStart - latency;     // PSOLA grains always need the full lookahead
@@ -1433,7 +1521,9 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 activeEchoOffset = wantedOffset;
                 for (auto& sp : singers)
                 {
-                    sp->psola.reset ((double) (tWords - wantedOffset - sp->delay));
+                    int64_t base = 0;
+                    sourceOf (*sp, base);
+                    sp->psola.reset ((double) (tWords - base - wantedOffset - sp->delay));
                     sp->amp = sp->gate = 0.0f;
                 }
                 duckFrom = duckTo = 1.0f;
@@ -1462,11 +1552,14 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         // of the others (a section going silent keeps its last value while it fades out).
         std::array<float, NumSections> normFrom {}, normTo {};
         const float normK = 1.0f - std::exp (-dt / 0.06f);
+        // The singers on one pass add up nearly in phase; different passes add up only in
+        // power, and would sound quieter for it: lift them by what that costs.
+        const float passLift = words && activePasses > 0 ? std::sqrt ((float) (activePasses + 1)) : 1.0f;
         for (int s = 0; s < NumSections; ++s)
         {
             float& cur = sectionNorm[(size_t) s];
             const int count = sectionCount[(size_t) s];
-            const float target = count > 0 ? 0.8f / std::sqrt ((float) count) : (cur > 0.0f ? cur : 0.5f);
+            const float target = count > 0 ? 0.8f * passLift / std::sqrt ((float) count) : (cur > 0.0f ? cur : 0.5f);
             if (cur <= 0.0f)
                 cur = target;
             normFrom[(size_t) s] = cur;
@@ -1523,7 +1616,9 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             std::fill (scratch.begin(), scratch.begin() + c, 0.0f);
             if (words && ! cf.midiInstrument && s.syllable < 0)
             {
-                s.psola.render (analyzer, tSinger, c, scratch.data(), s.pctl, s.rng);
+                int64_t base = 0;
+                const auto& source = sourceOf (s, base);
+                s.psola.render (source, tSinger - base, c, scratch.data(), s.pctl, s.rng);
                 const float gateTarget = cf.sounding && ! silent ? 1.0f : 0.0f;
                 float peak = 0.0f;
                 for (int i = 0; i < c; ++i)

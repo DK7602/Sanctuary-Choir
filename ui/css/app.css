@@ -500,3 +500,39 @@ html, body {
 .mic-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .mic-name { font-family: "Montserrat", sans-serif; font-weight: 700; font-size: 12px; letter-spacing: 2.6px; color: #ffe7b0; }
 .mic-text { font-size: 14.5px !important; line-height: 1.3 !important; color: #a8977c !important; margin-top: auto !important; }
+
+/* ---------- Multi-take choir ---------- */
+.passes-intro { display: flex; align-items: center; gap: 16px; margin: -4px 0 10px; }
+.passes-intro p { flex: 1; font-size: 15.5px !important; line-height: 1.3 !important; margin: 0 !important; }
+.passes-mode {
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid rgba(255, 190, 120, 0.55); background: rgba(255, 170, 90, 0.08);
+  font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: 1.8px; color: #f0c48a;
+}
+.passes-mode.hidden { display: none; }
+.passes-cards { display: flex; gap: 12px; }
+.pass-card { flex: 1; min-width: 0; padding: 10px 14px 12px !important; display: flex; flex-direction: column; gap: 6px; min-height: 150px; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s; }
+.pass-card.filled { border-color: var(--pc-edge) !important; box-shadow: inset 0 0 24px var(--pc-wash); }
+.pass-card.empty { border-style: dashed !important; }
+.pass-card.later { opacity: 0.45; }
+.pass-card.recording { border: 1px solid rgba(255, 110, 90, 0.85) !important; box-shadow: 0 0 16px rgba(255, 90, 70, 0.35); animation: passRec 1.4s ease-in-out infinite; }
+@keyframes passRec { 50% { box-shadow: 0 0 6px rgba(255, 90, 70, 0.15); } }
+.pass-card.aligning .pass-wave { animation: passAlign 0.9s ease-in-out infinite alternate; }
+@keyframes passAlign { from { opacity: 0.35; } to { opacity: 1; } }
+.pass-head { display: flex; align-items: center; gap: 9px; }
+.pass-head h3 { margin: 0 !important; }
+.pass-num {
+  width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-family: "Montserrat", sans-serif; font-weight: 700; font-size: 11px; color: #1b1209;
+  background: var(--pc); box-shadow: 0 0 8px var(--pc-edge);
+}
+.pass-card.empty .pass-num { background: transparent; color: var(--pc); border: 1px solid var(--pc); box-shadow: none; }
+.pass-wave { display: block; margin: 2px 0; }
+.pass-text { font-size: 14.5px !important; line-height: 1.3 !important; margin: 0 !important; flex: 1; color: #cbbda5; }
+.pass-btns { gap: 6px; }
+.passes-lower { display: flex; gap: 12px; margin-top: 12px; }
+.passes-spread { width: 630px; padding: 10px 14px !important; box-sizing: border-box; }
+.passes-note { font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 10px; letter-spacing: 1.6px; color: var(--muted); }
+.passes-canvas { display: block; margin-top: 8px; }
+.passes-how { flex: 1; padding: 10px 14px !important; }
+.passes-how p { font-size: 14.5px !important; line-height: 1.32 !important; margin: 0 !important; color: #b9a98d; }

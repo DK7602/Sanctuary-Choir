@@ -261,8 +261,11 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     learn.processInput (chans, std::max (1, std::min (numIn, 2)), n, info);
 
     const sc::ScoreSource* score = nullptr;
-    const sc::StemPlayback* stems = learn.preparePlayback (info, n, score);
+    const float* const* passes = nullptr;
+    int numPasses = 0;
+    const sc::StemPlayback* stems = learn.preparePlayback (info, n, score, passes, numPasses);
     engine.setScore (score);
+    engine.setPasses (passes, numPasses);
     engine.setSampleSet (voices.getLive());
 
     const float* inL = buffer.getReadPointer (0);

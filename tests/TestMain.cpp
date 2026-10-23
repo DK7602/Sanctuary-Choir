@@ -5,6 +5,7 @@
 #include <sanctuary/ChordDetector.h>
 #include <sanctuary/FFT.h>
 #include <sanctuary/Learn.h>
+#include <sanctuary/Passes.h>
 
 #include <chrono>
 #include <algorithm>
@@ -2045,23 +2046,167 @@ TEST (wordsSingersTakeRealVoices)
     CHECK_NEAR (pitch, 60.0, 0.3);
 }
 
+TEST (passesLineUpWithTheTake)
+{
+    // A second pass of the same melody, sung a little differently: each note early or late,
+    // longer or shorter, quieter overall, started later in its recording. Lined up, its notes
+    // start where the take's do (within a few hundredths), with or without knowing the start.
+    const double sr = 48000.0;
+    const auto melody = test::amazingGrace();
+    std::vector<test::SungNote> other = melody;
+    for (size_t k = 0; k < other.size(); ++k)
+    {
+        const float wobble = (float) ((k * 7) % 5) - 2.0f;   // -2..2
+        other[k].seconds *= 1.0f + 0.05f * wobble;
+        other[k].gapAfter = std::max (0.0f, other[k].gapAfter + 0.02f * wobble);
+    }
+    const auto take = test::singMelody (melody, sr, Tenor, 20.0f, 7);
+    auto pass = test::singMelody (other, sr, Tenor, 32.0f, 21);
+    const int64_t lead = (int64_t) (0.35 * sr);
+    pass.insert (pass.begin(), (size_t) lead, 0.0f);
+    for (auto& v : pass) v *= 0.5f;
+
+    const auto takeNotes = analyseTake (take.data(), (int64_t) take.size(), sr).notes;
+    auto noteError = [&] (const std::vector<float>& y)
+    {
+        const auto notes = analyseTake (y.data(), (int64_t) y.size(), sr).notes;
+        std::vector<double> err;
+        for (const auto& t : takeNotes)
+        {
+            double best = 1e9;
+            for (const auto& n : notes)
+                best = std::min (best, std::abs ((double) (n.start - t.start)) / sr);
+            err.push_back (best);
+        }
+        std::sort (err.begin(), err.end());
+        return std::make_pair (err[err.size() / 2], err.back());
+    };
+    std::vector<float> raw (pass.begin() + lead, pass.end());
+    raw.resize (take.size(), 0.0f);
+    const auto before = noteError (raw);
+    for (bool known : { true, false })
+    {
+        PassAlignment info;
+        const int64_t hint = lead;
+        const auto aligned = alignPass (take.data(), (int64_t) take.size(), pass.data(), (int64_t) pass.size(), sr, known ? &hint : nullptr, &info);
+        CHECK (aligned.size() == take.size());
+        const auto after = noteError (aligned);
+        std::printf ("  %s start: note starts off by %.0f ms (worst %.0f) after lining up, %.0f ms (worst %.0f) before; "
+                     "found the start at %.2f s, coverage %.0f%%, drift %.2f s, level %+.1f dB\n",
+                     known ? "known" : "searched", after.first * 1000, after.second * 1000, before.first * 1000, before.second * 1000,
+                     (double) info.offset / sr, info.coverage * 100, info.drift, info.gainDb);
+        CHECK (after.first < 0.025);
+        CHECK (after.second < 0.08);
+        CHECK (std::abs ((double) info.offset / sr - 0.35) < 0.05);
+        CHECK (info.coverage > 0.9f);
+        CHECK_NEAR (info.gainDb, 6.0, 1.5);
+        // The pass keeps its own pitch.
+        CHECK_NEAR (medianPitch (aligned, sr, 1.0, 2.0), medianPitch (take, sr, 1.0, 2.0), 0.4);
+    }
+}
+
+TEST (passesSingInTheChoir)
+{
+    // Words mode with the take sung twice more: the singers are spread over the three passes.
+    // A pass identical to the take only lifts the level (passes are taken to be different
+    // voices); a silent pass silences its share of each section; real passes keep the level and
+    // every section on its note.
+    const double sr = 48000.0;
+    const auto melody = test::amazingGrace();
+    const auto take = test::singMelody (melody, sr, Tenor, 20.0f, 7);
+    const auto n = (int64_t) take.size();
+    const auto analysis = analyseTake (take.data(), n, sr);
+    HarmonySettings hs;
+    hs.key = 8;   // G
+    hs.mode = HarmonyMode::Unison;
+    hs.wordsMode = true;
+    const auto score = harmoniseTake (analysis, hs);
+    auto p = dryParams (VocalType::Words, HarmonyMode::Unison);
+    p.key = 8;
+    p.choirSize = 60.0f;
+
+    auto render = [&] (const std::vector<const float*>& passes)
+    {
+        RenderedStems st;
+        CHECK (renderTake (take.data(), n, sr, p, score, st, {}, nullptr, nullptr, passes));
+        return st;
+    };
+    auto rms = [] (const std::vector<float>& x, size_t a, size_t b)
+    {
+        double e = 0.0;
+        for (size_t i = a; i < b && i < x.size(); ++i) e += (double) x[i] * x[i];
+        return std::sqrt (e / (double) std::max<size_t> (1, b - a));
+    };
+    const size_t a = (size_t) (0.5 * sr), b = (size_t) (8.0 * sr);
+    const auto alone = render ({});
+
+    const std::vector<float> silent ((size_t) n, 0.0f);
+    const auto same = render ({ take.data(), take.data() });
+    const float lift = std::sqrt (3.0f);
+    double maxDiff = 0.0;
+    for (size_t i = a; i < b; ++i)
+        maxDiff = std::max (maxDiff, (double) std::abs (same.channels[Tenor * 2][i] - lift * alone.channels[Tenor * 2][i]));
+    const auto half = render ({ silent.data() });
+    const double drop = 20.0 * std::log10 (rms (half.channels[Tenor * 2], a, b) / rms (alone.channels[Tenor * 2], a, b));
+
+    std::vector<test::SungNote> other = melody;
+    for (size_t k = 0; k < other.size(); ++k)
+        other[k].seconds *= 1.0f + 0.04f * (float) (((k * 3) % 5) - 2);
+    const auto raw2 = test::singMelody (other, sr, Tenor, 30.0f, 21);
+    const auto raw3 = test::singMelody (melody, sr, Tenor, 26.0f, 33);
+    const auto pass2 = alignPass (take.data(), n, raw2.data(), (int64_t) raw2.size(), sr);
+    const auto pass3 = alignPass (take.data(), n, raw3.data(), (int64_t) raw3.size(), sr);
+    const auto three = render ({ pass2.data(), pass3.data() });
+    double num = 0.0, d1 = 0.0, d2 = 0.0;
+    for (size_t i = a; i < b; ++i)
+    {
+        const double x = alone.channels[Tenor * 2][i], y = three.channels[Tenor * 2][i];
+        num += x * y; d1 += x * x; d2 += y * y;
+    }
+    const double similarity = num / std::sqrt (d1 * d2 + 1e-20);
+    const double level = 20.0 * std::log10 (rms (three.channels[Tenor * 2], a, b) / rms (alone.channels[Tenor * 2], a, b));
+    std::printf ("  a pass like the take: %.1e apart; a silent pass: tenors %.1f dB; three passes: %.2f alike, level %+.1f dB\n",
+                 maxDiff, drop, similarity, level);
+    CHECK (maxDiff < 1.0e-4);
+    CHECK (drop < 0.0 && drop > -3.5);
+    CHECK (similarity < 0.9);
+    CHECK (std::abs (level) < 1.5);
+    // Every section stays on its note (an octave slip of the pitch tracker on a dense section
+    // is not a wrong note).
+    for (int sec = 0; sec < NumSections; ++sec)
+    {
+        const float d = medianPitch (three.channels[(size_t) sec * 2], sr, 1.0, 1.6) - medianPitch (alone.channels[(size_t) sec * 2], sr, 1.0, 1.6);
+        CHECK (std::abs (d - 12.0f * std::round (d / 12.0f)) < 0.3f);
+    }
+}
+
 TEST (performanceBudget)
 {
     const double sr = 48000.0;
     auto x = test::singMelody (test::cMajorScale (57.0f, 0.5f), sr, Tenor, 25.0f);
-    for (VocalType vt : { VocalType::Words, VocalType::Ah })
+    // Words with all four passes: three more pitch trackers and analysers on top.
+    std::vector<float> pass (x.size() + 4096, 0.0f);
+    std::copy (x.begin(), x.end(), pass.begin());
+    for (int passes : { 0, kMaxExtraPasses, -1 })
     {
+        const VocalType vt = passes >= 0 ? VocalType::Words : VocalType::Ah;
         ChoirEngine eng;
         eng.prepare (sr, 256);
         EngineParams p;
         p.vocalType = vt;
         p.choirSize = 100.0f;
         eng.setParams (p);
+        const float* src[kMaxExtraPasses] = {};
         const auto t0 = std::chrono::steady_clock::now();
-        auto y = runEngine (eng, x, sr);
+        auto y = runEngine (eng, x, sr, nullptr, [&] (int64_t pos)
+        {
+            for (auto& ptr : src) ptr = pass.data() + std::min<int64_t> (pos, (int64_t) x.size());
+            eng.setPasses (src, std::max (0, passes));
+        });
         const double secs = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
         const double audio = (double) x.size() / sr;
-        std::printf ("  %d singers (%s): %.1fx real time\n", kMaxSingers, vt == VocalType::Words ? "words" : "ah", audio / secs);
+        std::printf ("  %d singers (%s%s): %.1fx real time\n", kMaxSingers, vt == VocalType::Words ? "words" : "ah",
+                     passes > 0 ? ", four passes" : "", audio / secs);
         CHECK (audio / secs > 3.0);
     }
 }

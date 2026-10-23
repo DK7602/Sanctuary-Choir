@@ -146,7 +146,8 @@ using ProgressFn = std::function<void (float)>;
 /** Render the learned take with the given settings. Runs one engine per section in parallel. */
 bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParams& params,
                  const LearnedScore& score, RenderedStems& out, const ProgressFn& progress = {},
-                 const std::atomic<bool>* cancel = nullptr, const SampleSet* voices = nullptr);
+                 const std::atomic<bool>* cancel = nullptr, const SampleSet* voices = nullptr,
+                 const std::vector<const float*>& passes = {});
 
 /** Mix rendered stems through the choir bus and room (reverb). Returns stereo (2 channels). */
 std::array<std::vector<float>, 2> mixdownStems (const RenderedStems& stems, const EngineParams& params,

@@ -838,7 +838,7 @@ std::vector<ChordOption> chordAlternatives (const TakeAnalysis& take, const Lear
 //==============================================================================
 bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParams& paramsIn,
                  const LearnedScore& score, RenderedStems& out, const ProgressFn& progress,
-                 const std::atomic<bool>* cancel, const SampleSet* voices)
+                 const std::atomic<bool>* cancel, const SampleSet* voices, const std::vector<const float*>& passes)
 {
     out = RenderedStems{};
     if (n <= 0)
@@ -887,11 +887,21 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
         engine.setStemTap (taps);
 
         std::vector<float> in ((size_t) block), outL ((size_t) block), outR ((size_t) block);
+        // The other passes (lined up with the take, n samples each), block by block with it.
+        const int numPasses = std::min ((int) passes.size(), kMaxExtraPasses);
+        std::vector<std::vector<float>> passBlocks ((size_t) numPasses, std::vector<float> ((size_t) block));
+        std::array<const float*, kMaxExtraPasses> passPtrs {};
+        for (int k = 0; k < numPasses; ++k)
+            passPtrs[(size_t) k] = passBlocks[(size_t) k].data();
         for (int64_t pos = 0; pos + block <= total; pos += block)
         {
             if (cancelled (cancel)) { failed = true; return; }
             for (int i = 0; i < block; ++i)
                 in[(size_t) i] = pos + i < n ? x[pos + i] : 0.0f;
+            for (int k = 0; k < numPasses; ++k)
+                for (int i = 0; i < block; ++i)
+                    passBlocks[(size_t) k][(size_t) i] = pos + i < n && passes[(size_t) k] != nullptr ? passes[(size_t) k][pos + i] : 0.0f;
+            engine.setPasses (passPtrs.data(), numPasses);
             engine.process (in.data(), nullptr, outL.data(), outR.data(), block);
             sectionProgress[(size_t) section].store ((float) ((double) pos / (double) total));
         }

@@ -31,6 +31,7 @@ struct LearnSession::PlaybackData
     int takeId = 0;
     std::vector<sc::ChordLock> locks;   // the chords chosen by hand that the score was written with
     TakeTiming timing;
+    std::vector<Pass> passes;           // more passes of the part, lined up with the take
     int64_t length() const { return take != nullptr ? (int64_t) take->size() : 0; }
 };
 
@@ -63,6 +64,15 @@ static std::shared_ptr<StemSet> toStemSet (const sc::RenderedStems& r)
             s->data[ch][i] = (int16_t) jlimit (-32767, 32767, roundToInt (src[i] / scale));
     }
     return s;
+}
+
+static std::vector<float> resampled (const float* x, int64_t len, double ratio)
+{
+    const int outLen = (int) std::floor ((double) len / ratio);
+    std::vector<float> out ((size_t) std::max (0, outLen), 0.0f);
+    LagrangeInterpolator interp;
+    interp.process (ratio, x, out.data(), outLen, (int) len, 0);
+    return out;
 }
 
 static sc::HarmonySettings harmonySettingsFor (const sc::EngineParams& p)
@@ -116,6 +126,8 @@ void LearnSession::prepare (double sampleRate)
     sr = sampleRate;
     prepared = true;
     for (auto& ch : stemScratch)
+        ch.assign (16384, 0.0f);
+    for (auto& ch : passScratch)
         ch.assign (16384, 0.0f);
 }
 
@@ -232,9 +244,12 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
     }
 }
 
-const sc::StemPlayback* LearnSession::preparePlayback (const BlockInfo& info, int n, const sc::ScoreSource*& scoreOut)
+const sc::StemPlayback* LearnSession::preparePlayback (const BlockInfo& info, int n, const sc::ScoreSource*& scoreOut,
+                                                       const float* const*& passesOut, int& numPassesOut)
 {
     scoreOut = nullptr;
+    passesOut = nullptr;
+    numPassesOut = 0;
     PlaybackData* d = live.load (std::memory_order_acquire);
     if (d == nullptr || d->analysis == nullptr || d->analysis->isEmpty())
         return nullptr;
@@ -256,24 +271,43 @@ const sc::StemPlayback* LearnSession::preparePlayback (const BlockInfo& info, in
     scoreOut = adapter.get();
 
     const StemSet* stems = d->stems.get();
-    if (stems == nullptr || d->stale.load() || n > (int) stemScratch[0].size())
-        return nullptr;
-
-    // Output sample i corresponds to take time takePos + i - latency.
-    const int64_t t0 = takePos - info.latency;
-    for (size_t ch = 0; ch < stemScratch.size(); ++ch)
+    if (stems != nullptr && ! d->stale.load() && n <= (int) stemScratch[0].size())
     {
-        float* dst = stemScratch[ch].data();
-        const auto& src = stems->data[ch];
-        const float scale = stems->scale[ch];
-        for (int i = 0; i < n; ++i)
+        // Output sample i corresponds to take time takePos + i - latency.
+        const int64_t t0 = takePos - info.latency;
+        for (size_t ch = 0; ch < stemScratch.size(); ++ch)
         {
-            const int64_t k = t0 + i;
-            dst[i] = (k >= 0 && k < (int64_t) src.size()) ? (float) src[(size_t) k] * scale : 0.0f;
+            float* dst = stemScratch[ch].data();
+            const auto& src = stems->data[ch];
+            const float scale = stems->scale[ch];
+            for (int i = 0; i < n; ++i)
+            {
+                const int64_t k = t0 + i;
+                dst[i] = (k >= 0 && k < (int64_t) src.size()) ? (float) src[(size_t) k] * scale : 0.0f;
+            }
+            stemPlayback.sections[ch] = dst;
         }
-        stemPlayback.sections[ch] = dst;
+        return &stemPlayback;
     }
-    return &stemPlayback;
+
+    // Singing from the input: the take's other passes go with it, sample for sample.
+    if (! d->passes.empty() && n <= (int) passScratch[0].size())
+    {
+        for (size_t k = 0; k < d->passes.size() && k < passScratch.size(); ++k)
+        {
+            const auto& src = *d->passes[k].audio;
+            float* dst = passScratch[k].data();
+            for (int i = 0; i < n; ++i)
+            {
+                const int64_t t = takePos + i;
+                dst[i] = (t >= 0 && t < (int64_t) src.size()) ? src[(size_t) t] : 0.0f;
+            }
+            passPointers[k] = dst;
+            ++numPassesOut;
+        }
+        passesOut = passPointers.data();
+    }
+    return nullptr;
 }
 
 //==============================================================================
@@ -294,13 +328,20 @@ void LearnSession::toggleLearn()
 
 void LearnSession::startRecording()
 {
+    beginCapture (false);
+}
+
+void LearnSession::beginCapture (bool pass)
+{
     cancelWork();
     previewPlaying = false;
     renderWhenReady = false;
+    recordingPass = pass;
+    passAlongPreview = false;
 
     // Pre-allocate the first few chunks; the timer keeps allocating ahead. With a band on the
     // side-chain, it is recorded too, so LEARN can harmonise with its chords.
-    captureBand = bandConnected.load();
+    captureBand = ! pass && bandConnected.load();
     for (int i = 0; i < kChunksAhead; ++i)
         allocateChunk (i);
     captured = 0;
@@ -312,8 +353,178 @@ void LearnSession::startRecording()
     capturePpq = -1.0;
     const bool freeRunning = standalone || JUCEApplicationBase::isStandaloneApp();
     captureStart = freeRunning ? -1 : -2;   // -2 = armed, wait for the host to play
+    if (pass && freeRunning)
+    {
+        // No song to sing along with: the take plays through the choir from its start instead,
+        // and the pass is captured from the same moment.
+        passAlongPreview = true;
+        previewPos = 0;
+        previewPlaying = true;
+    }
     lastError.clear();
     setPhase (Phase::Recording);
+}
+
+void LearnSession::togglePass()
+{
+    if (phase.load() == Phase::Recording)
+    {
+        if (recordingPass)
+            stopRecording();
+        return;
+    }
+    if (! hasTake())
+        notify ("Learn or load a take first");
+    else if (getNumPasses() >= sc::kMaxExtraPasses)
+        notify ("A take can have " + String (sc::kMaxExtraPasses) + " more passes - remove one first");
+    else
+        beginCapture (true);
+}
+
+void LearnSession::loadPassFile (const File& file)
+{
+    if (! hasTake())
+    {
+        notify ("Learn or load a take first");
+        return;
+    }
+    if (getNumPasses() >= sc::kMaxExtraPasses)
+    {
+        notify ("A take can have " + String (sc::kMaxExtraPasses) + " more passes - remove one first");
+        return;
+    }
+    std::vector<float> mono;
+    if (! readAudioFile (file, mono))
+    {
+        notify ("Could not open " + file.getFileName());
+        return;
+    }
+    addPass (std::move (mono), sr, std::nullopt);
+}
+
+void LearnSession::removePass (int index)
+{
+    const Phase p = phase.load();
+    if (owned == nullptr || index < 0 || index >= (int) owned->passes.size()
+        || p == Phase::Recording || p == Phase::Analysing || p == Phase::Rendering)
+        return;
+    auto passes = owned->passes;
+    passes.erase (passes.begin() + index);
+    setPasses (std::move (passes));
+}
+
+int LearnSession::getNumPasses() const
+{
+    return owned != nullptr ? (int) owned->passes.size() : 0;
+}
+
+void LearnSession::addPass (std::vector<float> audio, double rate, std::optional<int64_t> hint)
+{
+    if (owned == nullptr || owned->take == nullptr || owned->take->empty())
+    {
+        setPhase (restingPhase());
+        return;
+    }
+    if (audio.size() < (size_t) (rate * 0.5))
+    {
+        notify ("That pass is too short - sing the whole part again");
+        setPhase (restingPhase());
+        return;
+    }
+    if (std::abs (rate - owned->sampleRate) > 1.0)
+    {
+        const double ratio = rate / owned->sampleRate;
+        audio = resampled (audio.data(), (int64_t) audio.size(), ratio);
+        if (hint.has_value())
+            hint = (int64_t) std::llround ((double) *hint / ratio);
+    }
+
+    cancelWork();
+    aligningPass = true;
+    setPhase (Phase::Analysing);
+    progress = 0.0f;
+    changedDuringWork = false;
+    auto take = owned->take;
+    const double takeRate = owned->sampleRate;
+    const int takeId = owned->takeId;
+    auto result = std::make_shared<Pass>();
+    cancel = false;
+    workDone = false;
+    worker = std::make_unique<std::thread> ([this, result, take, takeRate, hint, audio = std::move (audio)]
+    {
+        const int64_t h = hint.value_or (0);
+        auto aligned = sc::alignPass (take->data(), (int64_t) take->size(), audio.data(), (int64_t) audio.size(), takeRate,
+                                      hint.has_value() ? &h : nullptr, &result->info, &cancel);
+        if (! aligned.empty())
+            result->audio = std::make_shared<const std::vector<float>> (std::move (aligned));
+        progress = 1.0f;
+        workDone = true;
+    });
+
+    onWorkDone = [this, result, takeId]
+    {
+        aligningPass = false;
+        // Most of what the take sings should be sung in the pass too; anything else is another
+        // part or another song.
+        const bool aligned = result->audio != nullptr && owned != nullptr && owned->takeId == takeId;
+        if (aligned && result->info.coverage >= 0.5f)
+        {
+            auto passes = owned->passes;
+            passes.push_back (*result);
+            setPasses (std::move (passes));
+        }
+        else
+        {
+            if (aligned)
+                notify ("That pass does not follow the take - sing the same part again");
+            setPhase (restingPhase());
+        }
+        if (std::exchange (changedDuringWork, false))
+            harmonySettingsChanged();   // edited while the pass was lined up
+    };
+}
+
+void LearnSession::setPasses (std::vector<Pass> passes)
+{
+    auto d = copyOfCurrent();
+    d->passes = std::move (passes);
+    publish (std::move (d));
+    setPhase (restingPhase());
+    // Only the Words choir sings from the passes: other voices sound the same as rendered.
+    if (getParams && getParams().vocalType == sc::VocalType::Words)
+        renderSettingsChanged();
+}
+
+std::unique_ptr<LearnSession::PlaybackData> LearnSession::copyOfCurrent() const
+{
+    auto d = std::make_unique<PlaybackData>();
+    d->sampleRate = owned->sampleRate;
+    d->timelineStart = owned->timelineStart;
+    d->take = owned->take;
+    d->analysis = owned->analysis;
+    d->score = owned->score;
+    d->stems = owned->stems;
+    d->stale = owned->stale.load();
+    d->takeId = owned->takeId;
+    d->locks = owned->locks;
+    d->timing = owned->timing;
+    d->passes = owned->passes;
+    return d;
+}
+
+LearnSession::Phase LearnSession::restingPhase() const
+{
+    if (owned == nullptr)
+        return Phase::Empty;
+    return owned->stems != nullptr && ! owned->stale.load() ? Phase::Rendered : Phase::Learned;
+}
+
+void LearnSession::notify (const String& text)
+{
+    notice = text;
+    ++noticeId;
+    if (onStatusChanged)
+        onStatusChanged();
 }
 
 void LearnSession::stopRecording()
@@ -357,6 +568,26 @@ void LearnSession::finishRecording()
                 std::memcpy (band.data() + i, src, sizeof (float) * (size_t) len);
     }
     releaseCapture();
+    if (std::exchange (recordingPass, false))
+    {
+        previewPlaying = false;
+        const int64_t start = captureStart.load();
+        std::optional<int64_t> hint;
+        if (start >= 0 && owned != nullptr && owned->timelineStart >= 0)
+            hint = start - owned->timelineStart;   // both recorded against the song
+        else if (passAlongPreview)
+            hint = 0;                              // sung along with the take from its start
+        passAlongPreview = false;
+        if (n < (int64_t) (captureSampleRate * 0.5))
+        {
+            notify (captureStarted.load() ? "That pass is too short - sing the whole part again"
+                                          : "Nothing was captured - press play in your DAW while RECORD is lit");
+            setPhase (restingPhase());
+            return;
+        }
+        addPass (std::move (audio), captureSampleRate, hint);
+        return;
+    }
     // Only keep the band if something was actually playing on the side-chain.
     if (! band.empty())
     {
@@ -396,7 +627,7 @@ void LearnSession::releaseCapture()
 }
 
 void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, int64_t timelineStart, bool renderAfter,
-                                  std::vector<float> band, std::vector<sc::BandChord> bandChords)
+                                  std::vector<float> band, std::vector<sc::BandChord> bandChords, std::vector<Pass> passes)
 {
     cancelWork();
     setPhase (Phase::Analysing);
@@ -413,7 +644,7 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
     cancel = false;
     workDone = false;
     worker = std::make_unique<std::thread> ([this, result, params, hs, takeId, timing, sampleRate, timelineStart, audio = std::move (audio),
-                                             band = std::move (band), bandChords = std::move (bandChords)]() mutable
+                                             band = std::move (band), bandChords = std::move (bandChords), passes = std::move (passes)]() mutable
     {
         auto take = std::make_shared<std::vector<float>> (std::move (audio));
         auto analysis = std::make_shared<sc::TakeAnalysis> (sc::analyseTake (take->data(), (int64_t) take->size(), sampleRate, params.a4, &cancel));
@@ -430,6 +661,7 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
             d->takeId = takeId;
             d->locks = hs.locks;
             d->timing = timing;
+            d->passes = std::move (passes);
             d->score = sc::harmoniseTake (*analysis, hs);
             *result = std::move (d);
         }
@@ -479,35 +711,36 @@ std::shared_ptr<const std::vector<float>> LearnSession::currentTake() const
 
 bool LearnSession::hasTake() const { return owned != nullptr && owned->take != nullptr && ! owned->take->empty(); }
 
-void LearnSession::loadFile (const File& file)
+bool LearnSession::readAudioFile (const File& file, std::vector<float>& mono)
 {
     AudioFormatManager fm;
     fm.registerBasicFormats();
     std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (file));
     if (reader == nullptr || reader->sampleRate < 1000.0 || reader->lengthInSamples <= 0)
-    {
-        lastError = "Could not open " + file.getFileName();
-        setPhase (Phase::Failed);
-        return;
-    }
+        return false;
     const int64_t maxLen = (int64_t) (reader->sampleRate * 60.0 * 12.0);
     const int64_t len = std::min<int64_t> (reader->lengthInSamples, maxLen);
     AudioBuffer<float> buf ((int) reader->numChannels, (int) len);
     reader->read (&buf, 0, (int) len, 0, true, true);
 
-    std::vector<float> mono ((size_t) len, 0.0f);
+    mono.assign ((size_t) len, 0.0f);
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
         FloatVectorOperations::addWithMultiply (mono.data(), buf.getReadPointer (ch), 1.0f / (float) buf.getNumChannels(), (int) len);
 
     // Resample to the session rate so playback lines up.
     if (std::abs (reader->sampleRate - sr) > 1.0)
+        mono = resampled (mono.data(), len, reader->sampleRate / sr);
+    return true;
+}
+
+void LearnSession::loadFile (const File& file)
+{
+    std::vector<float> mono;
+    if (! readAudioFile (file, mono))
     {
-        const double ratio = reader->sampleRate / sr;
-        const int outLen = (int) std::floor ((double) len / ratio);
-        std::vector<float> out ((size_t) outLen, 0.0f);
-        LagrangeInterpolator interp;
-        interp.process (ratio, mono.data(), out.data(), outLen);
-        mono = std::move (out);
+        lastError = "Could not open " + file.getFileName();
+        setPhase (Phase::Failed);
+        return;
     }
     previewPlaying = false;
     renderWhenReady = false;
@@ -527,6 +760,8 @@ void LearnSession::clear()
         stopRequested = true;
         releaseCapture();
     }
+    recordingPass = false;
+    passAlongPreview = false;
     live.store (nullptr, std::memory_order_release);
     if (owned != nullptr)
         graveyard.push_back ({ std::move (owned), Time::getMillisecondCounter() });
@@ -574,12 +809,13 @@ void LearnSession::render()
     const int64_t timelineStart = owned->timelineStart;
     const int takeId = owned->takeId;
     const TakeTiming timing = owned->timing;
+    const auto passes = owned->passes;
     auto result = std::make_shared<std::unique_ptr<PlaybackData>>();
     const auto t0 = Time::getMillisecondCounterHiRes();
 
     cancel = false;
     workDone = false;
-    worker = std::make_unique<std::thread> ([this, result, params, hs, voices, take, analysis, rate, timelineStart, takeId, timing]
+    worker = std::make_unique<std::thread> ([this, result, params, hs, voices, take, analysis, rate, timelineStart, takeId, timing, passes]
     {
         auto d = std::make_unique<PlaybackData>();
         d->sampleRate = rate;
@@ -589,10 +825,14 @@ void LearnSession::render()
         d->takeId = takeId;
         d->locks = hs.locks;
         d->timing = timing;
+        d->passes = passes;
         d->score = sc::harmoniseTake (*analysis, hs);
+        std::vector<const float*> passAudio;
+        for (const auto& pass : passes)
+            passAudio.push_back (pass.audio->data());
         sc::RenderedStems stems;
         if (sc::renderTake (take->data(), (int64_t) take->size(), rate, params, d->score, stems,
-                            [this] (float f) { progress = f; }, &cancel, voices.get()))
+                            [this] (float f) { progress = f; }, &cancel, voices.get(), passAudio))
         {
             d->stems = toStemSet (stems);
             *result = std::move (d);
@@ -626,12 +866,13 @@ void LearnSession::cancelWork()
             worker->join();
         worker.reset();
         cancel = false;
+        aligningPass = false;
         if (workDone.exchange (false) && onWorkDone)
         {
             // Discard the cancelled result but restore a sensible phase.
             onWorkDone = nullptr;
             if (phase.load() == Phase::Analysing || phase.load() == Phase::Rendering)
-                setPhase (owned != nullptr ? (owned->stems != nullptr && ! owned->stale.load() ? Phase::Rendered : Phase::Learned) : Phase::Empty);
+                setPhase (restingPhase());
         }
         onWorkDone = nullptr;
     }
@@ -665,16 +906,9 @@ void LearnSession::harmonySettingsChanged()
         return;
 
     const sc::HarmonySettings hs = currentHarmonySettings();
-    auto d = std::make_unique<PlaybackData>();
-    d->sampleRate = owned->sampleRate;
-    d->timelineStart = owned->timelineStart;
-    d->take = owned->take;
-    d->analysis = owned->analysis;
-    d->takeId = owned->takeId;
+    auto d = copyOfCurrent();
     d->locks = hs.locks;
-    d->timing = owned->timing;
     d->score = sc::harmoniseTake (*owned->analysis, hs);
-    d->stems = owned->stems;
     d->stale = true;
     publish (std::move (d));
     renderSettingsChanged();
@@ -1107,10 +1341,15 @@ void LearnSession::matchSessionRate()
 
     const double ratio = owned->sampleRate / sr;
     const auto& take = *owned->take;
-    const int outLen = (int) std::floor ((double) take.size() / ratio);
-    std::vector<float> out ((size_t) std::max (0, outLen), 0.0f);
-    LagrangeInterpolator interp;
-    interp.process (ratio, take.data(), out.data(), outLen, (int) take.size(), 0);
+    auto out = resampled (take.data(), (int64_t) take.size(), ratio);
+    std::vector<Pass> passes;
+    for (const auto& pass : owned->passes)
+    {
+        Pass q = pass;
+        q.audio = std::make_shared<const std::vector<float>> (resampled (pass.audio->data(), (int64_t) pass.audio->size(), ratio));
+        q.info.offset = (int64_t) std::llround ((double) pass.info.offset / ratio);
+        passes.push_back (std::move (q));
+    }
     const int64_t start = owned->timelineStart >= 0 ? (int64_t) std::llround ((double) owned->timelineStart / ratio) : -1;
     const bool wasRendered = owned->stems != nullptr && ! owned->stale.load();
     std::vector<sc::BandChord> band = owned->analysis != nullptr ? owned->analysis->bandChords : std::vector<sc::BandChord>{};
@@ -1124,7 +1363,7 @@ void LearnSession::matchSessionRate()
         l.start = (int64_t) std::llround ((double) l.start / ratio);
         l.end = (int64_t) std::llround ((double) l.end / ratio);
     }
-    startAnalysis (std::move (out), sr, start, wasRendered || renderWhenReady, {}, std::move (band));
+    startAnalysis (std::move (out), sr, start, wasRendered || renderWhenReady, {}, std::move (band), std::move (passes));
 }
 
 //==============================================================================
@@ -1139,12 +1378,17 @@ String LearnSession::describe() const
         case Phase::Recording:
         {
             const double secs = (double) captured.load() / captureSampleRate;
+            const String time = String ((int) secs / 60) + ":" + String ((int) secs % 60).paddedLeft ('0', 2);
+            if (recordingPass)
+                return ! captureStarted.load() ? String ("PASS ARMED - press play in your DAW and sing the part again")
+                                               : "RECORDING PASS " + String (getNumPasses() + 2) + "  " + time + "  - press STOP to finish";
             if (! captureStarted.load())
                 return "LEARN ARMED - press play in your DAW";
-            return "LEARNING " + String ((int) secs / 60) + ":" + String ((int) secs % 60).paddedLeft ('0', 2) + "  - press LEARN to finish";
+            return "LEARNING " + time + "  - press LEARN to finish";
         }
         case Phase::Analysing:
-            return "LISTENING TO YOUR TAKE...";
+            return aligningPass ? "LINING UP PASS " + String (getNumPasses() + 2) + " WITH YOUR TAKE..."
+                                : String ("LISTENING TO YOUR TAKE...");
         case Phase::Rendering:
             return "RENDERING " + String (roundToInt (progress.load() * 100.0f)) + "%";
         case Phase::Failed:
@@ -1158,6 +1402,8 @@ String LearnSession::describe() const
         return {};
     String s (CharPointer_UTF8 (d->score.describe().c_str()));
     const String dot (CharPointer_UTF8 ("  \xc2\xb7  "));
+    if (! d->passes.empty())
+        s << dot << ((int) d->passes.size() + 1) << " PASSES";
     if (p == Phase::Rendered && d->stems != nullptr && ! d->stale.load())
         s << dot << renderedSingers << " SINGERS RENDERED IN " << String (lastRenderSeconds, 1) << " S";
     else if (d->stems != nullptr)
@@ -1198,6 +1444,24 @@ var LearnSession::getStatus() const
     o->setProperty ("laneVersion", laneVersion);
     o->setProperty ("locks", (int) locks.size());
     o->setProperty ("export", exportStateName());
+    // More passes of the take, for the multi-take choir.
+    Array<var> passList;
+    if (owned != nullptr)
+    {
+        for (const auto& pass : owned->passes)
+        {
+            auto po = std::make_unique<DynamicObject>();
+            po->setProperty ("coverage", pass.info.coverage);
+            po->setProperty ("drift", pass.info.drift);
+            passList.add (var (po.release()));
+        }
+    }
+    o->setProperty ("passes", passList);
+    o->setProperty ("maxPasses", sc::kMaxExtraPasses);
+    o->setProperty ("recordingPass", p == Phase::Recording && recordingPass);
+    o->setProperty ("aligningPass", p == Phase::Analysing && aligningPass);
+    o->setProperty ("notice", notice);
+    o->setProperty ("noticeId", noticeId);
     if (owned != nullptr)
     {
         o->setProperty ("seconds", owned->score.durationSeconds);
@@ -1213,6 +1477,39 @@ var LearnSession::getStatus() const
 //==============================================================================
 static constexpr int kStateMagic = 0x4b544353;  // "SCTK"
 static constexpr int kExtrasMagic = 0x58544353; // "SCTX": chosen chords and song position, after the take
+static constexpr int kPassesMagic = 0x50544353; // "SCTP": more passes of the take, after that
+
+static void encodeFlac (const std::vector<float>& audio, double rate, MemoryBlock& dest)
+{
+    dest.reset();
+    FlacAudioFormat flac;
+    std::unique_ptr<OutputStream> stream = std::make_unique<MemoryOutputStream> (dest, false);
+    auto writer = flac.createWriterFor (stream, AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (1).withBitsPerSample (24));
+    if (writer != nullptr)
+    {
+        const int64_t len = (int64_t) audio.size();
+        for (int64_t pos = 0; pos < len; pos += 65536)
+        {
+            const float* p[] = { audio.data() + pos };
+            writer->writeFromFloatArrays (p, 1, (int) std::min<int64_t> (65536, len - pos));
+        }
+    }
+    writer.reset();   // flushes into dest
+}
+
+/** Reads `size` bytes of FLAC from the stream (always all of them). */
+static bool decodeFlac (InputStream& in, int64_t size, double rate, std::vector<float>& audio)
+{
+    MemoryBlock block;
+    in.readIntoMemoryBlock (block, (ssize_t) size);
+    FlacAudioFormat flac;
+    std::unique_ptr<AudioFormatReader> reader (flac.createReaderFor (new MemoryInputStream (block, false), true));
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->lengthInSamples > (int64) (rate * 60.0 * 15.0))
+        return false;
+    audio.resize ((size_t) reader->lengthInSamples);
+    float* dest[] = { audio.data() };
+    return reader->read (dest, 1, 0, (int) reader->lengthInSamples);
+}
 
 void LearnSession::writeState (OutputStream& out) const
 {
@@ -1236,21 +1533,7 @@ void LearnSession::writeState (OutputStream& out) const
     const std::lock_guard<std::mutex> g (encodeLock);
     if (encodedTake.lock() != owned->take)
     {
-        encodedFlac.reset();
-        FlacAudioFormat flac;
-        std::unique_ptr<OutputStream> stream = std::make_unique<MemoryOutputStream> (encodedFlac, false);
-        auto writer = flac.createWriterFor (stream, AudioFormatWriterOptions{}.withSampleRate (owned->sampleRate).withNumChannels (1).withBitsPerSample (24));
-        if (writer != nullptr)
-        {
-            const float* ch[] = { owned->take->data() };
-            const int64_t len = (int64_t) owned->take->size();
-            for (int64_t pos = 0; pos < len; pos += 65536)
-            {
-                const float* p[] = { ch[0] + pos };
-                writer->writeFromFloatArrays (p, 1, (int) std::min<int64_t> (65536, len - pos));
-            }
-        }
-        writer.reset();   // flushes into encodedFlac
+        encodeFlac (*owned->take, owned->sampleRate, encodedFlac);
         encodedTake = owned->take;
     }
     out.writeInt64 ((int64) encodedFlac.getSize());
@@ -1292,6 +1575,31 @@ void LearnSession::writeState (OutputStream& out) const
         out.writeInt (kExtrasMagic);
         out.writeString (JSON::toString (var (o.release()), true));
     }
+
+    // More passes of the take (lined up with it), encoded once each like the take.
+    if (! owned->passes.empty())
+    {
+        encodedPasses.erase (std::remove_if (encodedPasses.begin(), encodedPasses.end(), [] (const auto& e) { return e.first.expired(); }),
+                             encodedPasses.end());
+        out.writeInt (kPassesMagic);
+        out.writeInt ((int) owned->passes.size());
+        for (const auto& pass : owned->passes)
+        {
+            auto it = std::find_if (encodedPasses.begin(), encodedPasses.end(), [&] (const auto& e) { return e.first.lock() == pass.audio; });
+            if (it == encodedPasses.end())
+            {
+                encodedPasses.emplace_back (pass.audio, MemoryBlock());
+                encodeFlac (*pass.audio, owned->sampleRate, encodedPasses.back().second);
+                it = encodedPasses.end() - 1;
+            }
+            out.writeInt64 (pass.info.offset);
+            out.writeFloat (pass.info.coverage);
+            out.writeFloat (pass.info.drift);
+            out.writeFloat (pass.info.gainDb);
+            out.writeInt64 ((int64) it->second.getSize());
+            out.write (it->second.getData(), it->second.getSize());
+        }
+    }
 }
 
 void LearnSession::readState (InputStream& in)
@@ -1312,15 +1620,9 @@ void LearnSession::readState (InputStream& in)
     if (size <= 0 || size > in.getNumBytesRemaining() || ! (rate >= 8000.0 && rate <= 768000.0))
         return;
 
-    MemoryBlock block;
-    in.readIntoMemoryBlock (block, (ssize_t) size);
-    FlacAudioFormat flac;
-    std::unique_ptr<AudioFormatReader> reader (flac.createReaderFor (new MemoryInputStream (block, false), true));
-    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->lengthInSamples > (int64) (rate * 60.0 * 15.0))
+    std::vector<float> audio;
+    if (! decodeFlac (in, size, rate, audio))
         return;
-    std::vector<float> audio ((size_t) reader->lengthInSamples);
-    float* dest[] = { audio.data() };
-    reader->read (dest, 1, 0, (int) reader->lengthInSamples);
 
     // The band's chords (version 2).
     std::vector<sc::BandChord> band;
@@ -1339,11 +1641,37 @@ void LearnSession::readState (InputStream& in)
         }
     }
 
-    // Chords chosen by hand and the song position.
+    // Chords chosen by hand and the song position, then more passes of the take.
     std::vector<sc::ChordLock> savedLocks;
     TakeTiming timing;
-    if (in.getNumBytesRemaining() >= 5 && in.readInt() == kExtrasMagic)
+    std::vector<Pass> savedPasses;
+    while (in.getNumBytesRemaining() >= 4)
     {
+        const int tag = in.readInt();
+        if (tag == kPassesMagic)
+        {
+            const int count = in.readInt();
+            for (int k = 0; k < count && k < sc::kMaxExtraPasses && in.getNumBytesRemaining() >= 28; ++k)
+            {
+                Pass pass;
+                pass.info.offset = in.readInt64();
+                pass.info.coverage = in.readFloat();
+                pass.info.drift = in.readFloat();
+                pass.info.gainDb = in.readFloat();
+                const int64_t bytes = in.readInt64();
+                if (bytes <= 0 || bytes > in.getNumBytesRemaining())
+                    break;
+                std::vector<float> passAudio;
+                if (decodeFlac (in, bytes, rate, passAudio) && passAudio.size() == audio.size())
+                {
+                    pass.audio = std::make_shared<const std::vector<float>> (std::move (passAudio));
+                    savedPasses.push_back (std::move (pass));
+                }
+            }
+            continue;
+        }
+        if (tag != kExtrasMagic)
+            break;
         const auto extras = JSON::parse (in.readString());
         timing.bpm = jlimit (0.0, 999.0, (double) extras.getProperty ("bpm", 0.0));
         timing.ppqStart = (double) extras.getProperty ("ppq", -1.0);
@@ -1395,11 +1723,23 @@ void LearnSession::readState (InputStream& in)
                 locks = std::move (savedLocks);
                 harmonySettingsChanged();
             }
+            // ... or the passes (undo of adding or removing one).
+            auto samePass = [] (const Pass& a, const Pass& b)
+            {
+                if (a.audio->size() != b.audio->size())
+                    return false;
+                for (size_t i = 0; i < a.audio->size(); ++i)
+                    if (std::abs ((*a.audio)[i] - (*b.audio)[i]) >= 1.0e-5f)
+                        return false;
+                return true;
+            };
+            if (! std::equal (savedPasses.begin(), savedPasses.end(), owned->passes.begin(), owned->passes.end(), samePass))
+                setPasses (std::move (savedPasses));
             return;
         }
     }
     locks = std::move (savedLocks);
     takeTiming = timing;
-    startAnalysis (std::move (audio), rate, timelineStart, wasRendered, {}, std::move (band));
+    startAnalysis (std::move (audio), rate, timelineStart, wasRendered, {}, std::move (band), std::move (savedPasses));
 }
 } // namespace sanctuary
