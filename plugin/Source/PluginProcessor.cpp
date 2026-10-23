@@ -83,7 +83,7 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     setLatencySamples (reportedLatency());
     if (const int key = rememberedKey.load(); key >= 0)
         engine.seedKey (key % 12, key >= 12);
-    bypassDelay.setSize (2, engine.getLatencySamples() + 1);
+    bypassDelay.setSize (2, engine.getLatencySamples() + engine.getOutputDelay() + 1);
     bypassDelay.clear();
     sidechainCopy.setSize (2, std::max (samplesPerBlock * 2, 16384));
     sidechainCopy.clear();
@@ -249,7 +249,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         }
     }
     info.engineWritten = engineWritten;
-    info.latency = engine.getReportedLatency();   // what the host compensates (0 in Live mode)
+    info.latency = engine.getReportedLatency();   // the timeline offset (0 in Live mode); the limiter's look-ahead delays everything alike
     info.sidechainL = scL;
     info.sidechainR = scR;
 
@@ -352,7 +352,7 @@ sc::EngineParams SanctuaryProcessor::currentParams() const
 
 int SanctuaryProcessor::reportedLatency() const
 {
-    return currentParams().lowLatency ? 0 : engine.getLatencySamples();
+    return (currentParams().lowLatency ? 0 : engine.getLatencySamples()) + engine.getOutputDelay();
 }
 
 void SanctuaryProcessor::parameterChanged (const String& id, float)

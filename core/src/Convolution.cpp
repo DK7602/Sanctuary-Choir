@@ -38,6 +38,22 @@ namespace
     constexpr double kEarlySeconds = 0.085;   // what the Space knob's "early" level covers
 }
 
+bool normaliseRoom (RoomImpulse& ir)
+{
+    for (auto* ch : { &ir.left, &ir.right })
+    {
+        double energy = 0.0;
+        for (float v : *ch)
+            energy += (double) v * v;
+        if (energy <= 0.0)
+            return false;
+        const float scale = (float) (1.0 / std::sqrt (energy));
+        for (auto& v : *ch)
+            v *= scale;
+    }
+    return true;
+}
+
 std::vector<float> resampleImpulse (const std::vector<float>& x, double fromRate, double toRate)
 {
     if (x.empty() || fromRate <= 0.0 || toRate <= 0.0)

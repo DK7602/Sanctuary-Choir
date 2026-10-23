@@ -480,24 +480,95 @@ void GlueCompressor::process (float* l, float* r, int n, float amount)
 //==============================================================================
 void SafetyLimiter::prepare (double sampleRate)
 {
-    rel = onePoleCoeff (0.08f, sampleRate);
+    look = std::max (1, (int) std::lround (0.0015 * sampleRate));
+    // Held past the longest waveform cycle a choir sings (a 40 Hz bass), so a steady loud
+    // chord gets one steady gain rather than a dip at every cycle.
+    hold = (int) (0.03 * sampleRate);
+    rel = onePoleCoeff (0.15f, sampleRate);
+    delayL.assign ((size_t) look, 0.0f);
+    delayR.assign ((size_t) look, 0.0f);
+    minVal.assign ((size_t) look + 2, 1.0f);
+    minAt.assign ((size_t) look + 2, 0);
+    held.assign ((size_t) look + 1, 1.0f);
     reset();
 }
 
-void SafetyLimiter::process (float* l, float* r, int n)
+void SafetyLimiter::reset()
 {
+    std::fill (delayL.begin(), delayL.end(), 0.0f);
+    std::fill (delayR.begin(), delayR.end(), 0.0f);
+    std::fill (held.begin(), held.end(), 1.0f);
+    heldSum = (double) held.size();
+    minHead = minCount = 0;
+    pos = 0;
+    t = 0;
+    env = 1.0f;
+    holdLeft = 0;
+}
+
+void SafetyLimiter::process (float* l, float* r, int n) noexcept
+{
+    // The gain each sample needs; its minimum over the last look + 1 samples (so every sample
+    // still in the delay line is covered), averaged over look + 1 samples: a ramp down that
+    // reaches each peak's gain exactly when that peak leaves the delay line, and never more.
+    const int len = look + 1;
+    const int cap = (int) minVal.size();
     for (int i = 0; i < n; ++i)
     {
-        const float peak = std::max (std::abs (l[i]), std::abs (r[i]));
-        const float needed = peak * gain > ceiling ? ceiling / std::max (peak, 1.0e-9f) : 1.0f;
-        if (needed < gain) gain = needed;
-        else gain = 1.0f + (gain - 1.0f) * rel;
-        float a = l[i] * gain, b = r[i] * gain;
-        // Final soft clip for anything that still slips through.
-        if (std::abs (a) > ceiling) a = std::tanh (a);
-        if (std::abs (b) > ceiling) b = std::tanh (b);
+        const float inL = l[i], inR = r[i];
+        const float peak = std::max (std::abs (inL), std::abs (inR));
+        const float need = peak > ceiling ? ceiling / peak : 1.0f;
+
+        // Sliding minimum (a deque, oldest first, values increasing).
+        while (minCount > 0 && minVal[(size_t) ((minHead + minCount - 1) % cap)] >= need)
+            --minCount;
+        minVal[(size_t) ((minHead + minCount) % cap)] = need;
+        minAt[(size_t) ((minHead + minCount) % cap)] = t;
+        ++minCount;
+        while (minAt[(size_t) minHead] <= t - len)
+        {
+            minHead = (minHead + 1) % cap;
+            --minCount;
+        }
+        const float m = minVal[(size_t) minHead];
+
+        const int slot = (int) (t % len);
+        heldSum += (double) m - (double) held[(size_t) slot];
+        held[(size_t) slot] = m;
+        const float ramp = std::min (1.0f, (float) (heldSum / (double) len));
+
+        // Down with the ramp; back up only once the peaks have stopped coming (a peak within
+        // half a dB of the gain in force counts: sampled peaks of one held note differ a little).
+        if (ramp < env * 1.06f)
+            holdLeft = hold;
+        if (ramp < env)
+            env = ramp;
+        else if (holdLeft > 0)
+        {
+            --holdLeft;
+        }
+        else
+        {
+            env = ramp + (env - ramp) * rel;
+        }
+
+        float a = delayL[(size_t) pos] * env, b = delayR[(size_t) pos] * env;
+        delayL[(size_t) pos] = inL;
+        delayR[(size_t) pos] = inR;
+        pos = pos + 1 < look ? pos + 1 : 0;
+        ++t;
+        // Rounding aside nothing gets past the ramp; anything that does stops at the ceiling.
+        a = clampv (a, -ceiling, ceiling);
+        b = clampv (b, -ceiling, ceiling);
         l[i] = a;
         r[i] = b;
+    }
+    // Keep the running sum exact over long sessions.
+    if ((t & 0xffff) < n)
+    {
+        heldSum = 0.0;
+        for (float v : held)
+            heldSum += v;
     }
 }
 } // namespace sc

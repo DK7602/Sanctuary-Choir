@@ -318,7 +318,7 @@ static std::vector<float> runEngine (ChoirEngine& eng, const std::vector<float>&
                                      const std::function<void (int64_t)>& perBlock = {})
 {
     const int block = 256;
-    const int lat = eng.getReportedLatency();   // what a host would compensate
+    const int lat = eng.getReportedLatency() + eng.getOutputDelay();   // what a host would compensate
     std::vector<float> in (x);
     in.resize (x.size() + (size_t) lat + block, 0.0f);
     std::vector<float> l (in.size(), 0.0f), r (in.size(), 0.0f);
@@ -503,6 +503,78 @@ TEST (convolutionRoomSpreadsItsWork)
     const double median = times[times.size() / 2], p99 = times[times.size() * 99 / 100];
     std::printf ("  12 s room at 200%% decay, 64-sample blocks: median %.0f us, 99th percentile %.0f us (budget 1333 us)\n", median, p99);
     CHECK (p99 < 1333.0 * 0.5);
+}
+
+TEST (limiterTurnsDownWithoutCrackle)
+{
+    // A choir pushed 8 dB past full scale (a loud preset in a hall that leans to one side): the
+    // output limiter has to make it quieter, not grainy. The old one cut the gain within a
+    // sample at every new peak and let it back up between them, so a loud chord came out with
+    // a crackle riding on it.
+    const double sr = 48000.0;
+    auto limit = [&] (const std::vector<float>& x, SafetyLimiter& lim)
+    {
+        lim.prepare (sr);
+        std::vector<float> l (x), r ((size_t) x.size(), 0.0f);
+        for (size_t pos = 0; pos < x.size(); pos += 256)
+            lim.process (l.data() + pos, r.data() + pos, (int) std::min<size_t> (256, x.size() - pos));
+        return l;
+    };
+    auto hfRatioDb = [&] (const std::vector<float>& y, size_t from, size_t to)
+    {
+        Biquad h1, h2;
+        h1.highPass (sr, 2000.0);
+        h2.highPass (sr, 2000.0);
+        double hf = 1.0e-30, all = 1.0e-30;
+        for (size_t i = 0; i < to; ++i)
+        {
+            const float v = h2.process (h1.process (y[i]));
+            if (i >= from) { hf += (double) v * v; all += (double) y[i] * y[i]; }
+        }
+        return 10.0 * std::log10 (hf / all);
+    };
+
+    // Two low tones (a bass fifth): quiet for half a second, then entries 8 dB over the ceiling
+    // with 5 ms fades, so above 2 kHz is only what the limiter adds.
+    const size_t n = (size_t) (3.0 * sr);
+    std::vector<float> chord (n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double t = (double) i / sr, seg = std::fmod (t, 0.5);
+        const double fade = std::min ({ 1.0, seg / 0.005, (0.5 - seg) / 0.005 });
+        const double amp = t < 0.5 ? 0.4 : 2.4 * 0.5 * (1.0 - std::cos (kPi * fade));
+        chord[i] = (float) (amp * 0.5 * (std::sin (2.0 * kPi * 110.0 * t) + std::sin (2.0 * kPi * 164.8 * t)));
+    }
+    SafetyLimiter lim;
+    const auto out = limit (chord, lim);
+    const int la = lim.getLatency();
+    double quietErr = 0.0, peak = 0.0;
+    for (size_t i = 0; i + (size_t) la < (size_t) (0.45 * sr); ++i)
+        quietErr = std::max (quietErr, (double) std::abs (out[i + (size_t) la] - chord[i]));
+    for (float v : out)
+        peak = std::max (peak, (double) std::abs (v));
+    const double hfIn = hfRatioDb (chord, (size_t) (0.6 * sr), n - (size_t) la), hfOut = hfRatioDb (out, (size_t) (0.6 * sr) + (size_t) la, n);
+
+    // One loud held tone: every cycle peaks the same, so the gain must not move from cycle to cycle.
+    std::vector<float> tone ((size_t) sr);
+    for (size_t i = 0; i < tone.size(); ++i)
+        tone[i] = (float) (2.4 * std::min (1.0, (double) i / (0.005 * sr)) * std::sin (2.0 * kPi * 110.0 * (double) i / sr));
+    const auto held = limit (tone, lim);
+    double lo = 1.0e9, hi = 0.0;
+    for (size_t i = (size_t) (0.3 * sr); i < (size_t) (0.9 * sr); ++i)
+        if (std::abs (tone[i]) > 1.0f)
+        {
+            const double g = held[i + (size_t) la] / tone[i];
+            lo = std::min (lo, g);
+            hi = std::max (hi, g);
+        }
+    std::printf ("  latency %d samples; quiet part changed by %.1e; peak %.4f; above 2 kHz %.1f dB in, %.1f dB out; held tone's gain moves %.3f dB\n",
+                 la, quietErr, peak, hfIn, hfOut, 20.0 * std::log10 (hi / lo));
+    CHECK (la == 72);
+    CHECK (quietErr < 1.0e-6);
+    CHECK (peak <= 0.9661);
+    CHECK (hfOut < -70.0 && hfOut < hfIn + 4.0);
+    CHECK (20.0 * std::log10 (hi / lo) < 0.01);
 }
 
 TEST (engineSingsInTheMeasuredRoom)
@@ -1413,8 +1485,9 @@ TEST (leadLatencyAlignment)
 
 TEST (liveMonitoringLowLatency)
 {
-    // Live mode: the lead is not delayed at all, the vowel choir answers after the pitch analysis
-    // only, Words keep the full latency, and the plugin reports zero latency.
+    // Live mode: the lead is not delayed (beyond the output limiter's 1.5 ms look-ahead, which
+    // everything shares), the vowel choir answers after the pitch analysis only, and Words keep
+    // the full latency.
     const double sr = 48000.0;
     {
         ChoirEngine eng;
@@ -1463,7 +1536,7 @@ TEST (liveMonitoringLowLatency)
     std::printf ("  choir follows a note change after: vowels %.1f ms studio / %.1f ms live, words %.1f / %.1f ms\n",
                  studioAh, liveAh, studioWords, liveWords);
     CHECK (studioAh - liveAh > 18.0 && studioAh - liveAh < 30.0);   // vowels run ~24 ms closer to the voice
-    CHECK (liveAh < 40.0);
+    CHECK (liveAh < 41.5);   // the pitch analysis, plus the output limiter's 1.5 ms look-ahead
     CHECK_NEAR (liveWords, studioWords, 6.0); // Words always need the full lookahead
 }
 

@@ -419,6 +419,7 @@ ${go("settings", "Show me Settings")}`,
 <dt>The harmony is in the wrong key</dt><dd>Set the ${ui("KEY")} (and ${ui("SCALE")}) yourself, or wait a phrase for Auto and then lock it. LEARN gives the most reliable result.</dd>
 <dt>The chords change too often, or too slowly</dt><dd>Turn ${ui("CHORD SPEED")} (MIX) down or up. With a band, route it to the side-chain so the choir sings its chords.</dd>
 <dt>Clicks, crackles or dropouts</dt><dd>Usually your computer running out of time: raise the audio buffer, lower ${ui("CHOIR SIZE")}, or LEARN and RENDER (rendered playback costs almost nothing). In Words mode the choir no longer copies your mouth clicks.</dd>
+<dt>The choir gets quieter when it gets big</dt><dd>A very loud choir (a big ${ui("CHOIR SIZE")} at high Energy, with lots of ${ui("REVERB")} and a long Decay) goes past full scale, and the output limiter turns it down smoothly so it never distorts. For more headroom, turn ${ui("VOLUME")} down a few dB.</dd>
 <dt>It uses a lot of CPU</dt><dd>RENDER your take. Words mode with a large choir is the heaviest setting while live.</dd>
 <dt>RENDER is glowing</dt><dd>You changed something the rendered choir doesn't have yet. Press it to update.</dd>
 <dt>The vowel modes sound synthetic</dt><dd>${ui("SETTINGS")} › ${ui("CHOIR VOICES")}: choose ${ui("SANCTUARY")}. If it is greyed out, the recorded voices aren't installed: run the installer again with <i>Sanctuary Voices</i> ticked.</dd>

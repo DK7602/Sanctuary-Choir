@@ -55,10 +55,11 @@ public:
     ChoirVoices& getVoices() noexcept { return voices; }
     sc::EngineSnapshot takeSnapshot() { return engine.takeSnapshot(); }
     sc::EngineParams currentParams() const;
-    /** Latency reported to the host: the full alignment delay in Studio mode, 0 in Live mode. */
+    /** Latency reported to the host: the full alignment delay in Studio mode, none in Live
+        mode, plus the output limiter's look-ahead (1.5 ms) in both. */
     int reportedLatency() const;
-    int getAlignedLatency() const noexcept { return engine.getLatencySamples(); }
-    int getLiveChoirLatency() const noexcept { return engine.getLiveChoirLatency(); }
+    int getAlignedLatency() const noexcept { return engine.getLatencySamples() + engine.getOutputDelay(); }
+    int getLiveChoirLatency() const noexcept { return engine.getLiveChoirLatency() + engine.getOutputDelay(); }
     bool isStandaloneApp() const noexcept { return standaloneApp; }
     /** Song tempo while the host plays (0 when stopped or unknown), the beat position at the last
         block, and when that block ran (Time::getMillisecondCounterHiRes). */

@@ -51,7 +51,7 @@ To re-pitch your voice, the choir has to hear a little of it first, so it runs a
 | Mode | What you hear | Use it for |
 | --- | --- | --- |
 | **Studio** (default) | Your voice and the choir line up exactly. The plug-in reports its 39 ms to your DAW, which compensates on playback. While recording, though, you hear yourself 39 ms late. | Mixing, and singing over a track you already recorded. |
-| **Live** | Your own voice comes through instantly. The vowel choir (Ah, Oh, Oo, Ee, Eh, Mm) follows about 15 ms behind, *Words* about 39 ms behind, like a choir following its soloist. | Recording, rehearsing and performing. |
+| **Live** | Your own voice comes through instantly (1.5 ms). The vowel choir (Ah, Oh, Oo, Ee, Eh, Mm) follows about 15 ms behind, *Words* about 40 ms behind, like a choir following its soloist. | Recording, rehearsing and performing. |
 
 - Learned and rendered takes stay in sync with your song in both modes.
 - The standalone app always runs in **Live** mode.

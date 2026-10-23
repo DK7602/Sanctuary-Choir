@@ -183,10 +183,15 @@ public:
 
     void prepare (double sampleRate, int maxBlockSize);
     void reset();
-    /** Delay that lines the whole choir (Words included) up with the lead: the offline/aligned latency. */
+    /** Delay that lines the whole choir (Words included) up with the lead: the offline/aligned
+        latency. The dry stems (setStemTap) are this late; the output also has getOutputDelay(). */
     int getLatencySamples() const noexcept { return latency; }
-    /** Latency to report to the host: 0 in Live (low latency) mode, where the lead is not delayed. */
+    /** The same for the current monitoring: 0 in Live (low latency) mode, where the lead is not
+        delayed. What the song timeline (rendered stems, rhythm) is lined up against. */
     int getReportedLatency() const noexcept { return params.lowLatency ? 0 : latency; }
+    /** The output limiter's look-ahead: everything leaves this much later again. A host
+        compensates getReportedLatency() + getOutputDelay(). Set by prepare(). */
+    int getOutputDelay() const noexcept { return limiter.getLatency(); }
     /** In Live mode, how far the vowel choir runs behind the voice. */
     int getLiveChoirLatency() const noexcept { return liveLatency; }
     double getSampleRate() const noexcept { return sr; }

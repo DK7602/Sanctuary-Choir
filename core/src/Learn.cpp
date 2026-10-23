@@ -991,6 +991,9 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
     engine.setRoom (room.get());
 
     const int64_t total = length + (int64_t) (tailSeconds * sampleRate);
+    // The output limiter's look-ahead: run that much longer and drop that much from the start.
+    int skip = engine.getOutputDelay();
+    const int64_t run = total + skip;
     std::vector<float> zeros ((size_t) block, 0.0f), left ((size_t) block), right ((size_t) block), leadBlock ((size_t) block, 0.0f);
     std::array<std::vector<float>, NumSections * 2> chunk;
     std::array<float*, NumSections * 2> ptrs {};
@@ -1000,9 +1003,9 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
         ptrs[ch] = chunk[ch].data();
     }
 
-    for (int64_t pos = 0; pos < total; pos += block)
+    for (int64_t pos = 0; pos < run; pos += block)
     {
-        const int len = (int) std::min<int64_t> (block, total - pos);
+        const int len = (int) std::min<int64_t> (block, run - pos);
         for (auto& c : chunk)
             std::fill (c.begin(), c.end(), 0.0f);
         if (pos < length)
@@ -1019,7 +1022,9 @@ bool mixdownStemsStreaming (double sampleRate, int64_t length, const EngineParam
             in = leadBlock.data();
         }
         engine.process (in, nullptr, left.data(), right.data(), len, &pb);
-        if (! out (left.data(), right.data(), len))
+        const int drop = std::min (skip, len);
+        skip -= drop;
+        if (len > drop && ! out (left.data() + drop, right.data() + drop, len - drop))
             return false;
     }
     return true;

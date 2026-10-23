@@ -209,16 +209,34 @@ private:
     float att = 0, rel = 0, env = 0, gain = 1, gainSmooth = 0;
 };
 
-/** Output safety limiter (ceiling about -0.3 dBFS). */
+/** Output limiter (ceiling about -0.3 dBFS) that looks ahead: it sees each peak 1.5 ms before
+    it plays and turns the gain down in a straight ramp that arrives at the peak's level with the
+    peak, holds it while the peaks keep coming, then lets it back up slowly. A choir pushed far
+    past full scale gets quieter instead of crackling (gain that jumps sample to sample, or
+    rises and falls with every cycle of the waveform, is heard as static).
+    The output is getLatency() samples late; l and r may be the same buffer (mono). */
 class SafetyLimiter
 {
 public:
     void prepare (double sampleRate);
-    void reset() { gain = 1.0f; }
-    void process (float* l, float* r, int n);
+    void reset();
+    int getLatency() const noexcept { return look; }
+    void process (float* l, float* r, int n) noexcept;
+    /** The gain in force (1 = not limiting), for tests and meters. */
+    float getGain() const noexcept { return env; }
 
 private:
-    float rel = 0, gain = 1.0f;
+    int look = 72;                       // look-ahead (and latency), samples
+    std::vector<float> delayL, delayR;   // the input, look samples back
+    std::vector<float> minVal;           // sliding minimum of the gain each sample needs (a deque)
+    std::vector<int64_t> minAt;
+    int minHead = 0, minCount = 0;
+    std::vector<float> held;             // that minimum, the last look + 1 samples (for the ramp)
+    double heldSum = 0.0;
+    int pos = 0;
+    int64_t t = 0;
+    float env = 1.0f, rel = 0.0f;
+    int hold = 0, holdLeft = 0;
     const float ceiling = 0.966f;
 };
 

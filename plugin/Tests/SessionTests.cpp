@@ -732,8 +732,9 @@ static void passesMakeAMultiTakeChoir()
 
 static void measuredRoomsLoad()
 {
-    // Every venue's room is in the plug-in, decodes to unit energy with its decay as built
-    // (SOURCES.json), and follows the venue: a change builds the new room in the background.
+    // Every venue's room is in the plug-in, decodes to unit energy on each side (Stone Abbey's
+    // measurement leans 4.7 dB right) with its decay as built (SOURCES.json), and follows the
+    // venue: a change builds the new room in the background.
     std::printf ("[ measuredRoomsLoad ]\n");
     const auto sources = JSON::parse (File (String (SANCTUARY_SOURCE_DIR) + "/rooms/SOURCES.json"));
     for (int v = 0; v < (int) sc::Venue::Count; ++v)
@@ -744,9 +745,13 @@ static void measuredRoomsLoad()
         check (ir != nullptr && ir->left.size() == ir->right.size() && ! ir->left.empty(), "room decodes");
         if (ir == nullptr)
             continue;
-        double e = 0.0;
+        double e = 0.0, el = 0.0, er = 0.0;
         for (size_t i = 0; i < ir->left.size(); ++i)
-            e += 0.5 * ((double) ir->left[i] * ir->left[i] + (double) ir->right[i] * ir->right[i]);
+        {
+            el += (double) ir->left[i] * ir->left[i];
+            er += (double) ir->right[i] * ir->right[i];
+        }
+        e = 0.5 * (el + er);
         std::vector<float> both (ir->left.size());
         for (size_t i = 0; i < both.size(); ++i)
             both[i] = ir->left[i] + ir->right[i];
@@ -756,9 +761,10 @@ static void measuredRoomsLoad()
             for (const auto& r : *rows)
                 if (r.getProperty ("file", {}).toString() == String (sc::getVenueSlug ((sc::Venue) v)) + ".ogg")
                     expected = (double) r.getProperty ("t30_s", 0.0);
-        std::printf ("  %-16s %.1f s, energy %.3f, decay %.2f s (built %.2f s), decoded in %.0f ms\n", sc::getVenueNames()[v],
-                     (double) ir->left.size() / ir->sampleRate, e, t30, expected, ms);
+        std::printf ("  %-16s %.1f s, energy %.3f (right %+.2f dB), decay %.2f s (built %.2f s), decoded in %.0f ms\n", sc::getVenueNames()[v],
+                     (double) ir->left.size() / ir->sampleRate, e, 10.0 * std::log10 (er / el), t30, expected, ms);
         check (std::abs (e - 1.0) < 0.01, "unit energy");
+        check (std::abs (10.0 * std::log10 (er / el)) < 0.05, "both sides alike");
         check (std::abs (t30 - expected) < 0.12 * expected + 0.03, "decay as built");
     }
 

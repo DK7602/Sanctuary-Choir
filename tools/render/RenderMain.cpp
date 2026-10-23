@@ -194,6 +194,7 @@ int main (int argc, char** argv)
         roomImpulse.sampleRate = ra.sampleRate;
         roomImpulse.left = ra.channels[0];
         roomImpulse.right = ra.channels[std::min<size_t> (1, ra.channels.size() - 1)];
+        normaliseRoom (roomImpulse);   // as the plug-in plays it
         std::printf ("room: %s (%.1f s)\n", path.c_str(), (double) ra.length() / ra.sampleRate);
     }
     const RoomImpulse* roomPtr = roomImpulse.left.empty() ? nullptr : &roomImpulse;
@@ -301,7 +302,7 @@ int main (int argc, char** argv)
         eng.setSampleSet (voicesPtr);
         const auto room = roomPtr != nullptr ? ConvolutionRoom::create (*roomPtr, sr) : nullptr;
         eng.setRoom (room.get());
-        const int lat = eng.getLatencySamples();
+        const int lat = eng.getLatencySamples() + eng.getOutputDelay();
         const int64_t total = n + lat + (int64_t) (sr * 4.0);
         if (! words.empty())
             eng.setLyrics (&script);

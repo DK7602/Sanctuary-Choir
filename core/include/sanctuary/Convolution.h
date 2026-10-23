@@ -16,6 +16,11 @@ struct RoomImpulse
     std::vector<float> left, right;
 };
 
+/** Scales each channel of a response to unit energy. A measurement whose source stood nearer
+    one microphone (Stone Abbey's is 4.7 dB louder on the right) would otherwise lean the whole
+    choir to that side and push that side into the output limiter first. False if silent. */
+bool normaliseRoom (RoomImpulse& ir);
+
 /** Windowed-sinc resampling, for impulse responses (off the audio thread). */
 std::vector<float> resampleImpulse (const std::vector<float>& x, double fromRate, double toRate);
 

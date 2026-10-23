@@ -49,28 +49,22 @@ namespace
         AudioBuffer<float> buf ((int) reader->numChannels, n);
         reader->read (&buf, 0, n, 0, true, true);
 
-        // The decay was stored flattened: take that back out, then scale to unit energy.
+        // The decay was stored flattened: take that back out, then scale each side to unit energy.
         auto ir = std::make_shared<sc::RoomImpulse>();
         ir->sampleRate = reader->sampleRate;
         ir->left.resize ((size_t) n);
         ir->right.resize ((size_t) n);
         const double step = std::pow (10.0, -emphasisFor (file) / reader->sampleRate / 20.0);
         const int rightCh = std::min (1, buf.getNumChannels() - 1);
-        double g = 1.0, energy = 0.0;
+        double g = 1.0;
         for (int i = 0; i < n; ++i)
         {
-            const float l = (float) (buf.getSample (0, i) * g), r = (float) (buf.getSample (rightCh, i) * g);
-            ir->left[(size_t) i] = l;
-            ir->right[(size_t) i] = r;
-            energy += 0.5 * ((double) l * l + (double) r * r);
+            ir->left[(size_t) i] = (float) (buf.getSample (0, i) * g);
+            ir->right[(size_t) i] = (float) (buf.getSample (rightCh, i) * g);
             g *= step;
         }
-        if (energy <= 0.0)
+        if (! sc::normaliseRoom (*ir))
             return {};
-        const float scale = (float) (1.0 / std::sqrt (energy));
-        for (auto* ch : { &ir->left, &ir->right })
-            for (auto& v : *ch)
-                v *= scale;
         return ir;
     }
 
