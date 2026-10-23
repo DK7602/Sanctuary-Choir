@@ -2151,7 +2151,7 @@ TEST (passesSingInTheChoir)
 
     std::vector<test::SungNote> other = melody;
     for (size_t k = 0; k < other.size(); ++k)
-        other[k].seconds *= 1.0f + 0.04f * (float) (((k * 3) % 5) - 2);
+        other[k].seconds *= 1.0f + 0.04f * (float) ((int) ((k * 3) % 5) - 2);
     const auto raw2 = test::singMelody (other, sr, Tenor, 30.0f, 21);
     const auto raw3 = test::singMelody (melody, sr, Tenor, 26.0f, 33);
     const auto pass2 = alignPass (take.data(), n, raw2.data(), (int64_t) raw2.size(), sr);
