@@ -10,3 +10,4 @@ synthetic test voice, then learned and rendered by the engine):
 - `demo-ah.mp3`: `--learn --voice ah --style sacred --size 70`
 - `demo-gospel.mp3`: `--learn --voice words --style gospel --harmony gospel --size 45 --reverb 40`
 - `demo-massive.mp3`: `--learn --voice ah --style sacred --size 70 --energy 90 --sub 80` (the recorded choir at Massive energy, with oktavists)
+- `demo-children.mp3`: `--learn --voice ah --style sacred --size 50 --reverb 65 --lead -60 --ensemble children` (the children's choir alone)
