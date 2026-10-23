@@ -194,3 +194,64 @@ The steps:
 
 In the UI the venue picks the room: the scene crossfades to it, and Choir Size reveals the
 same share of that room's choir (5 singers in the studio, 62 in the cathedral).
+
+# The stage
+
+`build_stage_art.py` makes the Stage page's art from `design/mockups/stage/stage-parts.webp`
+(one picture: the four sections on their risers, and the lead singer from the front and
+from behind). It writes `ui/assets/stage/{sop,alt,ten,bas,lead-front,lead-back}.webp` and
+`manifest.json` (`{ <name>: { file, w, h } }`).
+
+```sh
+tools/art/.venv/bin/python tools/art/build_stage_art.py                 # everything
+tools/art/.venv/bin/python tools/art/build_stage_art.py --stage pieces  # only cut (.work/stage/1-*.png)
+tools/art/.venv/bin/python tools/art/build_stage_art.py --stage fix     # cut and fix (.work/stage/2-*.png)
+```
+
+1. **Pieces.** Each section is a connected part of the picture's alpha. Each view of the
+   lead stands just below a section and reaches over its risers: SAM, given a box around
+   him and a point on his chest (`LEADS`), tells him from them, and whatever is left
+   hanging below the risers (the head of his microphone) is his too. The risers' front
+   edge is carried across where he stood (a parabola through the edge either side) and
+   the riser behind his head and hands is inpainted.
+2. **Proportions.** The picture drew each section's front row too short: faces match the
+   rows behind, but from shoulders to hips (measured in eyes-to-shoulders, by YOLO pose)
+   the front singers are 7-15% shorter. Each front singer's body, shoulders to ankles, is
+   stretched by as much as that takes (at most `MAX_STRETCH`) and the head lifted with it,
+   as one layer (SAM outlines) warped column by column, so neighbours keep overlapping as
+   they did. What the taller figures no longer cover is inpainted. The log gives each
+   singer's stretch.
+3. **Quality.** 4x Real-ESRGAN (x4plus, colour and alpha; colour is bled out under the
+   transparent pixels first, so the outline gets no dark fringe), then GFPGAN v1.4 redraws
+   every face RetinaFace finds, blended in at `GFPGAN_WEIGHT` so each face keeps its own
+   features. The lead's in particular is meant to read as no one race.
+4. **Sizes.** Scaled down (premultiplied) to `OUT_WIDTH` (sections) or `OUT_HEIGHT`
+   (leads), WebP q90 with alpha.
+
+It needs, besides the YOLO pose and SAM weights above, in `tools/art/.cache/restore/`:
+
+| file | from |
+|---|---|
+| `RealESRGAN_x4plus.pth` | https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.1.0 |
+| `GFPGANv1.4.pth` | https://github.com/TencentARC/GFPGAN/releases/tag/v1.3.0 |
+| `detection_Resnet50_Final.pth`, `parsing_parsenet.pth` | https://github.com/xinntao/facexlib/releases/tag/v0.1.0 and v0.2.2 |
+
+and these packages in the venv (BasicSR 1.4.2 needs two one-line fixes for Python 3.13
+and current torchvision: in `setup.py`, `get_version()` must `exec` into a dict and read
+`__version__` from it; in `basicsr/data/degradations.py`, import `rgb_to_grayscale` from
+`torchvision.transforms.functional` instead of `functional_tensor`):
+
+```sh
+tools/art/.venv/bin/pip download --no-deps --no-binary :all: basicsr==1.4.2   # then unpack and fix as above
+tools/art/.venv/bin/pip install --no-deps --no-build-isolation ./basicsr-1.4.2
+tools/art/.venv/bin/pip install --no-deps facexlib==0.3.0 gfpgan==1.3.8 realesrgan==0.3.0
+tools/art/.venv/bin/pip install addict==2.4.0 filterpy==1.4.5 lmdb==3.0.0 numba==0.68.0 scikit-image==0.26.0 tqdm==4.70.1 yapf==0.43.0
+```
+
+A full run takes about 30 minutes on 4 cores, most of it in Real-ESRGAN.
+
+In the UI the Stage page draws the stage from the hall: each section's picture stands with
+its risers' front edge on the floor at the front of its depth, scaled for perspective; it
+follows the section's width only a little (at most 15% stretch), and a coloured mark on the
+floor shows the width exactly. YOU are drawn from behind at the microphones and from the
+front on the stage.
