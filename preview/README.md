@@ -4,10 +4,13 @@
 in any browser. Without the plugin, `ui/js/bridge.js` switches to a simulated engine.
 
 The demo MP3s were made with `sanctuary_render --synth-demo` ("Amazing Grace" sung by the built-in
-synthetic test voice, then learned and rendered by the engine):
+synthetic test voice, then learned and rendered by the engine). The recorded choir ones add
+`--voices <dir>`: Sanctuary Voices decoded to WAV (the render tool reads WAV only), or the
+voice pack builder's output.
 
 - `demo-input.mp3`: the solo test voice
 - `demo-ah.mp3`: `--learn --voice ah --style sacred --size 70`
 - `demo-gospel.mp3`: `--learn --voice words --style gospel --harmony gospel --size 45 --reverb 40`
 - `demo-massive.mp3`: `--learn --voice ah --style sacred --size 70 --energy 90 --sub 80` (the recorded choir at Massive energy, with oktavists)
 - `demo-children.mp3`: `--learn --voice ah --style sacred --size 50 --reverb 65 --lead -60 --ensemble children` (the children's choir alone)
+- `demo-kyrie.mp3`: `--words "Kyrie eleison, Christe eleison, Kyrie eleison" --size 80` (typed words on MIDI chords; the recorded singers sing the consonants they have)
