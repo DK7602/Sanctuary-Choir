@@ -23,6 +23,8 @@
 //     --venue NAME         cathedral | abbey | chapel | concert | gospel | studio  (default cathedral)
 //     --rooms DIR          the venues' measured rooms as WAV (<slug>.wav, from tools/rooms/build_rooms.py
 //                          --wav); without it the algorithmic reverb plays the venue
+//     --wet-only           only the room (the reverb), as the ROOM stem
+//     --volume DB          the Volume knob (default 0)
 #include "TestSignals.h"
 
 #include <sanctuary/Learn.h>
@@ -94,6 +96,8 @@ int main (int argc, char** argv)
         else if (a == "--stems") stemsDir = next();
         else if (a == "--voices") voicesDir = next();
         else if (a == "--rooms") roomsDir = next();
+        else if (a == "--wet-only") p.wetOnly = true;
+        else if (a == "--volume") p.volumeDb = std::stof (next());
         else if (a == "--venue") p.venue = (Venue) indexOf ({ { "cathedral", 0 }, { "abbey", 1 }, { "chapel", 2 }, { "concert", 3 }, { "gospel", 4 }, { "studio", 5 } }, next(), 0);
         else if (a == "--ensemble") p.ensemble = (Ensemble) indexOf ({ { "choir", 0 }, { "children", 1 }, { "gang", 2 }, { "congregation", 3 } }, next(), 0);
         else if (a == "--words") words = next();

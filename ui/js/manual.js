@@ -107,7 +107,7 @@ ${go("perform", "Show me the main page")}`,
       body: `
 <p>Drag a knob up or down to turn it. Double-click it to put it back to where it started.</p>
 <dl class="m-dl">
-<dt>${ui("VOLUME")}</dt><dd>The level of everything coming out: your voice, the choir and the room.</dd>
+<dt>${ui("VOLUME")}</dt><dd>The level of everything coming out: your voice, the choir and the room. It starts at -3 dB, so a loud vocal with the choir on top still has room before the output limiter.</dd>
 <dt>${ui("CHOIR SIZE")}</dt><dd>How many singers, from none to 40. You see them fill the room, front row first. More singers sound bigger and smoother; a handful sound like a small ensemble.</dd>
 <dt>${ui("SPACE")}</dt><dd>How wide the stage is, and how much of the room's first echoes you hear. Low is narrow and close; high surrounds you.</dd>
 <dt>${ui("REVERB")}</dt><dd>How much of the room you hear. The room itself (cathedral, chapel, studio...) is chosen at the top left of the church.</dd>

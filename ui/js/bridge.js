@@ -32,7 +32,7 @@
     const int = (id, name, min, max, def) => ({ id, name, type: "int", min, max, interval: 1, skew: 1, default: def });
 
     const defs = [
-      db("volume", "Volume", 0, -60, 12),
+      db("volume", "Volume", -3, -60, 12),
       { id: "choirSize", name: "Choir Size", type: "float", min: 0, max: 100, interval: 1, skew: 1, default: 70, label: "%" },
       pct("space", "Space", 60), pct("reverb", "Reverb", 65),
       { id: "tone", name: "Tone", type: "float", min: -12, max: 12, interval: 0.1, skew: 1, default: 0, label: "dB" },

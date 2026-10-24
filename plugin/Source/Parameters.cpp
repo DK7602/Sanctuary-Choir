@@ -49,7 +49,10 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 
     // Perform -------------------------------------------------------------
     auto perform = std::make_unique<AudioProcessorParameterGroup> ("perform", "Perform", "|");
-    perform->addChild (std::make_unique<APF> (pid (ParamIDs::volume), "Volume", NormalisableRange<float> (-60.0f, 12.0f, 0.1f, 2.2f), 0.0f, dbAttrs()));
+    // -3 dB: your voice comes through at full level and the choir and the room add to it, so at
+    // 0 dB a vocal recorded loud already peaks at the output limiter. A saved song or preset keeps
+    // the Volume it had.
+    perform->addChild (std::make_unique<APF> (pid (ParamIDs::volume), "Volume", NormalisableRange<float> (-60.0f, 12.0f, 0.1f, 2.2f), -3.0f, dbAttrs()));
     perform->addChild (std::make_unique<APF> (pid (ParamIDs::choirSize), "Choir Size", NormalisableRange<float> (0.0f, 100.0f, 1.0f), 70.0f, percentAttrs()));
     perform->addChild (std::make_unique<APF> (pid (ParamIDs::space), "Space", NormalisableRange<float> (0.0f, 100.0f, 0.1f), 60.0f, percentAttrs()));
     perform->addChild (std::make_unique<APF> (pid (ParamIDs::reverb), "Reverb", NormalisableRange<float> (0.0f, 100.0f, 0.1f), 65.0f, percentAttrs()));
