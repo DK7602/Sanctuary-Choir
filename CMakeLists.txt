@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(SanctuaryChoir VERSION 1.0.0 LANGUAGES C CXX)
+# The version the plug-in, its installers and Settings show: a release tag's (CI passes
+# -DSANCTUARY_VERSION=1.2.0 for the tag v1.2.0), else 1.0.0. Numbers only (Audio Units need it).
+set(SANCTUARY_VERSION "1.0.0" CACHE STRING "Plug-in version (major.minor.patch)")
+project(SanctuaryChoir VERSION ${SANCTUARY_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

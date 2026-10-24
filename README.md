@@ -84,7 +84,7 @@ To download a build:
 
 New here? Read the [user guide](docs/USER_GUIDE.md).
 
-Pushing a tag such as `v1.0.0` also publishes the zips as a GitHub Release.
+Pushing a tag such as `v1.2.0` also publishes the zips as a GitHub Release, and the tag sets the version the plug-in, its installers and Settings show (other builds say 1.0.0).
 
 ## Building from source
 

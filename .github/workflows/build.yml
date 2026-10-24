@@ -59,7 +59,7 @@ jobs:
       - name: Install WebView2 SDK (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: nuget install Microsoft.Web.WebView2 -OutputDirectory C:/webview2 -NonInteractive
+        run: nuget install Microsoft.Web.WebView2 -Version 1.0.4314.35 -OutputDirectory C:/webview2 -NonInteractive
 
       # JUCE lives in its own cached folder that CMake uses as is (a cached copy inside build/
       # was deleted and cloned again by FetchContent on every run).
@@ -75,6 +75,15 @@ jobs:
         shell: bash
         run: git clone --depth 1 --branch 9.0.4 https://github.com/juce-framework/JUCE.git .juce/JUCE
 
+      # A release tag (v1.2.0, or v1.2.0-beta) sets the version; anything else builds 1.0.0.
+      - name: Version
+        shell: bash
+        run: |
+          VERSION=1.0.0
+          if [[ "$GITHUB_REF" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+) ]]; then VERSION="${BASH_REMATCH[1]}"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Version $VERSION"
+
       - name: Configure
         shell: bash
         run: |
@@ -85,7 +94,7 @@ jobs:
             Windows) ARGS=(-DJUCE_WEBVIEW2_PACKAGE_LOCATION=C:/webview2) ;;
             *)       ARGS=(-G Ninja) ;;
           esac
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$PWD/.juce/JUCE" -DSANCTUARY_BUILD_ID="${SHA:0:7}" "${ARGS[@]}"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$PWD/.juce/JUCE" -DSANCTUARY_BUILD_ID="${SHA:0:7}" -DSANCTUARY_VERSION="$VERSION" "${ARGS[@]}"
 
       - name: Build
         shell: bash
@@ -103,7 +112,7 @@ jobs:
             macOS)   PV=pluginval_macOS.zip ;;
             Windows) PV=pluginval_Windows.zip ;;
           esac
-          curl -sSfL -o pv.zip "https://github.com/Tracktion/pluginval/releases/latest/download/$PV"
+          curl -sSfL -o pv.zip "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/$PV"
           mkdir -p pv && (cd pv && cmake -E tar xf ../pv.zip)
           VST3="build/plugin/SanctuaryChoir_artefacts/Release/VST3/Sanctuary Choir.vst3"
           case "$RUNNER_OS" in
@@ -126,8 +135,6 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          VERSION=1.0.0
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF#refs/tags/v}"; fi
           OUT="Sanctuary-Choir-${{ matrix.name }}"
           mkdir -p "dist/$OUT"
           ART=build/plugin/SanctuaryChoir_artefacts
