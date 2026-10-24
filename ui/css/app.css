@@ -672,4 +672,7 @@ html, body {
 #manual .m-toc::-webkit-scrollbar, #manual .m-content::-webkit-scrollbar { width: 8px; }
 #manual .m-toc::-webkit-scrollbar-thumb, #manual .m-content::-webkit-scrollbar-thumb { background: rgba(232, 201, 138, 0.35); border-radius: 4px; }
 #manual .m-toc::-webkit-scrollbar-track, #manual .m-content::-webkit-scrollbar-track { background: transparent; }
-.manual-btn { font-size: 13px; letter-spacing: 2px; }
+/* Keyboard focus shows on the controls that hide the browser's own outline. */
+.hit:focus-visible::after, .tab:focus-visible, .pill:focus-visible, .page-close:focus-visible {
+  outline: 2px solid rgba(255, 214, 140, 0.9); outline-offset: 2px;
+}

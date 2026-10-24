@@ -320,7 +320,10 @@
   // Pages opened from another page (not a tab) keep that page's tab lit.
   const SUB_PAGES = { take: "settings", stage: "mix", words: "settings", passes: "settings" };
   function setTab(tab) {
-    if (!SUB_PAGES[tab] && !SUB_PAGES[state.tab]) state.returnTab = state.tab;
+    // Remember the tab a sub-page was opened from, so its ✕ goes back there.
+    if (SUB_PAGES[tab] && !SUB_PAGES[state.tab]) state.returnTab = state.tab;
+    // Any page change closes the manual (it covers the pages).
+    if (window.SCManual && window.SCManual.isOpen()) window.SCManual.close();
     state.tab = tab;
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === (SUB_PAGES[tab] || tab)));
     const mixTab = document.querySelector('.tab[data-tab="mix"]');
@@ -381,6 +384,7 @@
       input.placeholder = "Name your sound...";
       input.addEventListener("keydown", (e) => {
         e.stopPropagation();
+        if (e.key === "Escape") Menu.close();
         if (e.key === "Enter" && input.value.trim()) { SC.send({ type: "cmd", name: "presetSave", value: input.value.trim() }); Menu.close(); }
       });
       m.appendChild(input);
@@ -396,7 +400,8 @@
   function openGearMenu() {
     Menu.open(stageRect($("gearBtn")), (m) => {
       m.classList.add("gear-menu");
-      Menu.item(m, "\u2756  THE MANUAL", false, () => window.SCManual.open(), "action");
+      const manualOpen = window.SCManual.isOpen();
+      Menu.item(m, manualOpen ? "CLOSE THE MANUAL" : "THE MANUAL", false, () => (manualOpen ? window.SCManual.close() : window.SCManual.open()), "action");
       Menu.item(m, state.tab === "settings" ? "BACK TO PERFORM" : "SETTINGS", false, () => setTab(state.tab === "settings" ? "perform" : "settings"), "action");
       Menu.sep(m);
       // Opened once this menu has closed (picking an item closes the menu it is in).
@@ -574,7 +579,7 @@
       Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || MAX_ENGINE_SINGERS)), Choir.maxSingers() || MAX_ENGINE_SINGERS), true);
       showRoom(true);
     });
-    setTab(info.tab && ["perform", "mix", "fx", "settings", "take", "stage"].includes(info.tab) ? info.tab : "perform");
+    setTab(info.tab && ["perform", "mix", "fx", "settings", "take", "stage", "words", "passes"].includes(info.tab) ? info.tab : "perform");
   }
 
   //==========================================================================
@@ -665,7 +670,7 @@
                    ["demo-passes.mp3", "Words \u00b7 four passes", 2, 45], ["demo-gospel-plain.mp3", "Words \u00b7 your voice only", 2, 45], ["demo-kyrie.mp3", "Sung words \u00b7 Kyrie", 1.25, 80], ["demo-children.mp3", "Children\u2019s choir", 2, 50]];
     const panel = document.createElement("div");
     panel.id = "previewPanel";
-    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. "Four passes" is the same choir singing from the take and three more passes of it. "Your voice only" is the gospel choir with Real Voices at 0, every singer your own voice. "Massive" is the recorded choir with Energy at 90 and Sub-Octave at 80. "Children\u2019s choir" is the choir alone, Ensemble on Children. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0).</div>';
+    panel.innerHTML = '<div class="pp-text"><b>Sanctuary Choir</b> interface preview. The knobs, menus and pages all work; the sound engine is simulated here. Turn <b>Choir Size</b> to add singers.</div><div class="pp-demos"><span class="pp-label">Hear the engine</span></div><div class="pp-note">"Amazing Grace" sung by the built-in test voice, then learned and rendered by Sanctuary Choir; "Kyrie eleison" typed as words and played on MIDI chords. "Four passes" is the same choir singing from the take and three more passes of it. "Your voice only" is the gospel choir with Real Voices at 0, every singer your own voice. "Massive" is the recorded choir with Energy at 90 and Sub-Octave at 80. "Children\u2019s choir" is the choir alone, Ensemble on Children. Recorded choir: Sanctuary Voices (VocalSet, CC BY 4.0). Rooms: measured in the church of Santi Marcellino e Pietro, Cremona (ChurchIR, CC BY 4.0); see Credits in the manual.</div>';
     const row = panel.querySelector(".pp-demos");
     const audio = new Audio();
     audio.preload = "none";

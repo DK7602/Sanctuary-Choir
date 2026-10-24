@@ -11,13 +11,13 @@
   // The main page, numbered. Positions are in the window's own pixels (1448 x 1086).
   const PINS = [
     [57, 45, "The gear: the manual, settings and saving presets"],
-    [290, 45, "Presets: pick a ready-made sound"],
+    [382, 45, "Presets: pick a ready-made sound"],
     [425, 45, "Previous and next preset"],
-    [1213, 48, "Pages: Perform, Mix, FX and Settings"],
-    [347, 142, "The room the choir sings in"],
-    [1101, 142, "Energy: how hard the choir sings"],
-    [290, 199, "The key, and the chord being sung"],
-    [1160, 199, "How many singers there are"],
+    [1213, 13, "Pages: Perform, Mix, FX and Settings"],
+    [494, 134, "The room the choir sings in"],
+    [1166, 129, "Energy: how hard the choir sings"],
+    [186, 199, "The key, and the chord being sung"],
+    [1262, 199, "How many singers there are"],
     [725, 330, "The choir: click it to arrange the stage"],
     [137, 650, "Volume"],
     [328, 650, "Choir Size"],
@@ -25,17 +25,17 @@
     [925, 650, "Reverb"],
     [1119, 650, "Tone"],
     [1312, 650, "Presence"],
-    [210, 828, "Harmony Mode"],
-    [480, 828, "Key"],
-    [725, 828, "Scale"],
-    [990, 828, "Style"],
-    [1285, 828, "Vocal Type"],
-    [114, 910, "LEARN"],
-    [114, 964, "LOAD"],
-    [114, 1013, "CLEAR"],
+    [284, 823, "Harmony Mode"],
+    [534, 823, "Key"],
+    [775, 823, "Scale"],
+    [1050, 823, "Style"],
+    [1362, 823, "Vocal Type"],
+    [22, 910, "LEARN"],
+    [22, 964, "LOAD"],
+    [22, 1013, "CLEAR"],
     [722, 952, "The four sections"],
-    [1335, 911, "FREEZE"],
-    [1335, 991, "RENDER"],
+    [1428, 911, "FREEZE"],
+    [1428, 991, "RENDER"],
   ];
 
   function tour() {
@@ -45,7 +45,7 @@
     });
     let legend = "";
     PINS.forEach(([, , label], i) => { legend += '<li data-pin="' + (i + 1) + '"><span class="m-num">' + (i + 1) + "</span>" + label + "</li>"; });
-    return '<div class="m-figure"><img src="assets/skin/skin.jpg" alt="The main page" draggable="false">' + pins + "</div>"
+    return '<div class="m-figure"><img src="assets/manual/main-page.jpg" alt="The main page" draggable="false">' + pins + "</div>"
       + '<ol class="m-legend">' + legend + "</ol>";
   }
 
@@ -76,7 +76,7 @@
 <li><b>Put Sanctuary Choir on your vocal track</b> as an effect. Use a <b>stereo</b> track: the choir is spread across a stereo stage. (The next chapter shows where to find it in each DAW.)</li>
 <li><b>Sing</b>, or play back a vocal you already recorded. You hear a choir around your voice straight away.</li>
 <li><b>Turn ${ui("CHOIR SIZE")} up or down.</b> You see the singers walk in and out of the choir loft.</li>
-<li><b>Pick a ${ui("VOCAL TYPE")}.</b> ${ui("Words (Your Voice)")} keeps your lyrics: every singer is your own voice, re-pitched. ${ui("Ah")}, ${ui("Oh")}, ${ui("Oo")}, ${ui("Ee")} and ${ui("Eh")} are sung by real recorded singers on a vowel, like a classic choir pad.</li>
+<li><b>Pick a ${ui("VOCAL TYPE")}.</b> ${ui("Words (Your Voice)")} keeps your lyrics: every singer is your own voice, re-pitched. ${ui("Ah (Vowels)")}, ${ui("Oh")}, ${ui("Oo")}, ${ui("Ee")} and ${ui("Eh")} are sung by real recorded singers on a vowel, like a classic choir pad.</li>
 <li><b>Pick a ${ui("STYLE")} and a room</b> (the room name at the top left of the church). Try ${ui("Gospel")} in the ${ui("Gospel Church")}, or ${ui("Sacred")} in the ${ui("Grand Cathedral")}.</li>
 <li><b>For the best result, LEARN and RENDER:</b> press ${ui("LEARN")}, play your song from the start, press ${ui("LEARN")} again at the end, then press ${ui("RENDER")}. The choir now knows your whole song and sings it at full quality.</li>
 </ol>
@@ -133,7 +133,7 @@ ${tip("The <b>Energy</b> plaque at the top right of the church is a seventh knob
 </dl>
 <h4>${ui("KEY")} and ${ui("SCALE")}</h4>
 <ul>
-<li>Both start on <b>Auto</b>: Sanctuary listens and works out the key (usually within a phrase or two) and whether the song is major or minor. The field shows what it heard, such as <i>Auto · E♭</i>.</li>
+<li>Both start on <b>Auto</b>: Sanctuary listens and works out the key (usually within a phrase or two) and whether the song is major or minor. The field shows what it heard, such as <i>Auto · Eb</i>.</li>
 <li>Click the small <b>padlock</b> beside the key once it's right, to keep it. The key is remembered with your project.</li>
 <li>Know the key? Set it yourself and the harmony is right from the very first note.</li>
 <li>Choose a scale yourself for the modes (Dorian, Mixolydian, Lydian, Phrygian), Harmonic Minor, Gospel (blues) or Chromatic.</li>
@@ -179,10 +179,10 @@ ${go("mix", "Show me the MIX page")}`,
     {
       id: "live", title: "Recording and performing live", summary: "Studio or Live: how the choir's small delay is handled, and what to use when.",
       body: `
-<p>To re-pitch a voice, the choir has to hear a little of it first, so it runs about 39 thousandths of a second behind you (this small delay is called <i>latency</i>). ${ui("SETTINGS")} › ${ui("MONITORING")} chooses how that is handled:</p>
+<p>To re-pitch a voice, the choir has to hear a little of it first, so it runs about 40 thousandths of a second behind you (this small delay is called <i>latency</i>). ${ui("SETTINGS")} › ${ui("MONITORING")} chooses how that is handled, and shows the exact figures for your session:</p>
 <dl class="m-dl">
 <dt>${ui("STUDIO")} (the default)</dt><dd>Your voice and the choir line up exactly. Your DAW knows about the delay and makes up for it on playback. While you record, though, you hear yourself slightly late. <b>Use it for mixing and for singing over a track you already recorded.</b></dd>
-<dt>${ui("LIVE")}</dt><dd>You hear your own voice instantly. The vowel choir follows about 15 thousandths of a second behind you, Words about 39, like a choir following its soloist. <b>Use it for recording, rehearsing and performing.</b></dd>
+<dt>${ui("LIVE")}</dt><dd>You hear your own voice almost at once (1.5 thousandths of a second, the time the output limiter looks ahead). The vowel choir follows about 16 thousandths of a second behind you, Words about 40, like a choir following its soloist. <b>Use it for recording, rehearsing and performing.</b></dd>
 </dl>
 ${tip("Record in Live, then switch back to Studio before you mix or bounce, so the choir sits exactly on the beat. Learned and rendered takes stay in time in both.")}
 <ul>
@@ -229,7 +229,7 @@ ${go("passes", "Show me Multi-Take")}`,
 <ol class="m-steps">
 <li>Click a chord in the lane. A menu lists the chords that could go there, best first; the bar beside each shows how much of your melody fits it.</li>
 <li>Pick one. It turns gold with a padlock, and the chords around it are worked out again so they lead in and out of it.</li>
-<li>To undo, click the gold chord and choose ${ui("Let the choir choose")}. ${ui("UNLOCK ALL")} undoes every chord you chose.</li>
+<li>To undo, click the gold chord and choose ${ui("LET THE CHOIR CHOOSE")}. ${ui("UNLOCK ALL")} undoes every chord you chose.</li>
 </ol>
 <p>Your chords are saved with the project and win over everything else. Press ${ui("RENDER")} to hear them in the rendered choir.</p>
 <h4>Drag into your DAW</h4>
@@ -342,7 +342,7 @@ ${go("stage", "Show me the stage")}`,
 <dt>Stone Abbey</dt><dd>Gothic stone, 4.3 s: the St. Nicholas Chapel of Aachen Cathedral. With the Gregorian style, monks sing here.</dd>
 <dt>Wooden Chapel</dt><dd>Warm and close, 1.5 s: a wood-panelled hall in Detmold.</dd>
 <dt>Concert Hall</dt><dd>Clear and wide, 2.1 s: the Arvedi Auditorium in Cremona.</dd>
-<dt>Gospel Church</dt><dd>Lively, 1.7 s: a church sound with a full house.</dd>
+<dt>Gospel Church</dt><dd>Lively, 1.7 s: the cathedral's church with its decay shortened, the sound of a full, lively church.</dd>
 <dt>Studio Room</dt><dd>Dry and intimate: BBC Maida Vale Studio 5.</dd>
 </dl>
 <h4>Reverb</h4>
@@ -374,7 +374,7 @@ ${go("fx", "Show me the FX page")}`,
 <dt>${ui("SCENES")}</dt><dd>See the next chapter.</dd>
 <dt>${ui("MANUAL")}</dt><dd>Opens this manual. So does the gear at the top left.</dd>
 </dl>
-<p>The line at the bottom shows the version, the delay your DAW is told about, and a reminder if you're on a mono track.</p>
+<p>The line at the bottom shows the version and build, the delay your DAW is told about (in Live mode, the 1.5 ms of the limiter), and a reminder if you're on a mono track.</p>
 ${go("settings", "Show me Settings")}`,
     },
     {
@@ -389,7 +389,7 @@ ${go("settings", "Show me Settings")}`,
 <h4>Scenes</h4>
 <p>Store up to 8 sounds for one song, such as verse, chorus and bridge: on the Settings page press ${ui("STORE")}, then a number. Click a number to bring that sound back, or automate the <b>Scene</b> parameter so the choir changes by itself as the song plays.</p>
 <h4>Automation</h4>
-<p>Every knob, menu and switch can be automated in your DAW. Favourites: <b>Energy</b> (a hushed verse into a massive chorus), <b>Singing</b> (breathy verse, belted chorus), <b>Choir Size</b>, <b>Lead Position</b> (a soloist who walks forward) and <b>Freeze</b>.</p>
+<p>The knobs, menus and switches of the sound can be automated in your DAW (the set-up switches, such as MIDI, Follow the Band, Tuning and Monitoring, can't). Favourites: <b>Energy</b> (a hushed verse into a massive chorus), <b>Singing</b> (breathy verse, belted chorus), <b>Choir Size</b>, <b>Lead Depth</b> with Lead on Stage on (a soloist who walks forward) and <b>Freeze</b>.</p>
 <h4>${ui("FREEZE")}</h4>
 <p>Holds the chord the choir is singing, for as long as you like, while you sing over it. Great for a big final chord.</p>`,
     },
@@ -453,16 +453,16 @@ ${go("settings", "Show me Settings")}`,
     {
       id: "credits", title: "Credits", summary: "Who made the recordings and rooms Sanctuary Choir is built on.",
       body: `
-<p><b>Sanctuary Voices</b>, the recorded singers, are cut from <i>VocalSet</i> by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (ISMIR 2018), under the Creative Commons Attribution 4.0 licence, with note and lyric times from <i>Annotated-VocalSet</i> (CC BY 4.0).</p>
+<p><b>Sanctuary Voices</b>, the recorded singers, are cut from <i>VocalSet: A Singing Voice Dataset</i> by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (ISMIR 2018, zenodo.org/records/1442513), with note and lyric times from <i>Annotated-VocalSet</i> by Behnam Faghih and Joseph Timoney (zenodo.org/records/7061507). Both are under the Creative Commons Attribution 4.0 licence (creativecommons.org/licenses/by/4.0).</p>
 <p><b>The rooms</b> are measured impulse responses, used under Creative Commons Attribution licences:</p>
 <ul>
-<li>Grand Cathedral and Gospel Church: ChurchIR, Santi Marcellino e Pietro, Cremona. Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (CC BY 4.0).</li>
-<li>Stone Abbey: the St. Nicholas Chapel, Aachen Cathedral. Martin Zerwas and Selin Kayku (CC BY 4.0).</li>
-<li>Wooden Chapel: the Brahmssaal, Detmold University of Music. Sebastia Vicenc Amengual Gari, Banu Sahin, Dusty Eddy and Malte Kob (CC BY 4.0).</li>
-<li>Concert Hall: the Giovanni Arvedi Auditorium, Cremona. Federico Miotello and colleagues (CC BY 4.0).</li>
-<li>Studio Room: BBC Maida Vale Studio 5. Gavin Kearney, Helena Daffern and colleagues at the University of York, with BBC R&amp;D (CC BY 3.0).</li>
+<li>Grand Cathedral and Gospel Church: the church of Santi Marcellino e Pietro, Cremona, from <i>ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Applications</i> by Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (zenodo.org/records/14901751, CC BY 4.0).</li>
+<li>Stone Abbey: the St. Nicholas Chapel, Aachen Cathedral, from <i>Room acoustic measurement and decay analysis data of the St. Nicholas Chapel, Aachen Cathedral</i>, © 2026 Martin Zerwas and Selin Kayku (zenodo.org/records/23312556, CC BY 4.0).</li>
+<li>Wooden Chapel: the Brahmssaal, Detmold University of Music, from <i>Open Database of Spatial Room Impulse Responses at Detmold University of Music</i> by Sebastia Vicenc Amengual Gari, Banu Sahin, Dusty Eddy and Malte Kob (zenodo.org/records/4116247, CC BY 4.0).</li>
+<li>Concert Hall: the Giovanni Arvedi Auditorium, Cremona, from <i>The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium in Cremona</i> by Federico Miotello and colleagues (zenodo.org/records/20098848, CC BY 4.0).</li>
+<li>Studio Room: BBC Maida Vale Studio 5, from the <i>BBC Maida Vale Impulse Response Dataset</i> by Gavin Kearney, Helena Daffern and colleagues at the University of York, with BBC R&amp;D (zenodo.org/records/10020866, CC BY 3.0, creativecommons.org/licenses/by/3.0).</li>
 </ul>
-<p>The rooms were changed for Sanctuary Choir (direct sound removed, noise floor replaced, some decays lengthened or shortened); ROOMS-CREDITS.txt, next to the plug-in, says exactly how. The licensors don't endorse Sanctuary Choir.</p>
+<p>The rooms were changed for Sanctuary Choir: direct sound removed, the noise floor replaced by each band's own decay, some decays lengthened or shortened (the Gospel Church is the Cremona church at 0.45 of its decay), high-passed at 40 Hz and evened out left to right. ROOMS-CREDITS.txt lists every change, room by room; the installers put it in the Sanctuary Choir folder (Windows: C:\ProgramData\Sanctuary Choir; Mac: /Library/Application Support/Sanctuary Choir). The licensors don't endorse Sanctuary Choir, and the material is provided as is.</p>
 <p>Fonts: Cinzel, Cormorant Garamond and Montserrat (SIL Open Font License).</p>`,
     },
   ];
@@ -471,7 +471,8 @@ ${go("settings", "Show me Settings")}`,
   let root = null, toc = null, content = null, search = null, current = null, info = {};
 
   const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const plain = (html) => html.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ");
+  const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', nbsp: " " };
+  const plain = (html) => html.replace(/<[^>]+>/g, " ").replace(/&([a-z]+);/g, (m, e) => ENTITIES[e] || " ").replace(/\s+/g, " ");
   CHAPTERS.forEach((c) => { c.text = (c.title + " " + c.summary + " " + plain(c.body)).toLowerCase(); });
 
   // Wraps each match of the query inside the text of el (not inside its tags).
@@ -515,7 +516,10 @@ ${go("settings", "Show me Settings")}`,
     content.scrollTop = 0;
     const first = content.querySelector("mark");
     if (first) first.scrollIntoView({ block: "center" });
-    toc.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.id === c.id));
+    toc.querySelectorAll("button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.id === c.id);
+      if (b.dataset.id === c.id) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+    });
     try { localStorage.setItem("sc.manual.chapter", c.id); } catch (e) { /* storage may be unavailable */ }
   }
 
@@ -529,6 +533,7 @@ ${go("settings", "Show me Settings")}`,
       b.dataset.id = c.id;
       b.innerHTML = '<span class="m-toc-num">' + (i + 1) + "</span>" + escapeHtml(c.title);
       b.classList.toggle("on", c.id === current);
+      if (c.id === current) b.setAttribute("aria-current", "page");
       b.addEventListener("click", () => showChapter(c.id));
       toc.appendChild(b);
       ++shown;
@@ -548,6 +553,7 @@ ${go("settings", "Show me Settings")}`,
     root.id = "manual";
     root.className = "hidden";
     root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
     root.setAttribute("aria-label", "Manual");
     root.innerHTML = '<div class="m-head"><h2>THE MANUAL</h2>'
       + '<input class="m-search" type="search" placeholder="Search the manual…" aria-label="Search the manual">'
@@ -565,7 +571,20 @@ ${go("settings", "Show me Settings")}`,
       if (shown && query.length >= 2 && cur && !cur.text.includes(query)) showChapter(toc.querySelector("button").dataset.id);
       else showChapter(current);
     });
-    search.addEventListener("keydown", (e) => e.stopPropagation());
+    search.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      // Escape clears the search; with nothing to clear it closes the manual.
+      if (e.key === "Escape" && !search.value) close();
+    });
+    // Keyboard focus stays inside the manual while it is open.
+    root.addEventListener("keydown", (e) => {
+      if (e.key !== "Tab") return;
+      const items = Array.from(root.querySelectorAll("button, input, [tabindex]")).filter((x) => x.offsetParent !== null);
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+      else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+    });
     content.addEventListener("click", (e) => {
       const nav = e.target.closest(".m-prev, .m-next");
       if (nav) { showChapter(nav.dataset.id); return; }
@@ -587,12 +606,20 @@ ${go("settings", "Show me Settings")}`,
     fillToc();
   }
 
+  let returnFocus = null;
   function open(id) {
     if (!root) return;
+    if (!isOpen()) returnFocus = document.activeElement;
     root.classList.remove("hidden");
     showChapter(id || current);
+    search.focus({ preventScroll: true });
   }
-  function close() { if (root) root.classList.add("hidden"); }
+  function close() {
+    if (!isOpen()) return;
+    root.classList.add("hidden");
+    if (returnFocus && returnFocus.focus && document.contains(returnFocus)) returnFocus.focus({ preventScroll: true });
+    returnFocus = null;
+  }
   function isOpen() { return !!root && !root.classList.contains("hidden"); }
 
   window.SCManual = { build, open, close, isOpen, chapters: CHAPTERS };

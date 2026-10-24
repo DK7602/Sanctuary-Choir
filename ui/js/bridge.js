@@ -317,7 +317,7 @@
 
     function receive(msg) {
       if (msg.type === "ready") {
-        emit("init", { params: defs.map((d) => Object.assign({}, d, { value: values[d.id] })), tab: "perform", version: "1.0.0 (preview)", standalone: false, latencyMs: 38.4, liveChoirMs: 14.8, maxSingers: 40 });
+        emit("init", { params: defs.map((d) => Object.assign({}, d, { value: values[d.id] })), tab: "perform", version: "1.0.0 (preview)", standalone: false, latencyMs: 39.9, liveChoirMs: 16.3, outputMs: 1.5, maxSingers: 40 });
         status();
         setInterval(meters, 33);
       } else if (msg.type === "set") {
