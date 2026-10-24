@@ -1579,9 +1579,20 @@ static bool decodeFlac (InputStream& in, int64_t size, double rate, std::vector<
     in.readIntoMemoryBlock (block, (ssize_t) size);
     FlacAudioFormat flac;
     std::unique_ptr<AudioFormatReader> reader (flac.createReaderFor (new MemoryInputStream (block, false), true));
-    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->lengthInSamples > (int64) (rate * 60.0 * 15.0))
+    // A damaged project mustn't make the host allocate gigabytes: the stream's own rate has to
+    // be the stored one, and a take is at most 15 minutes at no more than 192 kHz.
+    if (reader == nullptr || reader->lengthInSamples <= 0 || std::abs (reader->sampleRate - rate) > 1.0
+        || reader->lengthInSamples > (int64) (std::min (rate, 192000.0) * 60.0 * 15.0))
         return false;
-    audio.resize ((size_t) reader->lengthInSamples);
+    try
+    {
+        audio.resize ((size_t) reader->lengthInSamples);
+    }
+    catch (const std::bad_alloc&)
+    {
+        audio.clear();
+        return false;
+    }
     float* dest[] = { audio.data() };
     return reader->read (dest, 1, 0, (int) reader->lengthInSamples);
 }

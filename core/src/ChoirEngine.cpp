@@ -317,6 +317,7 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
         v->assign (kChunk, 0.0f);
     room = fadingRoom = nullptr;
     roomBlend = fadingGain = 0.0f;
+    processedSinceReset = false;
     revOutR.assign (kChunk, 0.0f);
     scratch.assign (kChunk, 0.0f);
 
@@ -400,8 +401,10 @@ void ChoirEngine::reset()
     subLevel = 0.0f;
     glue.reset();
     reverb.reset();
+    reverbIdle = true;
     room = fadingRoom = nullptr;   // the owner hands a fresh one back
     roomBlend = fadingGain = 0.0f;
+    processedSinceReset = false;
     limiter.reset();
     lastLevel = 0.0f;
     unvoicedTime = 10.0f;
@@ -460,12 +463,25 @@ void ChoirEngine::setRoom (ConvolutionRoom* r) noexcept
         r = nullptr;   // made for another sample rate: being rebuilt
     if (r == room)
         return;
-    if (room != nullptr)
+    if (! processedSinceReset)
+    {
+        // Nothing has played yet: start in this room (an export's first note, a fresh session).
+        room = r;
+        roomLevel = getMeasuredRoomLevel (params.venue);
+        roomBlend = r != nullptr ? 1.0f : 0.0f;
+        fadingRoom = nullptr;
+        fadingGain = 0.0f;
+        return;
+    }
+    // A second change within the 300 ms keeps the louder of the two rooms ringing out.
+    if (room != nullptr && (fadingRoom == nullptr || roomBlend * roomLevel >= fadingGain * fadingLevel))
     {
         fadingRoom = room;
         fadingGain = roomBlend;
+        fadingLevel = roomLevel;
     }
     room = r;
+    roomLevel = getMeasuredRoomLevel (params.venue);
 }
 
 void ChoirEngine::setSampleSet (const SampleSet* set) noexcept
@@ -1454,6 +1470,17 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         return;
     }
     midiClock += n;
+    if (! processedSinceReset)
+    {
+        // The first block after prepare() or reset(): start at the settings (an export's first
+        // note at its real levels and places) instead of gliding there from the defaults.
+        for (auto* g : { &volume, &leadGain, &choirGain, &wetGain, &dryChoirGain, &leadSend, &warmthAmt, &leadPlace })
+            g->snap (g->target);
+        for (auto& g : sectionGain)
+            g.snap (g.target);
+        stage.snapToSettings();
+        leadStage.snapToSettings();
+    }
 
     if (const int seed = pendingKeySeed.exchange (-1); seed >= 0)
     {
@@ -2023,14 +2050,16 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
 
 void ChoirEngine::processReverb (int c)
 {
-    // The measured room at the level the algorithmic hall had, so the Reverb knob means the same.
-    const float kRoomLevel = getMeasuredRoomLevel (params.venue);
+    // The measured room at the level the algorithmic hall had, so the Reverb knob means the same
+    // (each room at its own venue's level: a new venue's room takes a moment to build).
+    processedSinceReset = true;
     const float blendFrom = roomBlend;
     const float step = (float) c / (0.08f * (float) sr);
     roomBlend = room != nullptr ? std::min (1.0f, roomBlend + step) : std::max (0.0f, roomBlend - step);
 
     if (blendFrom < 1.0f || roomBlend < 1.0f)
     {
+        reverbIdle = false;
         reverb.process (revInL.data(), revInR.data(), revOutL.data(), revOutR.data(), c);
         for (int i = 0; i < c; ++i)
         {
@@ -2041,6 +2070,12 @@ void ChoirEngine::processReverb (int c)
     }
     else
     {
+        // Handed over to the room: clear the hall, so if it comes back it doesn't replay old sound.
+        if (! reverbIdle)
+        {
+            reverb.reset();
+            reverbIdle = true;
+        }
         std::fill (revOutL.begin(), revOutL.begin() + c, 0.0f);
         std::fill (revOutR.begin(), revOutR.begin() + c, 0.0f);
     }
@@ -2050,7 +2085,7 @@ void ChoirEngine::processReverb (int c)
         room->process (revInL.data(), revInR.data(), roomL.data(), roomR.data(), c, roomShape);
         for (int i = 0; i < c; ++i)
         {
-            const float g = kRoomLevel * (blendFrom + (roomBlend - blendFrom) * (float) (i + 1) / (float) c);
+            const float g = roomLevel * (blendFrom + (roomBlend - blendFrom) * (float) (i + 1) / (float) c);
             revOutL[(size_t) i] += roomL[(size_t) i] * g;
             revOutR[(size_t) i] += roomR[(size_t) i] * g;
         }
@@ -2063,7 +2098,7 @@ void ChoirEngine::processReverb (int c)
         fadingGain = std::max (0.0f, fadingGain - (float) c / (0.3f * (float) sr));
         for (int i = 0; i < c; ++i)
         {
-            const float g = kRoomLevel * (from + (fadingGain - from) * (float) (i + 1) / (float) c);
+            const float g = fadingLevel * (from + (fadingGain - from) * (float) (i + 1) / (float) c);
             revOutL[(size_t) i] += roomL[(size_t) i] * g;
             revOutR[(size_t) i] += roomR[(size_t) i] * g;
         }

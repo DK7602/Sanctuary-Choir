@@ -132,6 +132,8 @@ public:
     void prepare (double sampleRate, int maxBlock);
     void reset();
     void setSettings (const Settings& s);
+    /** Jumps to the settings rather than gliding there (before anything has played). */
+    void snapToSettings();
     /** Starts a block: call once, then addSection() for each section, then mix(). */
     void begin (int n);
     /** Adds a section's bus (already at its level) to the microphones. */
@@ -223,7 +225,7 @@ public:
     int getLatency() const noexcept { return look; }
     void process (float* l, float* r, int n) noexcept;
     /** The gain in force (1 = not limiting), for tests and meters. */
-    float getGain() const noexcept { return env; }
+    float getGain() const noexcept { return (float) env; }
 
 private:
     int look = 72;                       // look-ahead (and latency), samples
@@ -235,7 +237,7 @@ private:
     double heldSum = 0.0;
     int pos = 0;
     int64_t t = 0;
-    float env = 1.0f, rel = 0.0f;
+    double env = 1.0, rel = 0.0;          // double: in float the last steps back to 1 round away
     int hold = 0, holdLeft = 0;
     const float ceiling = 0.966f;
 };

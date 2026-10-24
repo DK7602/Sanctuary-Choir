@@ -239,8 +239,12 @@ public:
     void setSampleSet (const SampleSet* set) noexcept;
     /** The venue's measured room (nullptr: the algorithmic reverb). Call from the audio thread.
         The room must be new to this engine (it is not reset here), at the engine's sample rate,
-        and stay alive for a second after it is replaced: its tail fades out meanwhile. */
+        built for the current venue (it plays at that venue's level), and stay alive while
+        getRoomsInUse() names it: after it is replaced its tail fades out for 300 ms. Set before
+        the first block after prepare() or reset(), it plays from the start without a fade. */
     void setRoom (ConvolutionRoom* room) noexcept;
+    /** The rooms this engine may still process: the current one and the one fading out. */
+    std::pair<const ConvolutionRoom*, const ConvolutionRoom*> getRoomsInUse() const noexcept { return { room, fadingRoom }; }
     /** Only render singers of these sections (bit mask, used to parallelise offline renders). */
     void setRenderSections (uint8_t mask) { renderMask = mask; }
 
@@ -398,6 +402,9 @@ private:
     ConvolutionRoom* room = nullptr;
     ConvolutionRoom* fadingRoom = nullptr;
     float fadingGain = 0.0f, roomBlend = 0.0f;
+    float roomLevel = 1.0f, fadingLevel = 1.0f;   // each room at the level of the venue it was made for
+    bool reverbIdle = true;                       // the algorithmic reverb is cleared and not playing
+    bool processedSinceReset = false;
     RoomShape roomShape;
     std::vector<float> roomL, roomR, roomZeros;
     void processReverb (int c);

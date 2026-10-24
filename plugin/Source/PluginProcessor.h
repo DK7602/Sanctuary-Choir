@@ -23,6 +23,7 @@ public:
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
+    void reset() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     /** Bypass keeps the reported latency, so the DAW's delay compensation stays correct. */
@@ -60,6 +61,7 @@ public:
     int reportedLatency() const;
     int getAlignedLatency() const noexcept { return engine.getLatencySamples() + engine.getOutputDelay(); }
     int getLiveChoirLatency() const noexcept { return engine.getLiveChoirLatency() + engine.getOutputDelay(); }
+    int getOutputDelay() const noexcept { return engine.getOutputDelay(); }
     bool isStandaloneApp() const noexcept { return standaloneApp; }
     /** Song tempo while the host plays (0 when stopped or unknown), the beat position at the last
         block, and when that block ran (Time::getMillisecondCounterHiRes). */

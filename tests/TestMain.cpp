@@ -577,6 +577,169 @@ TEST (limiterTurnsDownWithoutCrackle)
     CHECK (20.0 * std::log10 (hi / lo) < 0.01);
 }
 
+TEST (limiterComesBackToFullLevel)
+{
+    // After a moment over full scale the limiter must let go completely: a hold that a quiet
+    // signal kept renewing left everything after the first loud chorus half a dB down for good.
+    const double sr = 48000.0;
+    for (float loud : { 1.0f, 1.2f, 2.4f })
+    {
+        SafetyLimiter lim;
+        lim.prepare (sr);
+        std::vector<float> l ((size_t) (3.0 * sr)), r;
+        for (size_t i = 0; i < l.size(); ++i)
+            l[i] = (i < (size_t) (0.2 * sr) ? loud : 0.3f) * std::sin (2.0f * kPi * 220.0f * (float) i / (float) sr);
+        r = l;
+        for (size_t pos = 0; pos < l.size(); pos += 256)
+            lim.process (l.data() + pos, r.data() + pos, (int) std::min<size_t> (256, l.size() - pos));
+        std::printf ("  after a 0.2 s peak of %.1f: gain %.6f at 3 s\n", loud, lim.getGain());
+        CHECK (lim.getGain() > 0.9999f);
+    }
+}
+
+TEST (convolutionRoomKeepsItsLevelAtAnySampleRate)
+{
+    // The rooms are recorded at 48 kHz; a session at another rate gets a resampled copy that
+    // must sound as loud (twice the samples at 96 kHz used to mean twice the level).
+    const auto ir = testRoom (48000.0, 1.5f, 0.8f, 21);
+    auto level = [&] (double sr)
+    {
+        auto room = ConvolutionRoom::create (ir, sr);
+        const int n = (int) (1.2 * sr);
+        std::vector<float> x ((size_t) n), l ((size_t) n), r ((size_t) n);
+        for (int i = 0; i < n; ++i) x[(size_t) i] = 0.3f * std::sin (2.0f * kPi * 500.0f * (float) i / (float) sr);
+        for (int pos = 0; pos < n; pos += 256)
+        {
+            const int len = std::min (256, n - pos);
+            room->process (x.data() + pos, x.data() + pos, l.data() + pos, r.data() + pos, len, RoomShape {});
+        }
+        double e = 0.0;
+        for (int i = (int) (0.7 * sr); i < n; ++i) e += (double) l[(size_t) i] * l[(size_t) i];
+        return 10.0 * std::log10 (e / (0.5 * sr));
+    };
+    const double ref = level (48000.0);
+    for (double sr : { 22050.0, 44100.0, 96000.0, 192000.0 })
+    {
+        const double d = level (sr) - ref;
+        std::printf ("  at %.2f kHz: %+.2f dB against 48 kHz\n", sr / 1000.0, d);
+        CHECK (std::abs (d) < 0.5);
+    }
+}
+
+TEST (convolutionRoomStretchesWithoutLiftingTheFloor)
+{
+    // A measurement decays into a noise floor that no longer decays. Stretching the decay must
+    // follow the room's own decay line, stretched: lifting the floor with it made the tail swell
+    // and then stop dead where the partitions end.
+    const double sr = 48000.0;
+    const float rt60 = 1.0f;
+    RoomImpulse ir;
+    ir.sampleRate = sr;
+    Rng rng (31);
+    const size_t n = (size_t) (4.0 * sr);
+    const float floorAmp = std::pow (10.0f, -75.0f / 20.0f);
+    for (auto* ch : { &ir.left, &ir.right })
+    {
+        ch->assign (n, 0.0f);
+        for (size_t i = (size_t) (0.004 * sr); i < n; ++i)
+            (*ch)[i] = (rng.uni() * 2.0f - 1.0f) * (std::pow (10.0f, -3.0f * (float) i / (float) sr / rt60) + floorAmp);
+    }
+    normaliseRoom (ir);
+    auto room = ConvolutionRoom::create (ir, sr);
+    RoomShape shape;
+    shape.decayScale = 2.5f;
+    const int len = (int) (5.0 * sr);
+    std::vector<float> x ((size_t) len, 0.0f), l ((size_t) len), r ((size_t) len);
+    x[0] = 1.0f;
+    for (int pos = 0; pos < len; pos += 256)
+        room->process (x.data() + pos, x.data() + pos, l.data() + pos, r.data() + pos, std::min (256, len - pos), shape);
+    // Level in 50 ms windows against the stretched line (60 dB over 2.5 s), from 0.1 s on.
+    auto at = [&] (double t) { double e = 1.0e-30; for (int i = (int) (t * sr); i < (int) ((t + 0.05) * sr); ++i) e += (double) l[(size_t) i] * l[(size_t) i]; return 10.0 * std::log10 (e); };
+    const double start = at (0.1);
+    double worst = -1.0e9, last = -1.0e9;
+    for (double t = 0.5; t + 0.05 < 4.9; t += 0.05)
+    {
+        const double over = at (t) - (start - 60.0 * (t - 0.1) / 2.5);
+        if (at (t) > -250.0) last = at (t) - start;
+        worst = std::max (worst, over);
+    }
+    std::printf ("  Decay 250%%: at most %+.1f dB above the stretched decay line; quietest it ends at %.1f dB\n", worst, last);
+    CHECK (worst < 6.0);
+    CHECK (last < -60.0);
+}
+
+TEST (venueChangeKeepsTheRoomsLevel)
+{
+    // Changing the venue builds the new room in the background; meanwhile the old room keeps its
+    // own venue's level (it used to jump to the new venue's: 13 dB from the cathedral to the studio).
+    const double sr = 48000.0;
+    const auto ir = testRoom (sr, 2.0f, 1.2f, 41);
+    const auto x = test::singMelody ({ { 60.0f, 3.0f, 0.0f } }, sr, Tenor, 0.0f);
+    auto run = [&] (bool change)
+    {
+        auto room = ConvolutionRoom::create (ir, sr);
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::Unison);
+        p.reverb = 100.0f;
+        p.wetOnly = true;
+        p.venue = Venue::GrandCathedral;
+        eng.setParams (p);
+        std::vector<float> l (x.size()), r (x.size());
+        for (size_t pos = 0; pos + 256 <= x.size(); pos += 256)
+        {
+            if (change && pos >= (size_t) (1.5 * sr) && p.venue != Venue::StudioRoom)
+            {
+                p.venue = Venue::StudioRoom;
+                eng.setParams (p);
+            }
+            eng.setRoom (room.get());
+            eng.process (x.data() + pos, nullptr, l.data() + pos, r.data() + pos, 256);
+        }
+        double e = 0.0;
+        for (size_t i = (size_t) (1.55 * sr); i < (size_t) (1.95 * sr); ++i) e += (double) l[i] * l[i];
+        return e;
+    };
+    const double step = 10.0 * std::log10 (run (true) / run (false));
+    std::printf ("  the same room after the venue changes: %+.2f dB\n", step);
+    CHECK (std::abs (step) < 0.5);
+}
+
+TEST (exportsStartInTheRoom)
+{
+    // A room given before the first block plays from the first sample: no 80 ms of the
+    // algorithmic hall at the start of every export.
+    const double sr = 48000.0;
+    const auto ir = testRoom (sr, 1.0f, 0.6f, 51);
+    const auto voice = test::singMelody ({ { 60.0f, 0.5f, 0.0f } }, sr, Tenor, 0.0f);
+    auto run = [&] (size_t silence)
+    {
+        auto room = ConvolutionRoom::create (ir, sr);
+        ChoirEngine eng;
+        eng.prepare (sr, 256);
+        auto p = dryParams (VocalType::Ah, HarmonyMode::Unison);
+        p.choirDb = -60.0f;
+        p.leadReverb = 100.0f;
+        p.reverb = 100.0f;
+        p.wetOnly = true;
+        p.lowLatency = true;
+        eng.setParams (p);
+        eng.setRoom (room.get());
+        std::vector<float> x (silence, 0.0f);
+        x.insert (x.end(), voice.begin(), voice.end());
+        x.resize ((x.size() + 255) / 256 * 256, 0.0f);
+        std::vector<float> l (x.size()), r (x.size());
+        for (size_t pos = 0; pos < x.size(); pos += 256)
+            eng.process (x.data() + pos, nullptr, l.data() + pos, r.data() + pos, 256);
+        return std::vector<float> (l.begin() + (long) silence, l.end());
+    };
+    const auto first = run (0), settled = run ((size_t) (0.512 * sr));
+    double err = 0.0, ref = 1.0e-30;
+    for (size_t i = 0; i < (size_t) (0.4 * sr); ++i) { err += (double) (first[i] - settled[i]) * (first[i] - settled[i]); ref += (double) settled[i] * settled[i]; }
+    std::printf ("  the room from the first block against a settled one: %.1f dB apart\n", 10.0 * std::log10 (err / ref + 1.0e-30));
+    CHECK (10.0 * std::log10 (err / ref + 1.0e-30) < -60.0);
+}
+
 TEST (engineSingsInTheMeasuredRoom)
 {
     const double sr = 48000.0;

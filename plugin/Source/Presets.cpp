@@ -229,8 +229,10 @@ void PresetManager::load (int index)
         {
             if (! isPresetParam (rp->getParameterID()))
                 continue;
-            if (! e.factory)
-                continue; // user presets store every parameter
+            // User presets store every parameter they knew of; one added since starts at its default.
+            const auto id = rp->getParameterID();
+            if (! e.factory && std::any_of (e.values.begin(), e.values.end(), [&id] (const auto& v) { return v.first == id; }))
+                continue;
             rp->beginChangeGesture();
             rp->setValueNotifyingHost (rp->getDefaultValue());
             rp->endChangeGesture();

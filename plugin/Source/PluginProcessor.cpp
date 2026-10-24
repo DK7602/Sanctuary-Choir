@@ -95,6 +95,18 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     sustain = false;
 }
 
+void SanctuaryProcessor::reset()
+{
+    // The host stopped processing (bypass, a track suspended while silent): start again clean,
+    // rather than replaying the lead, room tail and look-ahead from before. The key heard so far
+    // is kept.
+    engine.reset();
+    if (const int key = rememberedKey.load(); key >= 0)
+        engine.seedKey (key % 12, key >= 12);
+    bypassDelay.clear();
+    bypassPos = 0;
+}
+
 void SanctuaryProcessor::updateMidi (const MidiBuffer& midi)
 {
     noteOns.fill (0);
@@ -148,7 +160,10 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     const int numIn = getMainBusNumInputChannels();
     const int numOut = getTotalNumOutputChannels();
     if (n == 0 || numOut == 0)
+    {
+        updateMidi (midi);   // hosts can send events in an empty block: keep note-offs and pedals
         return;
+    }
 
     // The band on the side-chain. Copied first: its channels share the buffer with the outputs.
     const float* scL = nullptr;
@@ -277,6 +292,8 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     float* outR = numOut > 1 ? buffer.getWritePointer (1) : nullptr;
     engine.process (inL, inR, outL, outR, n, stems);
     engineWritten += n;
+    const auto roomsHeld = engine.getRoomsInUse();
+    rooms.setInUse (roomsHeld.first, roomsHeld.second);
 
     for (int ch = 2; ch < numOut; ++ch)
         buffer.clear (ch, 0, n);

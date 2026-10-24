@@ -143,13 +143,19 @@ void MeasuredRooms::timerCallback()
     {
         std::lock_guard<std::mutex> g (lock);
         const auto now = Time::getMillisecondCounter();
+        const auto* heldNow = inUseCurrent.load();   // current before fading (see setInUse)
+        const auto* heldFading = inUseFading.load();
         retired.erase (std::remove_if (retired.begin(), retired.end(),
-                                       [now] (const auto& r) { return now - r.second > 3000; }),
+                                       [&] (const auto& r)
+                                       {
+                                           return now - r.second > 3000 && r.first.get() != heldNow && r.first.get() != heldFading;
+                                       }),
                        retired.end());
 
         if (pendingVenue >= 0)
         {
-            if (pendingRate == sampleRate)
+            // Built for a venue that's still wanted (else the build below starts the right one).
+            if (pendingRate == sampleRate && pendingVenue == venue)
                 publish (std::move (pending), pendingVenue, pendingRate);
             pending.reset();
             pendingVenue = -1;

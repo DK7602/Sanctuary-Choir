@@ -46,7 +46,9 @@ struct RoomShape
     absorbs), the rest in blocks eight times as long. Their transforms and products are spread
     evenly over the period they are computed in, so no audio block carries a burst of work.
     The Decay knob scales each partition by the envelope that stretches the room's decay, and
-    partitions the decay has left behind are skipped. */
+    partitions the decay has left behind are skipped. Stretching never lifts a partition above
+    the room's own decay line, stretched: a measurement's late noise floor (it stops decaying)
+    would otherwise swell up and then stop dead where the partitions end. */
 class ConvolutionRoom
 {
 public:
@@ -78,6 +80,8 @@ private:
         std::vector<float> yRe[2], yIm[2];       // the sum being built
         std::vector<std::complex<float>> work;
         int newest = 0;                           // ring slot of the newest input block
+        std::vector<float> energy;                // each partition's mean energy per sample
+        std::vector<float> gain;                  // each partition's gain for the current shape
     };
 
     void gatherInput (Stage& s, int64_t end) noexcept;
@@ -85,7 +89,8 @@ private:
     void accumulate (Stage& s, int part, float gain) noexcept;
     void sumToWork (Stage& s) noexcept;
     void writeOutput (Stage& s, int64_t outStart, float scale) noexcept;
-    float partGain (int64_t t) const noexcept;
+    float partGain (const Stage& s, int part) const noexcept;
+    void updateGains (Stage& s) noexcept;
     bool partActive (int64_t t) const noexcept;
     void runTailUnits (int upTo) noexcept;
     void updateShape (const RoomShape& shape) noexcept;
@@ -111,6 +116,8 @@ private:
 
     RoomShape current;
     float decayRate = 0.0f;    // nepers per second added back (or taken away) by the Decay knob
+    float fitLog10 = 0.0f;     // the measured decay as a straight line: log10 energy per sample at t = 0
+    bool fitted = false;
     int64_t activeLength = 0;
     float earlyGain = 1.0f;
     int preDelay = 0;

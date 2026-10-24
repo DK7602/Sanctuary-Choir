@@ -32,6 +32,15 @@ public:
 
     /** The room the audio thread plays, or nullptr (lock-free). */
     sc::ConvolutionRoom* getLive() const noexcept { return live.load (std::memory_order_acquire); }
+    /** The audio thread, after each block: the rooms the engine still holds (ChoirEngine::
+        getRoomsInUse). A replaced room is freed only once it is neither, so a host that stops
+        processing for a while (a silent track) never resumes into a freed room. */
+    void setInUse (const sc::ConvolutionRoom* current, const sc::ConvolutionRoom* fading) noexcept
+    {
+        // Fading first: a room moving from current to fading is always named in one of them.
+        inUseFading.store (fading);
+        inUseCurrent.store (current);
+    }
 
     /** A venue's measured response, decoded (any thread; decodes on first use). nullptr if the
         plug-in was built without it. */
@@ -43,6 +52,7 @@ private:
     void joinWorker();
 
     std::atomic<sc::ConvolutionRoom*> live { nullptr };
+    std::atomic<const sc::ConvolutionRoom*> inUseCurrent { nullptr }, inUseFading { nullptr };
     std::unique_ptr<sc::ConvolutionRoom> current;
     int currentVenue = -1;
     double currentRate = 0.0;

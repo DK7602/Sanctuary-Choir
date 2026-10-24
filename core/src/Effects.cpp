@@ -297,6 +297,19 @@ void ChoirStage::setSettings (const Settings& s)
     spread.setTarget (clampv (s.spread, 0.0f, 1.0f));
 }
 
+void ChoirStage::snapToSettings()
+{
+    for (auto& st : sections)
+    {
+        st.x.snap (st.x.target);
+        st.width.snap (st.width.target);
+        st.depth.snap (st.depth.target);
+        st.delay = st.delayTarget;
+    }
+    for (auto* g : { &close, &tree, &room, &spread })
+        g->snap (g->target);
+}
+
 float ChoirStage::sectionDelaySeconds (int section) const noexcept
 {
     return sections[(size_t) clampv (section, 0, NumSections - 1)].delayTarget / (float) sr;
@@ -484,7 +497,7 @@ void SafetyLimiter::prepare (double sampleRate)
     // Held past the longest waveform cycle a choir sings (a 40 Hz bass), so a steady loud
     // chord gets one steady gain rather than a dip at every cycle.
     hold = (int) (0.03 * sampleRate);
-    rel = onePoleCoeff (0.15f, sampleRate);
+    rel = std::exp (-1.0 / (0.15 * sampleRate));
     delayL.assign ((size_t) look, 0.0f);
     delayR.assign ((size_t) look, 0.0f);
     minVal.assign ((size_t) look + 2, 1.0f);
@@ -502,7 +515,7 @@ void SafetyLimiter::reset()
     minHead = minCount = 0;
     pos = 0;
     t = 0;
-    env = 1.0f;
+    env = 1.0;
     holdLeft = 0;
 }
 
@@ -535,24 +548,21 @@ void SafetyLimiter::process (float* l, float* r, int n) noexcept
         const int slot = (int) (t % len);
         heldSum += (double) m - (double) held[(size_t) slot];
         held[(size_t) slot] = m;
-        const float ramp = std::min (1.0f, (float) (heldSum / (double) len));
+        const double ramp = std::min (1.0, heldSum / (double) len);
 
         // Down with the ramp; back up only once the peaks have stopped coming (a peak within
         // half a dB of the gain in force counts: sampled peaks of one held note differ a little).
-        if (ramp < env * 1.06f)
+        if (m < 1.0f && ramp < env * 1.06)
             holdLeft = hold;
         if (ramp < env)
             env = ramp;
         else if (holdLeft > 0)
-        {
             --holdLeft;
-        }
         else
-        {
-            env = ramp + (env - ramp) * rel;
-        }
+            env = ramp - env < 1.0e-7 ? ramp : ramp + (env - ramp) * rel;
 
-        float a = delayL[(size_t) pos] * env, b = delayR[(size_t) pos] * env;
+        const float g = (float) env;
+        float a = delayL[(size_t) pos] * g, b = delayR[(size_t) pos] * g;
         delayL[(size_t) pos] = inL;
         delayR[(size_t) pos] = inR;
         pos = pos + 1 < look ? pos + 1 : 0;

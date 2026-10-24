@@ -247,6 +247,7 @@ void SanctuaryEditor::addLatencyInfo (DynamicObject& o)
     const double rate = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
     o.setProperty ("latencyMs", 1000.0 * processor.getAlignedLatency() / rate);
     o.setProperty ("liveChoirMs", 1000.0 * processor.getLiveChoirLatency() / rate);
+    o.setProperty ("outputMs", 1000.0 * processor.getOutputDelay() / rate);   // what Live mode reports
     sentLatency = processor.getAlignedLatency();
     sentRate = processor.getSampleRate();
 }

@@ -161,8 +161,17 @@ std::unique_ptr<ConvolutionRoom> ConvolutionRoom::create (const RoomImpulse& ir,
 
     std::array<std::vector<float>, 2> h { ir.left, ir.right.empty() ? ir.left : ir.right };
     if (std::abs (ir.sampleRate - sampleRate) > 0.5)
+    {
+        // At twice the rate a response has twice the samples, each as large: half the gain
+        // keeps the room as loud.
+        const float scale = (float) (ir.sampleRate / sampleRate);
         for (auto& c : h)
+        {
             c = resampleImpulse (c, ir.sampleRate, sampleRate);
+            for (auto& v : c)
+                v *= scale;
+        }
+    }
     const size_t n = std::max (h[0].size(), h[1].size());
     for (auto& c : h)
         c.resize (n, 0.0f);
@@ -187,6 +196,8 @@ std::unique_ptr<ConvolutionRoom> ConvolutionRoom::create (const RoomImpulse& ir,
         s.parts = (int) std::min<int64_t> (maxParts, (remaining + block - 1) / block);
         s.fft = std::make_unique<FFT> (orderOf (s.size));
         s.work.assign ((size_t) s.size, {});
+        s.energy.assign ((size_t) s.parts, 0.0f);
+        s.gain.assign ((size_t) s.parts, 1.0f);
         for (int ch = 0; ch < 2; ++ch)
         {
             s.hRe[ch].assign ((size_t) s.parts * (size_t) s.bins, 0.0f);
@@ -200,12 +211,16 @@ std::unique_ptr<ConvolutionRoom> ConvolutionRoom::create (const RoomImpulse& ir,
         // complex transform (left real, right imaginary), then pulled apart.
         for (int p = 0; p < s.parts; ++p)
         {
+            double e = 0.0;
             for (int k = 0; k < s.size; ++k)
             {
                 const int64_t t = offset + (int64_t) p * block + k;
                 const bool in = k < block && t < (int64_t) n;
                 s.work[(size_t) k] = { in ? h[0][(size_t) t] : 0.0f, in ? h[1][(size_t) t] : 0.0f };
+                if (in)
+                    e += (double) h[0][(size_t) t] * h[0][(size_t) t] + (double) h[1][(size_t) t] * h[1][(size_t) t];
             }
+            s.energy[(size_t) p] = (float) (e / block);
             s.fft->forward (s.work.data());
             for (int m = 0; m < s.bins; ++m)
             {
@@ -225,6 +240,33 @@ std::unique_ptr<ConvolutionRoom> ConvolutionRoom::create (const RoomImpulse& ir,
     if ((int64_t) n > 16 * (int64_t) hb)
         setup (r->tail, 8 * hb, 16 * (int64_t) hb, 1 << 20);
     r->tailUnits = r->tail.parts > 0 ? 2 * r->tail.fft->getOrder() + r->tail.parts + 4 : 0;
+
+    // The room's decay as a straight line in dB (slope from rt60), placed by the partitions
+    // from 50 ms on while they are within 40 dB of the loudest: the part that really decays.
+    {
+        float peak = 0.0f;
+        for (const auto* s : { &r->head, &r->tail })
+            for (float e : s->energy)
+                peak = std::max (peak, e);
+        double sum = 0.0;
+        int count = 0;
+        bool below = false;
+        for (const auto* s : { &r->head, &r->tail })
+            for (int p = 0; p < s->parts && ! below; ++p)
+            {
+                const double t = ((double) s->offset + ((double) p + 0.5) * s->block) / sampleRate;
+                const float e = s->energy[(size_t) p];
+                if (e < peak * 1.0e-4f)
+                    below = true;
+                else if (t >= 0.05 && e > 0.0f)
+                {
+                    sum += std::log10 ((double) e) + 6.0 * t / r->rt60;
+                    ++count;
+                }
+            }
+        r->fitted = count >= 2;
+        r->fitLog10 = r->fitted ? (float) (sum / count) : 0.0f;
+    }
 
     const int ring = nextPow2 (32 * hb);
     r->ringMask = ring - 1;
@@ -276,7 +318,13 @@ void ConvolutionRoom::updateShape (const RoomShape& shape) noexcept
         decayRate = std::log (1000.0f) / rt60 * (1.0f - 1.0f / s);
         activeLength = std::min<int64_t> (length, std::max<int64_t> (16 * (int64_t) headBlock, (int64_t) (rt60 * s * 1.3f * (float) sr)));
     }
-    earlyGain = 0.5f + 0.5f * clampv (shape.early, 0.0f, 1.0f);
+    const float early = 0.5f + 0.5f * clampv (shape.early, 0.0f, 1.0f);
+    if (decayChanged || early != earlyGain)
+    {
+        earlyGain = early;
+        updateGains (head);
+        updateGains (tail);
+    }
     preDelay = clampv ((int) std::lround (shape.preDelayMs * 0.001 * sr) - headBlock, 0, preMask - 1);
     const float db = (clampv (shape.brightness, 0.0f, 1.0f) - 0.5f) * 12.0f;
     if (db != shelfDb || decayChanged)
@@ -288,13 +336,28 @@ void ConvolutionRoom::updateShape (const RoomShape& shape) noexcept
     current = shape;
 }
 
-float ConvolutionRoom::partGain (int64_t t) const noexcept
+float ConvolutionRoom::partGain (const Stage& s, int part) const noexcept
 {
-    const double secs = (double) t / sr;
+    const double secs = ((double) s.offset + ((double) part + 0.5) * s.block) / sr;
     float g = (float) std::exp ((double) decayRate * secs);
+    if (decayRate > 0.0f && fitted)
+    {
+        // Lengthened: lift the partition no higher than the decay line, lengthened (but never
+        // below where the room has it).
+        const float e = s.energy[(size_t) part];
+        const double line = std::pow (10.0, (double) fitLog10 - 6.0 * secs / rt60);
+        if (e > 0.0f)
+            g = clampv ((float) (g * std::sqrt (line / (double) e)), 1.0f, g);
+    }
     if (secs < kEarlySeconds)
         g *= earlyGain + (1.0f - earlyGain) * (float) (secs / kEarlySeconds);
     return g;
+}
+
+void ConvolutionRoom::updateGains (Stage& s) noexcept
+{
+    for (int p = 0; p < s.parts; ++p)
+        s.gain[(size_t) p] = partGain (s, p);
 }
 
 bool ConvolutionRoom::partActive (int64_t t) const noexcept
@@ -413,7 +476,7 @@ void ConvolutionRoom::runTailUnits (int upTo) noexcept
             const int part = u - multiply;
             const int64_t t = tail.offset + (int64_t) part * tail.block;
             if (partActive (t))
-                accumulate (tail, part, partGain (t + tail.block / 2));
+                accumulate (tail, part, tail.gain[(size_t) part]);
         }
         else if (u == inverse)
         {
@@ -455,7 +518,7 @@ void ConvolutionRoom::process (const float* inL, const float* inR, float* oL, fl
             head.fft->forward (head.work.data());
             storeInput (head);
             for (int p = 0; p < head.parts; ++p)
-                accumulate (head, p, partGain ((int64_t) p * head.block + head.block / 2));
+                accumulate (head, p, head.gain[(size_t) p]);
             sumToWork (head);
             head.fft->inverse (head.work.data());
             writeOutput (head, now, 1.0f);
