@@ -27,7 +27,7 @@ Pro Tools (AAX) isn't supported yet.
 ## 3. Sing
 
 - **Turn up Choir Size** to add singers. You'll see each one walk into the loft. While your song plays, the singers move with its beat (each a touch loose, like real people); when the transport stops they sway on their own.
-- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note. Once Auto has found it, click the small **lock** next to *Auto · E♭* to keep it.
+- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note. Once Auto has found it, click the small **lock** next to *Auto · Eb* to keep it.
 - **Scale** is *Auto* by default too: Sanctuary hears whether your song is major or minor, and in a minor song whether you sing the raised seventh (harmonic minor) or not (natural minor). The field shows what it heard, e.g. *Auto · Minor*. With the key set by hand, Auto still decides major or minor for it. Locking the key also locks the scale it heard. Choose a scale yourself for the modes (Dorian, Mixolydian...), Gospel (blues) or Chromatic.
 - **Harmony Mode** chooses the arrangement. *Full Choir* is the classic four-part hymn sound.
 - **Style** changes how the choir performs. *Gospel* adds 7th chords, scoops and more vibrato; *Gregorian* gives pure, still voices.
@@ -46,12 +46,12 @@ Pro Tools (AAX) isn't supported yet.
 
 ### Latency: Studio or Live
 
-To re-pitch your voice, the choir has to hear a little of it first, so it runs about 39 ms behind you. Pick how that delay is handled under **Settings → Monitoring**:
+To re-pitch your voice, the choir has to hear a little of it first, so it runs about 40 ms behind you. Pick how that delay is handled under **Settings → Monitoring** (it shows the exact figures for your session):
 
 | Mode | What you hear | Use it for |
 | --- | --- | --- |
-| **Studio** (default) | Your voice and the choir line up exactly. The plug-in reports its 39 ms to your DAW, which compensates on playback. While recording, though, you hear yourself 39 ms late. | Mixing, and singing over a track you already recorded. |
-| **Live** | Your own voice comes through instantly (1.5 ms). The vowel choir (Ah, Oh, Oo, Ee, Eh, Mm) follows about 15 ms behind, *Words* about 40 ms behind, like a choir following its soloist. | Recording, rehearsing and performing. |
+| **Studio** (default) | Your voice and the choir line up exactly. The plug-in reports its 40 ms to your DAW, which compensates on playback. While recording, though, you hear yourself 40 ms late. | Mixing, and singing over a track you already recorded. |
+| **Live** | Your own voice comes through instantly (1.5 ms). The vowel choir (Ah, Oh, Oo, Ee, Eh, Mm) follows about 16 ms behind, *Words* about 40 ms behind, like a choir following its soloist. | Recording, rehearsing and performing. |
 
 - Learned and rendered takes stay in sync with your song in both modes.
 - The standalone app always runs in **Live** mode.
@@ -100,7 +100,7 @@ Click the plaque after LEARN (*LEARNED 0:43 · ...*), or **Settings → Chords &
 
 1. Click a chord in the lane. A menu lists the chords that could go there, best first. The bar next to each one shows how much of your melody sits on its notes. The menu offers the key's chords, their colours (7ths, sus4) and borrowed chords such as bVII or iv.
 2. Pick one. It turns gold with a padlock: that part of the song now sings your chord. Sanctuary works out the chords around it again so they lead in and out of it.
-3. Click a gold chord and choose **Let the choir choose** to undo it. **Unlock all** undoes every chord you chose.
+3. Click a gold chord and choose **LET THE CHOIR CHOOSE** to undo it. **Unlock all** undoes every chord you chose.
 
 Your chords are saved with the project and win over everything else, including the band on the side-chain. Changing a chord makes RENDER glow; press it to hear the change in the rendered choir. Chords can be chosen in the chord harmony modes (Full Choir, Gospel Stack, Open Voicing and so on), not in Drone or MIDI Chords.
 
@@ -219,4 +219,8 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
   - **Gospel Church**: a gospel choir in purple robes with its director, lively. The Cremona church again, nearer the front and with a shorter, fuller-house decay of 1.7 s.
   - **Studio Room**: five singers at their microphones, dry and intimate. BBC Maida Vale Studio 5.
   - Choir Size fills each room in turn, front row first.
-- **FX page**: the reverb of the room, and the choir bus (low/high cut, warmth, glue). **Decay** stretches or shortens the room's own decay (30 to 250%), **Pre-Delay** waits before the room answers, **Brightness** darkens or brightens it (50% is the room as measured). Changing rooms lets the old one ring out briefly while the new one takes over. The measurements come from research datasets under Creative Commons Attribution licences; their authors are credited in ROOMS-CREDITS.txt next to the plug-in.
+- **FX page**: the reverb of the room, and the choir bus (low/high cut, warmth, glue). **Decay** stretches or shortens the room's own decay (30 to 250%), **Pre-Delay** waits before the room answers, **Brightness** darkens or brightens it (50% is the room as measured). Changing rooms lets the old one ring out briefly while the new one takes over. The measurements come from research datasets under Creative Commons Attribution licences; their authors are credited in the manual's Credits chapter and in ROOMS-CREDITS.txt, which the installers put in the Sanctuary Choir folder (Windows: C:\ProgramData\Sanctuary Choir; Mac: /Library/Application Support/Sanctuary Choir).
+
+## Reporting a problem
+
+The bottom line of **Settings** shows the version and build (for example *1.0.0 build c287c81*). When something sounds wrong, note the build, save the sound as a preset (the gear › *Save this sound as a preset*; the gear › *Open presets folder* shows the file) and send the preset with a short clip, so the problem can be heard with your exact settings.

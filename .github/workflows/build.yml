@@ -57,15 +57,26 @@ jobs:
         shell: pwsh
         run: nuget install Microsoft.Web.WebView2 -OutputDirectory C:/webview2 -NonInteractive
 
-      - name: Cache JUCE download
+      # JUCE lives in its own cached folder that CMake uses as is (a cached copy inside build/
+      # was deleted and cloned again by FetchContent on every run).
+      - name: Cache JUCE
+        id: juce-cache
         uses: actions/cache@v4
         with:
-          path: build/_deps/juce-src
-          key: juce-9.0.4-${{ runner.os }}
+          path: .juce/JUCE
+          key: juce-9.0.4-src-${{ runner.os }}
+
+      - name: Fetch JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: git clone --depth 1 --branch 9.0.4 https://github.com/juce-framework/JUCE.git .juce/JUCE
 
       - name: Configure
         shell: bash
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_args }}
+        run: |
+          # The commit the build is of (a pull request's own head, not GitHub's merge commit).
+          SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$PWD/.juce/JUCE" -DSANCTUARY_BUILD_ID="${SHA:0:7}" ${{ matrix.cmake_args }}
 
       - name: Build
         shell: bash

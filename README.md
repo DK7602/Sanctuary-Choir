@@ -54,8 +54,8 @@ The plug-in carries its own manual: **Settings → Manual**, or the gear at the 
   - Lead reverb send.
   - Low/high cut, Warmth and a Glue compressor on the choir bus.
 - **MIDI**: hold chords on a keyboard to dictate the harmony. With no voice coming in, the choir becomes a playable instrument.
-- **Live monitoring**: your voice comes through instantly while you record; the choir follows about 15 ms behind (Settings → Monitoring).
-- **Sanctuary Voices**: real recorded singers sing the vowel modes (Ah, Oh, Oo, Ee, Eh): 1,703 held notes from 19 professional singers, sorted into SATB sections, plus their real onsets and note-to-note slides, so legato lines join up and short notes start like sung notes. **Singing** (MIX page) switches them between natural, breathy and belted takes. Installed with the plug-in; switch back to the synthesised voices any time (Settings → Choir Voices).
+- **Live monitoring**: your voice comes through almost at once (1.5 ms) while you record; the choir follows about 16 ms behind (Settings → Monitoring).
+- **Sanctuary Voices**: real recorded singers sing the vowel modes (Ah, Oh, Oo, Ee, Eh): 1,103 held notes from 20 professional singers (with their breathy, belted and classical takes, about 10,000 recordings in all), sorted into SATB sections, plus their real onsets and note-to-note slides, so legato lines join up and short notes start like sung notes. **Singing** (MIX page) switches them between natural, breathy and belted takes. Installed with the plug-in; switch back to the synthesised voices any time (Settings → Choir Voices).
 - **Your own choir**: record a few held notes per section and the vowel modes sing with those real voices ([guide](docs/RECORDING_YOUR_CHOIR.md)).
 - **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
 - **Real voices in Words mode**: each singer takes on the vocal tract, tone and vibrato of one of 19 real singers (measured from VocalSet), so the choir sounds like different people singing your words. No AI involved.
@@ -127,7 +127,7 @@ input ─► YIN pitch tracker ─► harmoniser ─────────► 
 | `rooms/`, `tools/rooms/` | The venues' measured rooms (built into the plug-in) and the script that makes them from the datasets, with their sources and credits. |
 | `tests/` | DSP unit tests. These cover pitch accuracy, voicing rules, key detection, section pitches in every mode, latency alignment, learn and render, and a CPU budget check. |
 
-The plugin reports its latency (about 40 ms) so your DAW keeps everything in time. For recording and live use, **Settings → Monitoring → Live** passes your voice through almost at once (1.5 ms) and runs the vowel choir about 15 ms behind you (Words keep the full 40 ms); the plugin then reports just the 1.5 ms. The standalone app always runs live.
+The plugin reports its latency (about 40 ms) so your DAW keeps everything in time. For recording and live use, **Settings → Monitoring → Live** passes your voice through almost at once (1.5 ms) and runs the vowel choir about 16 ms behind you (Words keep the full 40 ms); the plugin then reports just the 1.5 ms. The standalone app always runs live.
 
 The 1.5 ms is the output limiter looking ahead. A choir driven past full scale (a big Choir Size at high Energy in a long, loud room) is turned down in smooth ramps that arrive with each peak, rather than clipped sample by sample, which used to be heard as static. The measured rooms are also evened out left to right when they load (Stone Abbey's measurement is 4.7 dB louder on the right), so neither side reaches the limiter first.
 

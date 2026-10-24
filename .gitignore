@@ -26,3 +26,6 @@ tools/art/.work/
 
 # Node
 node_modules/
+
+# JUCE fetched by CI
+.juce/

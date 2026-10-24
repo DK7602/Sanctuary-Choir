@@ -33,7 +33,7 @@ Name: "custom"; Description: "Custom installation"; Flags: iscustom
 [Components]
 Name: "vst3"; Description: "VST3 plug-in"; Types: full custom; Flags: fixed
 Name: "standalone"; Description: "Standalone application"; Types: full
-Name: "voices"; Description: "Sanctuary Voices: real recorded singers for the choir (13 MB)"; Types: full custom
+Name: "voices"; Description: "Sanctuary Voices: real recorded singers for the choir (about 90 MB)"; Types: full custom
 
 [Files]
 Source: "{#SourceDir}\Sanctuary Choir.vst3\*"; DestDir: "{commoncf64}\VST3\Sanctuary Choir.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -41,6 +41,7 @@ Source: "{#SourceDir}\Sanctuary Choir.exe"; DestDir: "{app}"; Components: standa
 Source: "{#SourceDir}\SanctuaryVoices\*"; DestDir: "{commonappdata}\Sanctuary Choir\Voices\SanctuaryVoices"; Components: voices; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\INSTALL.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ROOMS-CREDITS.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\ROOMS-CREDITS.txt"; DestDir: "{commonappdata}\Sanctuary Choir"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Sanctuary Choir"; Filename: "{app}\Sanctuary Choir.exe"; Components: standalone

@@ -3,7 +3,7 @@
     "venue": "Grand Cathedral",
     "file": "grand-cathedral.ogg",
     "emphasisDbPerSecond": 9.589,
-    "dataset": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application",
+    "dataset": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Applications",
     "place": "the church of Santi Marcellino e Pietro, Cremona",
     "authors": "Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)",
     "record": "https://zenodo.org/records/14901751",
@@ -55,7 +55,8 @@
     "processing": "direct sound removed; noise floor replaced by each 1/6-octave band's own decay; decay time x1.0; high-pass 40 Hz; unit energy; extended to 11.7 s; stored rising 11.297 dB/s (taken out on loading); Ogg Vorbis q8",
     "t30_measured_s": 4.27,
     "t30_s": 4.25,
-    "retrieved": "2026-10-23"
+    "retrieved": "2026-10-23",
+    "copyright": "\u00a9 2026 Martin Zerwas and Selin Kayku"
   },
   {
     "venue": "Wooden Chapel",
@@ -90,7 +91,7 @@
     "venue": "Concert Hall",
     "file": "concert-hall.ogg",
     "emphasisDbPerSecond": 22.799,
-    "dataset": "The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium",
+    "dataset": "The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium in Cremona",
     "place": "the Giovanni Arvedi Auditorium, Museo del Violino, Cremona",
     "authors": "Federico Miotello, Gioele Greco, Paolo Ostan, Francesca Del Gaudio, Luca Comanducci, Raffaele Malvermi, Mirco Pezzoli and Fabio Antonacci (2026)",
     "record": "https://zenodo.org/records/20098848",
@@ -119,7 +120,7 @@
     "venue": "Gospel Church",
     "file": "gospel-church.ogg",
     "emphasisDbPerSecond": 28.215,
-    "dataset": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application",
+    "dataset": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Applications",
     "place": "the church of Santi Marcellino e Pietro, Cremona",
     "authors": "Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)",
     "record": "https://zenodo.org/records/14901751",

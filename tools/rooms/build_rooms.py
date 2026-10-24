@@ -24,7 +24,6 @@ Processing, per venue:
 Writes SOURCES.json (one row per venue: dataset, record, licence, files, SHA-256 of the files
 read, processing) and CREDITS.txt.
 """
-import datetime
 import hashlib
 import io
 import json
@@ -40,12 +39,13 @@ import soundfile as sf
 from scipy.signal import butter, sosfilt, stft, istft
 
 SR = 48000
+RETRIEVED = "2026-10-23"  # when the datasets were downloaded (kept fixed so a rebuild is identical)
 MAX_DECAY_KNOB = 2.5      # the Decay knob's top (250%)
 
 DATASETS = {
     "cremona": {
         "record": "14901751", "zip": "ChurchIR.zip", "licence": "CC-BY-4.0",
-        "title": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application",
+        "title": "ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Applications",
         "authors": "Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)", "doi": "10.5281/zenodo.14901751",
         "place": "the church of Santi Marcellino e Pietro, Cremona",
     },
@@ -53,6 +53,7 @@ DATASETS = {
         "record": "23312556", "zip": "impulse_responses.zip", "licence": "CC-BY-4.0",
         "title": "Room acoustic measurement and decay analysis data of the St. Nicholas Chapel, Aachen Cathedral",
         "authors": "Martin Zerwas and Selin Kayku (2026)", "doi": "10.5281/zenodo.23312556",
+        "copyright": "\u00a9 2026 Martin Zerwas and Selin Kayku",
         "place": "the St. Nicholas Chapel (Nikolauskapelle), Aachen Cathedral",
     },
     "detmold": {
@@ -63,7 +64,7 @@ DATASETS = {
     },
     "arvedi": {
         "record": "20098848", "zip": "arvedi_auditorium_dataset.zip", "licence": "CC-BY-4.0",
-        "title": "The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium",
+        "title": "The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium in Cremona",
         "authors": "Federico Miotello, Gioele Greco, Paolo Ostan, Francesca Del Gaudio, Luca Comanducci, Raffaele Malvermi, Mirco Pezzoli and Fabio Antonacci (2026)", "doi": "10.5281/zenodo.20098848",
         "place": "the Giovanni Arvedi Auditorium, Museo del Violino, Cremona",
     },
@@ -314,8 +315,10 @@ def build(cache, out, keep_wav=False):
                            f"decay time x{v['stretch']}; high-pass 40 Hz; unit energy; extended to {len(z) / SR:.1f} s; "
                            f"stored rising {emphasis} dB/s (taken out on loading); Ogg Vorbis q8"),
             "t30_measured_s": round(float(t_meas), 2), "t30_s": round(float(rt), 2),
-            "retrieved": datetime.date.today().isoformat(),
+            "retrieved": RETRIEVED,
         })
+        if "copyright" in ds:
+            rows[-1]["copyright"] = ds["copyright"]
         os.remove(wav)
     with open(os.path.join(out, "SOURCES.json"), "w") as f:
         json.dump(rows, f, indent=2)
@@ -336,6 +339,7 @@ def write_credits(out, rows):
         lines += [f"{r['venue']}  ({r['file']})",
                   f"  {r['place']}",
                   f"  From: {r['dataset']}, by {r['authors']}",
+                  *([f"  {r['copyright']}"] if "copyright" in r else []),
                   f"  {r['record']}   DOI {r['doi']}",
                   f"  Licence: {r['licence'].replace('-', ' ', 2)}  {licence_urls[r['licence']]}",
                   f"  Used: {r['positions']}.",

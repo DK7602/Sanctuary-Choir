@@ -73,15 +73,26 @@ target_compile_definitions(SanctuaryChoir PUBLIC
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
 # Which commit this build is (shown in Settings and the manual), so a report can be matched to
-# its code. Read when CMake configures: CI configures every run; a local build after new
-# commits needs a re-configure to update it.
-execute_process(COMMAND git rev-parse --short HEAD
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-    OUTPUT_VARIABLE SANCTUARY_BUILD_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
+# its code. CI passes it (-DSANCTUARY_BUILD_ID=...); otherwise it is read when CMake configures,
+# with "+" when the checkout has uncommitted changes. A local build after new commits needs a
+# re-configure to update it.
 if(NOT SANCTUARY_BUILD_ID)
-    set(SANCTUARY_BUILD_ID "local")
+    execute_process(COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        OUTPUT_VARIABLE SANCTUARY_BUILD_ID
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(SANCTUARY_BUILD_ID)
+        execute_process(COMMAND git diff-index --quiet HEAD --
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            RESULT_VARIABLE SANCTUARY_DIRTY
+            ERROR_QUIET)
+        if(SANCTUARY_DIRTY)
+            string(APPEND SANCTUARY_BUILD_ID "+")
+        endif()
+    else()
+        set(SANCTUARY_BUILD_ID "local")
+    endif()
 endif()
 target_compile_definitions(SanctuaryChoir PRIVATE SANCTUARY_BUILD_ID="${SANCTUARY_BUILD_ID}")
 

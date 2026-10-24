@@ -11,7 +11,7 @@ Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (2018):
 VocalSet is licensed under the Creative Commons Attribution 4.0 International
 licence (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
 These recordings remain under that licence: you may use, copy and share them
-on its terms. Nothing in Sanctuary Choir's own terms restricts that. The
+on its terms, whatever terms Sanctuary Choir itself comes under. The
 licensors and the singers do not endorse Sanctuary Choir. The recordings are
 provided as is, without warranties of any kind (CC BY 4.0, section 5).
 
@@ -37,8 +37,9 @@ written in its file name (m6312 = MIDI note 63.12). Alongside them:
   syllables/  syllables of the songs the singers sang in straight tone
             (Dona nobis pacem, Caro mio ben, Row row row your boat), each cut
             from its consonants to the start of its vowel with the note and
-            lyric times of Annotated-VocalSet (CC BY 4.0,
-            https://zenodo.org/records/7061507); on<consonants> names them
+            lyric times of Annotated-VocalSet by Behnam Faghih and Joseph
+            Timoney (CC BY 4.0, https://zenodo.org/records/7061507);
+            on<consonants> names them
             (onkxr = k then r).
 Singers are named by VocalSet's anonymous ids (f1-f9, m1-m11).
 Rebuild with tools/voicepack.

@@ -8,7 +8,7 @@ without warranties of any kind.
 
 Grand Cathedral  (grand-cathedral.ogg)
   the church of Santi Marcellino e Pietro, Cremona
-  From: ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application, by Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)
+  From: ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Applications, by Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)
   https://zenodo.org/records/14901751   DOI 10.5281/zenodo.14901751
   Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
   Used: source at the centre of the sanctuary, omnidirectional microphones 21 m down the nave, 5.4 m apart.
@@ -17,6 +17,7 @@ Grand Cathedral  (grand-cathedral.ogg)
 Stone Abbey  (stone-abbey.ogg)
   the St. Nicholas Chapel (Nikolauskapelle), Aachen Cathedral
   From: Room acoustic measurement and decay analysis data of the St. Nicholas Chapel, Aachen Cathedral, by Martin Zerwas and Selin Kayku (2026)
+  © 2026 Martin Zerwas and Selin Kayku
   https://zenodo.org/records/23312556   DOI 10.5281/zenodo.23312556
   Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
   Used: source in the apse, the W (omnidirectional) channel at receivers R5 and R7 in the main hall, 4.2 m apart.
@@ -32,7 +33,7 @@ Wooden Chapel  (wooden-chapel.ogg)
 
 Concert Hall  (concert-hall.ogg)
   the Giovanni Arvedi Auditorium, Museo del Violino, Cremona
-  From: The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium, by Federico Miotello, Gioele Greco, Paolo Ostan, Francesca Del Gaudio, Luca Comanducci, Raffaele Malvermi, Mirco Pezzoli and Fabio Antonacci (2026)
+  From: The Sound of the Violin's Home: A Higher-Order Room Impulse Response Dataset of the Arvedi Auditorium in Cremona, by Federico Miotello, Gioele Greco, Paolo Ostan, Francesca Del Gaudio, Luca Comanducci, Raffaele Malvermi, Mirco Pezzoli and Fabio Antonacci (2026)
   https://zenodo.org/records/20098848   DOI 10.5281/zenodo.20098848
   Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
   Used: source S0 at the centre of the stage, capsule 1 of the arrays A406 and A413 in the fourth ring of seats, 4 m apart.
@@ -40,7 +41,7 @@ Concert Hall  (concert-hall.ogg)
 
 Gospel Church  (gospel-church.ogg)
   the church of Santi Marcellino e Pietro, Cremona
-  From: ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Application, by Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)
+  From: ChurchIR: A Dataset of Multichannel Church Impulse Responses for Spatial Audio Applications, by Riccardo Giampiccolo, Sofia Parrinelli and Fabio Antonacci (2025)
   https://zenodo.org/records/14901751   DOI 10.5281/zenodo.14901751
   Licence: CC BY 4.0  https://creativecommons.org/licenses/by/4.0/
   Used: source at the centre of the sanctuary, omnidirectional microphones 10 m down the nave, 5.4 m apart.
