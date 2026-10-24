@@ -75,7 +75,9 @@ The plug-in carries its own manual: **Settings → Manual**, or the gear at the 
 
 ## Download
 
-Every push builds the plug-in on GitHub Actions for **macOS (universal), Windows and Linux**:
+GitHub Actions builds the plug-in for **macOS (universal), Windows and Linux**. While the repository is public, every push builds all three. Once it is private, where Actions minutes are limited (macOS minutes count ten times, Windows twice), pushes and pull requests build only Windows; to build macOS or Linux, open **Actions → Build → Run workflow** and pick the system (or *all*). A `v*` tag always builds all three.
+
+To download a build:
 1. Open the repository's **Actions** tab and pick the latest green **Build** run.
 2. Download `Sanctuary-Choir-macOS`, `Sanctuary-Choir-Windows` or `Sanctuary-Choir-Linux` under *Artifacts*.
 3. Run the installer inside the zip (`Sanctuary Choir Setup.exe` on Windows, `Sanctuary Choir.pkg` on Mac) or follow `INSTALL.txt`.
@@ -133,7 +135,10 @@ The 1.5 ms is the output limiter looking ahead. A choir driven past full scale (
 
 ## Licensing notes
 
-- Sanctuary Choir is built on [JUCE](https://juce.com). JUCE is available under the AGPLv3 or a commercial JUCE licence (free "Personal" tier for small revenue). If you sell the plug-in closed-source, get the appropriate JUCE licence.
+Sanctuary Choir is free software: Copyright (C) 2026 DK7602, licensed under the [GNU Affero General Public License, version 3](LICENSE). Anyone you give a copy to may use, change and share it under the same licence, and is entitled to its source code (this repository).
+
+- Sanctuary Choir is built on [JUCE](https://juce.com), used under the AGPLv3, which is why Sanctuary Choir is under it too. Selling it closed-source would need a commercial JUCE licence instead.
+- The downloads and installers carry `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt`: the licence of every library built into the plug-in (JUCE and what it contains, such as zlib, FLAC, Ogg Vorbis, Opus, HarfBuzz, the VST3 SDK, Apple's AudioUnitSDK on macOS and Microsoft's WebView2 loader on Windows) and of the fonts. `tools/notices/collect_notices.py` writes the notices from JUCE's own bill of materials (`JUCE.spdx.json`) when CI packages a build.
 - Fonts: Cinzel, Cormorant Garamond and Montserrat (SIL Open Font License, see `ui/assets/fonts`).
 - Sanctuary Voices (`voices/SanctuaryVoices`) are cut from [VocalSet](https://zenodo.org/records/1442513) by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo (ISMIR 2018), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credit them wherever you distribute the plug-in; `voices/SanctuaryVoices/CREDITS.txt` says what was changed. `tools/voicepack` rebuilds the pack from the dataset. The Words-mode voice prints (`core/src/VoicePrints.inc`) are measured from the same recordings by `tools/voiceprints`.
 - Rooms (`rooms/`): measured impulse responses from ChurchIR (Giampiccolo, Parrinelli & Antonacci), the St. Nicholas Chapel of Aachen Cathedral (Zerwas & Kayku), the Detmold University of Music (Amengual Gari, Sahin, Eddy & Kob) and the Arvedi Auditorium (Miotello et al.), all CC BY 4.0, and the BBC Maida Vale dataset (Kearney, Daffern et al., University of York, with BBC R&D), CC BY 3.0. `rooms/CREDITS.txt` (shipped as ROOMS-CREDITS.txt) names each and what was changed; `rooms/SOURCES.json` records the exact files used.

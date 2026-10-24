@@ -42,6 +42,10 @@ Source: "{#SourceDir}\SanctuaryVoices\*"; DestDir: "{commonappdata}\Sanctuary Ch
 Source: "{#SourceDir}\INSTALL.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ROOMS-CREDITS.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ROOMS-CREDITS.txt"; DestDir: "{commonappdata}\Sanctuary Choir"; Flags: ignoreversion
+Source: "{#SourceDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\LICENSE.txt"; DestDir: "{commonappdata}\Sanctuary Choir"; Flags: ignoreversion
+Source: "{#SourceDir}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\THIRD-PARTY-NOTICES.txt"; DestDir: "{commonappdata}\Sanctuary Choir"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Sanctuary Choir"; Filename: "{app}\Sanctuary Choir.exe"; Components: standalone

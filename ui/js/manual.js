@@ -463,7 +463,8 @@ ${go("settings", "Show me Settings")}`,
 <li>Studio Room: BBC Maida Vale Studio 5, from the <i>BBC Maida Vale Impulse Response Dataset</i> by Gavin Kearney, Helena Daffern and colleagues at the University of York, with BBC R&amp;D (zenodo.org/records/10020866, CC BY 3.0, creativecommons.org/licenses/by/3.0).</li>
 </ul>
 <p>The rooms were changed for Sanctuary Choir: direct sound removed, the noise floor replaced by each band's own decay, some decays lengthened or shortened (the Gospel Church is the Cremona church at 0.45 of its decay), high-passed at 40 Hz and evened out left to right. ROOMS-CREDITS.txt lists every change, room by room; the installers put it in the Sanctuary Choir folder (Windows: C:\ProgramData\Sanctuary Choir; Mac: /Library/Application Support/Sanctuary Choir). The licensors don't endorse Sanctuary Choir, and the material is provided as is.</p>
-<p>Fonts: Cinzel, Cormorant Garamond and Montserrat (SIL Open Font License).</p>`,
+<p>Fonts: Cinzel, Cormorant Garamond and Montserrat (SIL Open Font License).</p>
+<p><b>Sanctuary Choir</b> is free software under the GNU Affero General Public License, version 3; its source code is at github.com/DK7602/Sanctuary-Choir. It is built with the JUCE framework (used under the same licence) and the libraries JUCE contains, such as zlib, FLAC, Ogg Vorbis, Opus, HarfBuzz and the VST3 SDK. LICENSE.txt and THIRD-PARTY-NOTICES.txt, with every licence in full, are in the download and in the same Sanctuary Choir folder as ROOMS-CREDITS.txt.</p>`,
     },
   ];
 

@@ -6,9 +6,11 @@ SRC="$1"; VERSION="$2"; OUT="$3"
 WORK=$(mktemp -d)
 ID=com.sanctuaryaudio.sanctuarychoir
 
-stage() { # name, bundle, install location
+stage() { # name, bundle, install location, more files installed with it
   mkdir -p "$WORK/$1/root"
   cp -R "$SRC/$2" "$WORK/$1/root/"
+  local extra
+  for extra in "${@:4}"; do cp "$SRC/$extra" "$WORK/$1/root/"; done
   local plist=()
   if [[ "$2" == *.component || "$2" == *.vst3 || "$2" == *.app ]]; then
     # Bundles are "relocatable" by default: Installer would update a copy it finds anywhere on
@@ -30,7 +32,7 @@ stage au "Sanctuary Choir.component" "/Library/Audio/Plug-Ins/Components"
 stage vst3 "Sanctuary Choir.vst3" "/Library/Audio/Plug-Ins/VST3"
 stage app "Sanctuary Choir.app" "/Applications"
 stage voices "SanctuaryVoices" "/Library/Application Support/Sanctuary Choir/Voices"
-stage credits "ROOMS-CREDITS.txt" "/Library/Application Support/Sanctuary Choir"
+stage credits "ROOMS-CREDITS.txt" "/Library/Application Support/Sanctuary Choir" LICENSE.txt THIRD-PARTY-NOTICES.txt
 
 cat > "$WORK/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
@@ -45,7 +47,7 @@ cat > "$WORK/distribution.xml" <<XML
   <choice id="vst3" title="VST3 (Ableton, Cubase, Studio One, Reaper...)"><pkg-ref id="$ID.vst3"/></choice>
   <choice id="app" title="Standalone app"><pkg-ref id="$ID.app"/></choice>
   <choice id="voices" title="Sanctuary Voices (real recorded singers, about 90 MB)"><pkg-ref id="$ID.voices"/></choice>
-  <choice id="credits" title="Credits for the rooms" visible="false" enabled="false" selected="true"><pkg-ref id="$ID.credits"/></choice>
+  <choice id="credits" title="Licences and credits" visible="false" enabled="false" selected="true"><pkg-ref id="$ID.credits"/></choice>
   <pkg-ref id="$ID.au" version="$VERSION">au.pkg</pkg-ref>
   <pkg-ref id="$ID.vst3" version="$VERSION">vst3.pkg</pkg-ref>
   <pkg-ref id="$ID.app" version="$VERSION">app.pkg</pkg-ref>
