@@ -789,6 +789,7 @@ static void measuredRoomsLoad()
 
 int main()
 {
+    std::setvbuf (stdout, nullptr, _IONBF, 0);   // a crash on CI still shows which test it was in
     ScopedJuceInitialiser_GUI juce;
     measuredRoomsLoad();
     voicePackLoads();
