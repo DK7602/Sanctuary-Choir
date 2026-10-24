@@ -91,6 +91,7 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     learn.prepare (sampleRate);
     engineWritten = 0;
     voicesWaitLeftMs = 30000;
+    takeWaitLeftMs = 180000;   // a render of a long song takes a while
     for (auto& ch : heldVelocity) ch.fill (0.0f);
     for (auto& ch : sustained) ch.fill (false);
     sustain = false;
@@ -188,7 +189,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     if (isNonRealtime())
     {
         applyChangesNow();
-        waitForVoices();
+        waitForVoicesAndTake();
     }
     const sc::EngineParams p = currentParams();
     engine.setParams (p);
@@ -434,15 +435,20 @@ void SanctuaryProcessor::applyChangesNow()
     }
 }
 
-void SanctuaryProcessor::waitForVoices()
+void SanctuaryProcessor::waitForVoicesAndTake()
 {
-    // The message thread hands a loaded set over; it can't while the host bounces on it.
-    if (voicesWaitLeftMs <= 0 || MessageManager::existsAndIsCurrentThread())
+    // The message thread hands a loaded set or take over; it can't while the host bounces on it.
+    if (MessageManager::existsAndIsCurrentThread())
         return;
     while (voicesWaitLeftMs > 0 && voices.isBusy())
     {
         Thread::sleep (5);
         voicesWaitLeftMs -= 5;
+    }
+    while (takeWaitLeftMs > 0 && learn.isPreparingPlayback())
+    {
+        Thread::sleep (5);
+        takeWaitLeftMs -= 5;
     }
 }
 

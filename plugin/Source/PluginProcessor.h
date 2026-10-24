@@ -105,8 +105,9 @@ private:
         the song. */
     void applyChangesNow();
     /** A bounce faster than real time: waits for recorded voices still loading (a project just
-        opened, a set just picked), so it doesn't start with the synthesised ones. */
-    void waitForVoices();
+        opened, a set just picked), so it doesn't start with the synthesised ones, and for a
+        learned take still being made ready (converted to a new sample rate, rendered again). */
+    void waitForVoicesAndTake();
 
     juce::AudioProcessorValueTreeState state;
     ParameterCache cache;
@@ -133,7 +134,8 @@ private:
     std::atomic<bool> sceneDirty { false };
     std::atomic<juce::uint32> changesRequested { 0 }, changesApplied { 0 };
     juce::uint32 changesGivenUp = 0;   // audio thread: stopped waiting for these (the message thread was stuck)
-    int voicesWaitLeftMs = 0;          // audio thread: how long a bounce may still wait for the voices
+    int voicesWaitLeftMs = 0;          // audio thread: how long a bounce may still wait for the voices,
+    int takeWaitLeftMs = 0;            // and for the learned take
 
     // Change tracking for the UI and the learn session
     juce::StringArray paramIds;

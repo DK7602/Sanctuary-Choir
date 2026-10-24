@@ -246,6 +246,14 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
     }
 }
 
+bool LearnSession::isPreparingPlayback() const noexcept
+{
+    if (preparing.load (std::memory_order_relaxed))
+        return true;
+    const PlaybackData* d = live.load (std::memory_order_acquire);
+    return d != nullptr && std::abs (d->sampleRate - sr) > 1.0;   // the timer converts it next
+}
+
 const sc::StemPlayback* LearnSession::preparePlayback (const BlockInfo& info, int n, const sc::ScoreSource*& scoreOut,
                                                        const float* const*& passesOut, int& numPassesOut)
 {
@@ -316,8 +324,15 @@ const sc::StemPlayback* LearnSession::preparePlayback (const BlockInfo& info, in
 void LearnSession::setPhase (Phase p)
 {
     phase = p;
+    updatePreparing();
     if (onStatusChanged)
         onStatusChanged();
+}
+
+void LearnSession::updatePreparing()
+{
+    const Phase p = phase.load();
+    preparing.store (p == Phase::Analysing || p == Phase::Rendering || (renderWhenReady && (p == Phase::Learned || p == Phase::Rendered)));
 }
 
 void LearnSession::toggleLearn()
@@ -1391,6 +1406,8 @@ void LearnSession::timerCallback()
             renderWhenReady = false;
         }
     }
+
+    updatePreparing();
 
     // Free old playback data and capture memory once the audio thread can no longer be using it.
     const auto now = Time::getMillisecondCounter();

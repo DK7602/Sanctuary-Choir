@@ -61,6 +61,11 @@ public:
     const sc::StemPlayback* preparePlayback (const BlockInfo& info, int numSamples, const sc::ScoreSource*& scoreOut,
                                              const float* const*& passesOut, int& numPassesOut);
 
+    /** The take is still being made ready to play as it will (learned, converted to the
+        session's sample rate, or rendered again after the project opened): a bounce faster
+        than real time waits for it (audio thread). */
+    bool isPreparingPlayback() const noexcept;
+
     //==============================================================================
     // Message thread commands
     void toggleLearn();
@@ -155,6 +160,7 @@ private:
     void matchSessionRate();
     void publish (std::unique_ptr<PlaybackData> data);
     void setPhase (Phase p);
+    void updatePreparing();   // after the phase or renderWhenReady changes (isPreparingPlayback)
     std::shared_ptr<const std::vector<float>> currentTake() const;
     juce::String describe() const;
 
@@ -210,6 +216,7 @@ private:
     int renderedSingers = 0;
     bool renderStale = false;
     bool renderWhenReady = false;     // RENDER pressed while learning, or a rendered project reloaded
+    std::atomic<bool> preparing { false };   // analysing or rendering a take that will play (isPreparingPlayback)
     bool changedDuringWork = false;   // settings edited while analysing or rendering
 
     // Chords chosen by hand and the song position of the current take (copied into each

@@ -139,8 +139,11 @@ static void renderPressedWhileLearning()
     rig.session.stopRecording();
     check (phaseName (rig.session) == "analysing", "analysing after LEARN is pressed again");
     rig.session.render();
+    check (rig.session.isPreparingPlayback(), "a bounce would wait while the take is analysed and rendered");
     check (waitFor (rig.session, [&] { return phaseName (rig.session) == "rendered"; }), "rendered after the analysis");
     check (std::abs (rig.learnedSeconds() - firstSeconds) < 0.5, "the rendered take is the third one");
+    pump (150);
+    check (! rig.session.isPreparingPlayback(), "and goes on once it is rendered");
 }
 
 static void settingsChangedWhileRendering()
@@ -201,6 +204,7 @@ static void projectReopenedAtAnotherRate()
     Rig rig (48000.0);
     MemoryInputStream in (state, false);
     rig.session.readState (in);
+    check (rig.session.isPreparingPlayback(), "a bounce would wait while the take is converted");
     check (waitFor (rig.session, [&] {
         MemoryBlock now;
         MemoryOutputStream out (now, false);
@@ -209,6 +213,8 @@ static void projectReopenedAtAnotherRate()
         return phaseName (rig.session) == "learned" && storedRate (now) == 48000;
     }), "converted to 48 kHz");
     check (std::abs (rig.learnedSeconds() - seconds) < 0.1, "same length in seconds");
+    pump (150);
+    check (! rig.session.isPreparingPlayback(), "and goes on once it plays at 48 kHz");
 }
 
 static void reloadWaitsForVoicesAndSkipsSameTake()
