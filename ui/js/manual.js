@@ -158,7 +158,7 @@ ${tip("The <b>Energy</b> plaque at the top right of the church is a seventh knob
 <dt>Ah, Oh, Oo, Ee, Eh</dt><dd>Real recorded singers holding a vowel: the classic choir pad. They slide from note to note the way they were recorded sliding, and a note that starts from silence begins with a real sung onset.</dd>
 <dt>Mm (Hum)</dt><dd>A soft hum (always synthesised).</dd>
 </dl>
-${note("In Words mode the singers copy your singing, not your mouth noises: lip smacks and clicks are taken out of what they sing (your own voice is untouched). Where your voice creaks at the end of a phrase, they stay in the octave you were singing.")}
+${note("In Words mode the singers copy your singing, not your mouth noises: lip smacks and clicks are taken out of what they sing (your own voice is untouched), while your consonants stay crisp: a <i>t</i> or <i>k</i> lasts longer than a click, so they keep it. Where your voice creaks at the end of a phrase, they stay in the octave you were singing.")}
 <h4>${ui("SINGING")} (MIX page)</h4>
 <p>${ui("NATURAL")}, ${ui("BREATHY")} (airy and soft) or ${ui("BELT")} (bright and pressed, sung out). The recorded singers switch to takes they recorded that way. On Natural, some of them sing in their own classical voice with its vibrato, as in a real choir: how many depends on the Style and the ${ui("VIBRATO")} knob (none in Chamber or Gregorian, most of a Gospel choir).</p>
 <h4>Energy (the plaque at the top right)</h4>

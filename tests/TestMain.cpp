@@ -881,6 +881,66 @@ TEST (wordsChoirDoesNotCrackleOnMouthClicks)
     CHECK (rise < 1.0);   // +2.4 dB before the voice was softened
 }
 
+TEST (clickSoftenerSparesConsonants)
+{
+    // A "t" or "k" after a silence stands far above the voice's recent peaks, like a click, but
+    // it lasts: a burst, then breath. The singers must get it whole; a mouth click (a spike that's
+    // gone within a millisecond or two) is still turned down.
+    const double sr = 48000.0;
+    Rng rng (7u);
+    std::vector<float> x ((size_t) (sr * 4.0), 0.0f);
+    for (auto& v : x) v = 1.0e-4f * rng.bi();   // room noise
+    std::vector<int64_t> consonants, clicks;
+    for (int k = 0; k < 6; ++k)
+    {
+        const int64_t c = (int64_t) ((0.3 + 0.6 * k) * sr);
+        consonants.push_back (c);
+        for (int n = 0; n < (int) (0.003 * sr); ++n) x[(size_t) (c + n)] += 0.3f * rng.bi();                 // the burst
+        for (int n = (int) (0.003 * sr); n < (int) (0.05 * sr); ++n) x[(size_t) (c + n)] += 0.08f * rng.bi(); // the breath
+        for (int n = (int) (0.05 * sr); n < (int) (0.25 * sr); ++n)                                             // the vowel
+            x[(size_t) (c + n)] += 0.3f * std::sin (2.0f * kPi * 200.0f * (float) n / (float) sr);
+        const int64_t s = c + (int64_t) (0.4 * sr);   // a lip smack in the silence after
+        clicks.push_back (s);
+        for (int n = 0; n < 200; ++n)
+            x[(size_t) (s + n)] += 0.25f * std::exp (-(float) n / 19.0f) * std::sin (2.0f * kPi * 3500.0f * (float) n / (float) sr + 0.3f);
+        x[(size_t) s] += 0.3f;
+    }
+    ClickSoftener soft;
+    soft.prepare (sr);
+    const int la = soft.getLookahead();
+    std::vector<float> y (x.size(), 0.0f);
+    for (size_t i = 0; i < x.size(); ++i)
+    {
+        const float v = soft.process (x[i]);
+        if ((int64_t) i >= la) y[i - (size_t) la] = v;
+    }
+    auto topBand = [sr] (const std::vector<float>& s)
+    {
+        Biquad h1, h2;
+        h1.highPass (sr, 3000.0);
+        h2.highPass (sr, 3000.0);
+        std::vector<float> o (s.size());
+        for (size_t i = 0; i < s.size(); ++i) o[i] = h2.process (h1.process (s[i]));
+        return o;
+    };
+    const auto tx = topBand (x), ty = topBand (y);
+    auto change = [&] (const std::vector<int64_t>& at, double seconds)
+    {
+        double sum = 0.0;
+        for (int64_t i : at)
+        {
+            double ex = 1.0e-12, ey = 1.0e-12;
+            for (int64_t n = i; n < i + (int64_t) (seconds * sr); ++n) { ex += tx[(size_t) n] * tx[(size_t) n]; ey += ty[(size_t) n] * ty[(size_t) n]; }
+            sum += 10.0 * std::log10 (ey / ex);
+        }
+        return sum / (double) at.size();
+    };
+    const double burst = change (consonants, 0.006), click = change (clicks, 0.004);
+    std::printf ("  top band after the softener: consonant burst %+.1f dB, mouth click %+.1f dB\n", burst, click);
+    CHECK (burst > -1.0);
+    CHECK (click < -6.0);
+}
+
 TEST (engineFullChoirHarmony)
 {
     const double sr = 48000.0;

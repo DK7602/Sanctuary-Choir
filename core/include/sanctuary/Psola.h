@@ -19,8 +19,10 @@ struct PsolaMark
     lead at its own small delay, so one click in the lead would come back from the choir as a
     burst of small clicks: a crackle. A spike in the top band well above the voice's own recent
     peaks (its glottal pulses, a steady "s") is turned down above ~1.5 kHz for a few ms; the
-    look-ahead catches its start. The bands are a Linkwitz-Riley split, so with nothing to turn
-    down the voice comes out whole (only phase-shifted). */
+    look-ahead catches its start. Only a short spike is a click: one that stays up longer than
+    2 ms is a consonant (the burst and breath of a "t" or "k", loudest after a silence, when the
+    voice's recent peaks are low) and is left alone. The bands are a Linkwitz-Riley split, so
+    with nothing to turn down the voice comes out whole (only phase-shifted). */
 class ClickSoftener
 {
 public:
@@ -31,9 +33,10 @@ public:
     int getLookahead() const noexcept { return lookahead; }
 
 private:
+    static constexpr int ringSize = 1024;
     Biquad detect, low1, low2, high1, high2;
-    std::array<float, 256> lowDelay {}, highDelay {};
-    int lookahead = 64, pos = 0, holdLeft = 0;
+    std::array<float, ringSize> lowDelay {}, highDelay {}, target {};
+    int lookahead = 64, decide = 96, pre = 64, gapMax = 24, pos = 0, holdLeft = 0, run = 0, quiet = 0;
     float fastRel = 0.0f, slowAtt = 0.0f, slowRel = 0.0f, gainAtt = 0.0f, gainRel = 0.0f;
     float fast = 0.0f, slow = 0.0f, hold = 1.0f, gain = 1.0f;
 };

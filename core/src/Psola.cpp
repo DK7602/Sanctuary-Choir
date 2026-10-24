@@ -19,12 +19,17 @@ void ClickSoftener::prepare (double sampleRate)
     low2.lowPass (sr, 1500.0);
     high1.highPass (sr, 1500.0);
     high2.highPass (sr, 1500.0);
-    lookahead = clampv ((int) std::lround (sr * 0.0013), 8, (int) lowDelay.size() - 1);
+    // A spike is judged once it has lasted (or not) 2 ms; the gain then starts down 1.3 ms before
+    // it, so the output runs both behind the input.
+    decide = clampv ((int) std::lround (sr * 0.002), 4, ringSize / 2);
+    pre = clampv ((int) std::lround (sr * 0.0013), 4, ringSize / 2 - 2);
+    lookahead = decide + pre;
+    gapMax = std::max (1, (int) std::lround (sr * 0.0005));   // a noisy burst dips between its peaks
     auto coeff = [sr] (double seconds) { return (float) std::exp (-1.0 / (seconds * sr)); };
     fastRel = coeff (0.0003);
     slowAtt = 1.0f - coeff (0.012);   // the voice's recent peaks: rise slowly (a click doesn't count)...
     slowRel = coeff (0.04);           // ...and fall slowly between glottal pulses
-    gainAtt = (float) std::exp (-3.0 / (double) lookahead);
+    gainAtt = (float) std::exp (-3.0 / (double) pre);
     gainRel = coeff (0.005);
     reset();
 }
@@ -35,7 +40,8 @@ void ClickSoftener::reset()
         f->reset();
     lowDelay.fill (0.0f);
     highDelay.fill (0.0f);
-    pos = holdLeft = 0;
+    target.fill (1.0f);
+    pos = holdLeft = run = quiet = 0;
     fast = slow = 0.0f;
     hold = gain = 1.0f;
 }
@@ -47,26 +53,41 @@ float ClickSoftener::process (float x) noexcept
     if (fast > slow) slow += (fast - slow) * slowAtt;
     else             slow = std::max (fast, slow * slowRel);
     constexpr float allowed = 4.0f;   // how far above the voice's own peaks a spike may stand
-    const float target = fast > 3.0e-5f ? std::min (1.0f, allowed * slow / fast) : 1.0f;
+    const bool over = fast > 3.0e-5f && fast > allowed * slow;
+    target[(size_t) pos] = over ? allowed * slow / fast : 1.0f;
 
-    // Hold the lowest gain across the look-ahead either side, then glide: down within the
-    // look-ahead (so the spike's start is caught), back up over ~5 ms.
-    if (target <= hold)
+    // How long the spike has stood up (across dips under 0.5 ms): past 2 ms it's a consonant,
+    // so all of it is let through.
+    if (over || run > 0)
     {
-        hold = target;
-        holdLeft = 2 * lookahead;
+        quiet = over ? 0 : quiet + 1;
+        run = quiet > gapMax ? 0 : run + 1;
+        if (run > decide)
+        {
+            const int back = run == decide + 1 ? decide : 0;
+            for (int k = 0; k <= back; ++k)
+                target[(size_t) ((pos - k + ringSize) % ringSize)] = 1.0f;
+        }
+    }
+
+    // The gain for the sample judged by now: hold the lowest across the look-ahead either side,
+    // then glide, down within it (so the spike's start is caught), back up over ~5 ms.
+    const float judged = target[(size_t) ((pos - decide + ringSize) % ringSize)];
+    if (judged <= hold)
+    {
+        hold = judged;
+        holdLeft = 2 * pre;
     }
     else if (--holdLeft <= 0)
     {
-        hold = target;
+        hold = judged;
     }
     gain = hold + (gain - hold) * (hold < gain ? gainAtt : gainRel);
 
-    const int size = (int) lowDelay.size();
     lowDelay[(size_t) pos] = low2.process (low1.process (x));
     highDelay[(size_t) pos] = high2.process (high1.process (x));
-    const int old = (pos - lookahead + size) % size;
-    pos = (pos + 1) % size;
+    const int old = (pos - lookahead + ringSize) % ringSize;
+    pos = (pos + 1) % ringSize;
     return lowDelay[(size_t) old] + gain * highDelay[(size_t) old];
 }
 
