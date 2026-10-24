@@ -785,6 +785,26 @@ static void measuredRoomsLoad()
     }
     check (switched, "a venue change builds the new room");
     std::printf ("  cathedral built for 44.1 kHz in %.0f ms; studio room %s\n", prepMs, switched ? "followed" : "did not follow");
+
+    // A bounce faster than real time builds the room at once, where the change is in the song.
+    venue = sc::Venue::ConcertHall;
+    auto* before = rooms.getLive();
+    const auto t1 = Time::getMillisecondCounterHiRes();
+    rooms.buildNow (venue);
+    const double nowMs = Time::getMillisecondCounterHiRes() - t1;
+    auto* built = rooms.getLive();
+    check (built != nullptr && built != before && std::abs (built->getSampleRate() - 44100.0) < 0.5, "a bounce gets the new room before its next block");
+    rooms.buildNow (venue);
+    check (rooms.getLive() == built, "and keeps it (no rebuild for the room already playing)");
+    // The background build may already be under way for that venue: it must not swap in a second
+    // copy afterwards (the room's tail would start again from silence).
+    venue = sc::Venue::WoodenChapel;
+    pump (150);
+    rooms.buildNow (venue);
+    auto* chapel = rooms.getLive();
+    pump (1500);
+    check (chapel != nullptr && rooms.getLive() == chapel, "a background build of the same room doesn't replace it");
+    std::printf ("  concert hall built at once for a bounce in %.0f ms\n", nowMs);
 }
 
 int main()

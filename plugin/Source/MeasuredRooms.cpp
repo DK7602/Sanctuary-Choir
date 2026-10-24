@@ -124,6 +124,28 @@ void MeasuredRooms::prepare (double rate)
     publish (std::move (room), (int) venue, rate);
 }
 
+void MeasuredRooms::buildNow (sc::Venue venue)
+{
+    double rate = 0.0;
+    {
+        std::lock_guard<std::mutex> g (lock);
+        if (sampleRate <= 0.0 || ((int) venue == currentVenue && currentRate == sampleRate))
+            return;
+        if (pendingVenue == (int) venue && pendingRate == sampleRate)
+        {
+            publish (std::move (pending), pendingVenue, pendingRate);
+            pendingVenue = -1;
+            return;
+        }
+        rate = sampleRate;
+    }
+    auto ir = getImpulse (venue);
+    auto room = ir != nullptr ? sc::ConvolutionRoom::create (*ir, rate) : nullptr;
+    std::lock_guard<std::mutex> g (lock);
+    if (sampleRate == rate)
+        publish (std::move (room), (int) venue, rate);
+}
+
 void MeasuredRooms::publish (std::unique_ptr<sc::ConvolutionRoom> room, int venue, double rate)
 {
     // A room the engine played stays alive a while: its tail fades out after the switch.
@@ -154,8 +176,9 @@ void MeasuredRooms::timerCallback()
 
         if (pendingVenue >= 0)
         {
-            // Built for a venue that's still wanted (else the build below starts the right one).
-            if (pendingRate == sampleRate && pendingVenue == venue)
+            // Built for a venue that's still wanted (else the build below starts the right one),
+            // and not already live (a bounce builds its rooms itself: buildNow).
+            if (pendingRate == sampleRate && pendingVenue == venue && (venue != currentVenue || currentRate != sampleRate))
                 publish (std::move (pending), pendingVenue, pendingRate);
             pending.reset();
             pendingVenue = -1;

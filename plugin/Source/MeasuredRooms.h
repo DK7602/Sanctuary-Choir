@@ -29,6 +29,10 @@ public:
 
     /** Builds the current venue's room for this sample rate before returning (prepareToPlay). */
     void prepare (double sampleRate);
+    /** A bounce faster than real time (the audio thread, offline): makes the venue's room the live
+        one before returning, so a venue change lands where it is in the song instead of when the
+        background build would have caught up. Does nothing when that room is already live. */
+    void buildNow (sc::Venue venue);
 
     /** The room the audio thread plays, or nullptr (lock-free). */
     sc::ConvolutionRoom* getLive() const noexcept { return live.load (std::memory_order_acquire); }

@@ -90,6 +90,7 @@ void SanctuaryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     bypassPos = 0;
     learn.prepare (sampleRate);
     engineWritten = 0;
+    voicesWaitLeftMs = 30000;
     for (auto& ch : heldVelocity) ch.fill (0.0f);
     for (auto& ch : sustained) ch.fill (false);
     sustain = false;
@@ -148,7 +149,7 @@ void SanctuaryProcessor::updateMidi (const MidiBuffer& midi)
         else if (m.isProgramChange())
         {
             pendingProgram.store (m.getProgramChangeNumber());
-            triggerAsyncUpdate();
+            requestChange();
         }
     }
 }
@@ -184,6 +185,11 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     engine.setSidechain (scL, scR);
 
     updateMidi (midi);
+    if (isNonRealtime())
+    {
+        applyChangesNow();
+        waitForVoices();
+    }
     const sc::EngineParams p = currentParams();
     engine.setParams (p);
 
@@ -284,6 +290,8 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
     engine.setScore (score);
     engine.setPasses (passes, numPasses);
     engine.setSampleSet (voices.getLive());
+    if (isNonRealtime())
+        rooms.buildNow (p.venue);
     engine.setRoom (rooms.getLive());
 
     const float* inL = buffer.getReadPointer (0);
@@ -380,7 +388,7 @@ void SanctuaryProcessor::parameterChanged (const String& id, float)
     if (id == ParamIDs::scene)
     {
         sceneDirty = true;
-        triggerAsyncUpdate();
+        requestChange();
     }
     if (affectsHarmony (id))
         harmonyDirty = true;
@@ -397,8 +405,50 @@ StringArray SanctuaryProcessor::takeChangedParameters()
     return changed;
 }
 
+void SanctuaryProcessor::requestChange()
+{
+    changesRequested.fetch_add (1);
+    triggerAsyncUpdate();
+}
+
+void SanctuaryProcessor::applyChangesNow()
+{
+    const auto target = changesRequested.load();
+    if (changesApplied.load() == target || changesGivenUp == target)
+        return;
+    if (MessageManager::existsAndIsCurrentThread())
+    {
+        handleUpdateNowIfNeeded();   // the host bounces on the message thread itself
+        return;
+    }
+    // The message thread recalls it in a moment; a bounce has no deadline to keep, so wait. If
+    // it's stuck (waiting on the host), carry on after a second rather than stall every block.
+    for (int waited = 0; changesApplied.load() != target; ++waited)
+    {
+        if (waited >= 1000)
+        {
+            changesGivenUp = target;
+            return;
+        }
+        Thread::sleep (1);
+    }
+}
+
+void SanctuaryProcessor::waitForVoices()
+{
+    // The message thread hands a loaded set over; it can't while the host bounces on it.
+    if (voicesWaitLeftMs <= 0 || MessageManager::existsAndIsCurrentThread())
+        return;
+    while (voicesWaitLeftMs > 0 && voices.isBusy())
+    {
+        Thread::sleep (5);
+        voicesWaitLeftMs -= 5;
+    }
+}
+
 void SanctuaryProcessor::handleAsyncUpdate()
 {
+    const auto upTo = changesRequested.load();
     // MIDI Program Change selects a preset.
     if (const int program = pendingProgram.exchange (-1); program >= 0 && program < (int) presets.getEntries().size())
     {
@@ -415,6 +465,7 @@ void SanctuaryProcessor::handleAsyncUpdate()
                 recallScene (slot);
         }
     }
+    changesApplied.store (upTo);
 }
 
 void SanctuaryProcessor::storeScene (int slot)
@@ -531,7 +582,7 @@ void SanctuaryProcessor::setCurrentProgram (int index)
     if (! MessageManager::existsAndIsCurrentThread())
     {
         pendingProgram.store (index);
-        triggerAsyncUpdate();
+        requestChange();
         return;
     }
     presets.load (index);

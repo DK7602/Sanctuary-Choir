@@ -192,7 +192,7 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
   - **Call & Answer**: the upper voices sing the first half of the bar, the lower voices the second.
   - **RATE** sets the speed (1/8, 1/16 or 1/32), **LENGTH** how long each note lasts, and **DEPTH** how far the gate closes.
   - Rendered takes play the rhythm live. Exported stems are without it.
-- **Scenes** (Settings page) store up to 8 sounds per song, such as verse, chorus and bridge. Press **STORE**, then a slot. Click a slot to bring it back, or automate the **Scene** parameter in your DAW so the choir changes with the song.
+- **Scenes** (Settings page) store up to 8 sounds per song, such as verse, chorus and bridge. Press **STORE**, then a slot. Click a slot to bring it back, or automate the **Scene** parameter in your DAW so the choir changes with the song. Scenes, presets and venues that change during the song land in the same place when you export faster than real time.
 - **FREEZE**: hold a big final chord, then keep it ringing while you sing over it.
 - **Chord Speed** (MIX page) sets how often the choir changes chord. Turn it down and quick passing notes ride over one chord, like a real choir; turn it up and every note gets its own chord.
 - **Response: Echo** (MIX page, or the *Call & Response* preset): the choir answers each phrase right after you sing it.

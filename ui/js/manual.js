@@ -387,7 +387,7 @@ ${go("settings", "Show me Settings")}`,
 <li>To save your own, open the preset menu (or the gear), type a name and choose ${ui("SAVE CURRENT SOUND")}. Your presets appear under <i>My Presets</i>.</li>
 </ul>
 <h4>Scenes</h4>
-<p>Store up to 8 sounds for one song, such as verse, chorus and bridge: on the Settings page press ${ui("STORE")}, then a number. Click a number to bring that sound back, or automate the <b>Scene</b> parameter so the choir changes by itself as the song plays.</p>
+<p>Store up to 8 sounds for one song, such as verse, chorus and bridge: on the Settings page press ${ui("STORE")}, then a number. Click a number to bring that sound back, or automate the <b>Scene</b> parameter so the choir changes by itself as the song plays. An export faster than real time changes it in the same place as playback does.</p>
 <h4>Automation</h4>
 <p>The knobs, menus and switches of the sound can be automated in your DAW (the set-up switches, such as MIDI, Follow the Band, Tuning and Monitoring, can't). Favourites: <b>Energy</b> (a hushed verse into a massive chorus), <b>Singing</b> (breathy verse, belted chorus), <b>Choir Size</b>, <b>Lead Depth</b> with Lead on Stage on (a soloist who walks forward) and <b>Freeze</b>.</p>
 <h4>${ui("FREEZE")}</h4>
