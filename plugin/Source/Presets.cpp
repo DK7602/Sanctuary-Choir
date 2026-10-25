@@ -214,6 +214,8 @@ void PresetManager::setCurrentByName (const String& name)
     for (int i = 0; i < (int) entries.size(); ++i)
         if (entries[(size_t) i].name == name)
             current = i;
+    if (onCurrentChanged)
+        onCurrentChanged();
 }
 
 void PresetManager::load (int index)
@@ -251,6 +253,8 @@ void PresetManager::load (int index)
     }
     current = index;
     currentName = e.name;
+    if (onCurrentChanged)
+        onCurrentChanged();
 }
 
 void PresetManager::next()

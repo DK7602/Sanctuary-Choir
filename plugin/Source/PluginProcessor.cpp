@@ -44,6 +44,13 @@ SanctuaryProcessor::SanctuaryProcessor()
         return String::toHexString ((int64) h);
     };
     rooms.getVenue = [this] { return currentParams().venue; };
+    // A preset picked on the plug-in's own page (or by MIDI) is the host's program too, so the
+    // project saves it; a host that only knew the first one would hand that back on reopening.
+    presets.onCurrentChanged = [this]
+    {
+        programChangedForHost = true;
+        triggerAsyncUpdate();
+    };
     voices.onStatusChanged = [this] { ++statusVersion; };
     voices.onSetChanged = [this] { learn.renderSettingsChanged(); };   // rendered takes used the old voices
     // The recorded Sanctuary Voices are the default when they are installed.
@@ -472,6 +479,8 @@ void SanctuaryProcessor::handleAsyncUpdate()
         }
     }
     changesApplied.store (upTo);
+    if (programChangedForHost.exchange (false))
+        updateHostDisplay (ChangeDetails().withProgramChanged (true));
 }
 
 void SanctuaryProcessor::storeScene (int slot)
@@ -584,6 +593,17 @@ int SanctuaryProcessor::getNumPrograms() { return std::max (1, (int) presets.get
 int SanctuaryProcessor::getCurrentProgram() { return std::max (0, presets.getCurrentIndex()); }
 void SanctuaryProcessor::setCurrentProgram (int index)
 {
+    // Right after a project opens, hosts hand back the program they remembered. Projects saved
+    // before the plug-in told the host about presets picked on its own page remembered the
+    // first preset: it must not replace the sound the project just restored. Put the host right
+    // instead.
+    if (const auto restored = stateRestoredAt.load(); restored != 0 && Time::getMillisecondCounter() - restored < 3000
+                                                        && index != getCurrentProgram())
+    {
+        programChangedForHost = true;
+        triggerAsyncUpdate();
+        return;
+    }
     // Some hosts change programs from the audio thread: hand it to the message thread.
     if (! MessageManager::existsAndIsCurrentThread())
     {
@@ -683,6 +703,7 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
             }
         }
         presets.setCurrentByName (tree.getProperty ("preset").toString());
+        stateRestoredAt = std::max<juce::uint32> (1, Time::getMillisecondCounter());
         uiTab = tree.getProperty ("uiTab", "perform").toString();
         editorWidth = tree.getProperty ("editorWidth", 0);
         editorHeight = tree.getProperty ("editorHeight", 0);
@@ -714,6 +735,9 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
             }
             sceneDirty = false;
             cancelPendingUpdate();
+            changesApplied.store (changesRequested.load());   // nothing left for a bounce to wait for
+            if (programChangedForHost.load())
+                triggerAsyncUpdate();                         // still tell the host the restored preset
         }
         const int key = tree.getProperty ("detectedKey", -1);
         if (key >= 0 && key < 24)

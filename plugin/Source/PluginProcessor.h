@@ -129,6 +129,8 @@ private:
     std::vector<std::pair<std::shared_ptr<sc::LyricScript>, juce::uint32>> retiredScripts;   // freed once the audio thread let go
     std::atomic<const sc::LyricScript*> liveLyrics { nullptr };
     std::atomic<int> pendingProgram { -1 };   // MIDI Program Change: load that preset (message thread)
+    std::atomic<bool> programChangedForHost { false };   // tell the host which preset is current (message thread)
+    std::atomic<juce::uint32> stateRestoredAt { 0 };     // when a project's state was last loaded
 
     std::array<juce::var, kNumScenes> scenes;   // { paramID: value } or void
     std::atomic<bool> sceneDirty { false };

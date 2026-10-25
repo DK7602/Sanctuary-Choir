@@ -33,6 +33,10 @@ public:
     /** Restore the selection after the plugin state is loaded. */
     void setCurrentByName (const juce::String& name);
 
+    /** The current preset changed (loaded, restored or renamed in the list): the host is told,
+        so the program it saves with the song is this one. */
+    std::function<void()> onCurrentChanged;
+
     /** Preset list for the UI: [{ name, factory, category }]. */
     juce::var toVar() const;
 
