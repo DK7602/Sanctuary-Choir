@@ -69,6 +69,9 @@ public:
     std::atomic<double> hostBpm { 0.0 };   // the song's tempo, also while stopped (0 = never told)
     /** The side-chain bus is enabled (something can be routed to it). */
     std::atomic<bool> sidechainConnected { false };
+    /** MIDI coming in, for the page's MIDI light: note-ons so far, and notes held now. */
+    std::atomic<juce::uint32> midiNotesIn { 0 };
+    std::atomic<int> midiNotesHeld { 0 };
 
     /** Parameter ids changed since the last call (message thread). */
     juce::StringArray takeChangedParameters();

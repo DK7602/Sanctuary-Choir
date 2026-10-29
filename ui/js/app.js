@@ -616,9 +616,47 @@
     if (state.stageInfo && state.stageInfo.onMeters) state.stageInfo.onMeters(m);
     if (state.wordsInfo && state.wordsInfo.onMeters) state.wordsInfo.onMeters(m);
     const now = performance.now();
+    // MIDI coming in: the lamp glows while notes are held, flashes with each new one and goes
+    // out a few seconds after the last. With MIDI Control off it says so.
+    const midiIn = m.midiIn || 0, midiHeld = m.midiHeld || 0;
+    const fresh = state.midiIn !== undefined && midiIn !== state.midiIn;
+    state.midiIn = midiIn;
+    if (fresh || midiHeld > 0) state.lastMidi = now;
+    const midiRecent = now - (state.lastMidi || -1e9) < 4000;
+    const midiOff = (Params.get("midiEnabled") || 0) < 0.5;
+    const light = $("midiLight");
+    light.classList.toggle("hidden", !midiRecent);
+    light.classList.toggle("held", midiHeld > 0 && !midiOff);
+    light.classList.toggle("off", midiOff);
+    const lightText = midiOff ? "MIDI OFF" : "MIDI";
+    if (light.textContent !== lightText) {
+      light.textContent = lightText;
+      light.title = midiOff ? "MIDI is coming in, but MIDI chords is switched off in Settings" : "MIDI is coming in: the choir sings your chords";
+    }
+    if (fresh && !midiOff) {
+      light.classList.add("flash");
+      clearTimeout(state.midiFlash);
+      state.midiFlash = setTimeout(() => light.classList.remove("flash"), 150);
+    }
+    if (state.midiActive !== midiRecent) { state.midiActive = midiRecent; updateMidiDim(); }
+    if (midiRecent) state.lastActivity = now;
     if (m.leadVoiced || out > 0.05 || band) state.lastActivity = now;
     $("harmonyBadge").style.opacity = now - state.lastActivity < 4000 ? "1" : "0";
     $("singerBadge").style.opacity = now - state.lastSizeChange < 2500 ? "1" : "0";
+  }
+
+  // While MIDI plays the choir and there's no take, LEARN and RENDER aren't needed: darken them
+  // (they still work).
+  function updateMidiDim() {
+    const l = (state.status && state.status.learn) || {};
+    const dim = !!state.midiActive && !l.hasTake && ["empty", "failed"].includes(l.phase || "empty");
+    ["learnBtn", "renderBtn"].forEach((id) => {
+      const b = $(id);
+      if (b.classList.contains("midi-dim") === dim) return;
+      b.classList.toggle("midi-dim", dim);
+      if (dim) { b.dataset.title = b.title; b.title = "Not needed while you play from MIDI: the choir sings your chords live"; }
+      else if (b.dataset.title !== undefined) b.title = b.dataset.title;
+    });
   }
 
   function onStatus(st) {
@@ -659,6 +697,7 @@
     if (state.takeInfo && state.takeInfo.onTakeStatus) state.takeInfo.onTakeStatus(st);
     clearTimeout(state.plaqueTimer);
     if (!busy) state.plaqueTimer = setTimeout(() => onStatus(state.status), 7100);
+    updateMidiDim();
   }
 
   //==========================================================================

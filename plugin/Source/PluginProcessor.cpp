@@ -130,6 +130,7 @@ void SanctuaryProcessor::updateMidi (const MidiBuffer& midi)
         if (m.isNoteOn())
         {
             ++noteOns[(size_t) ch];
+            midiNotesIn.fetch_add (1, std::memory_order_relaxed);
             held[(size_t) m.getNoteNumber()] = m.getFloatVelocity();
             sus[(size_t) m.getNoteNumber()] = false;
         }
@@ -227,6 +228,7 @@ void SanctuaryProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& m
         if (inChord)
             held.add (note);
     }
+    midiNotesHeld.store (held.count + parts[0].count + parts[1].count + parts[2].count + parts[3].count, std::memory_order_relaxed);
     // Typed words: each new note (chord) sings the next syllable; in Parts mode each part keeps
     // its own place in the words.
     engine.setLyrics (liveLyrics.load (std::memory_order_acquire));

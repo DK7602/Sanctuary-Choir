@@ -266,6 +266,8 @@
         sidechain: true, bandHeard: singing, followingBand: singing && !!values.followBand,
         bandChord: singing ? (demoLevel !== undefined ? chordNamesG : chordNames)[beat] : "",
         lyric: singing && lyrics.sung.length ? Math.floor(t / 1.4) % lyrics.sung.length : -1,
+        // MIDI coming in (window.SC_DEMO_MIDI): a chord every 1.4 s, held most of the way.
+        midiIn: window.SC_DEMO_MIDI ? 3 * Math.floor(t / 1.4) : 0, midiHeld: window.SC_DEMO_MIDI && (t % 1.4) < 1.2 ? 3 : 0,
       });
     }
 
@@ -310,7 +312,7 @@
       status();
     }
     function renderSim() {
-      if (!learn.hasTake) { emit("toast", { text: "Learn or load a vocal take first" }); return; }
+      if (!learn.hasTake) { emit("toast", { text: "RENDER is for a learned vocal take: press LEARN and sing, or LOAD one. Playing from MIDI? There is nothing to render: the choir sings your chords live." }); return; }
       clearInterval(learnTimer);
       learn.phase = "rendering"; learn.progress = 0;
       learnTimer = setInterval(() => {

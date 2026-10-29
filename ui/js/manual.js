@@ -267,7 +267,8 @@ ${go("take", "Show me Chords &amp; Stems")}`,
       id: "midi", title: "Play the choir with MIDI", summary: "Hold chords, write each part yourself, switch presets, or make the choir sing typed words.",
       body: `
 <dl class="m-dl">
-<dt>MIDI chords</dt><dd>Hold a chord on a keyboard and the choir sings it, whatever it heard. With no voice coming in, the choir becomes an instrument you play. Turn it on or off with ${ui("MIDI chords")} in Settings.</dd>
+<dt>MIDI chords</dt><dd>Hold a chord on a keyboard and the choir sings it, whatever it heard. With no voice coming in, the choir becomes an instrument you play. Turn it on or off with ${ui("MIDI chords")} in Settings. There is nothing to LEARN or RENDER: those are for a sung take, so they are dimmed while MIDI plays the choir (they still work).</dd>
+<dt>The MIDI light</dt><dd>While MIDI comes in, a ${ui("● MIDI")} light shows beside the key at the top left: it glows while notes are held and flashes with each new one. If it never comes on, the MIDI isn't reaching the plug-in (see Troubleshooting). ${ui("● MIDI OFF")} means it arrives but ${ui("MIDI chords")} is switched off in Settings.</dd>
 <dt>Parts on channels 1–4</dt><dd>Write every part yourself: notes on channel 1 are sung by the sopranos, 2 the altos, 3 the tenors and 4 the basses. Other channels still work as chords.</dd>
 <dt>Program Change</dt><dd>Picks a preset by its number in the list, so a controller or a DAW track can switch sounds.</dd>
 </dl>
@@ -414,6 +415,7 @@ ${go("settings", "Show me Settings")}`,
       body: `
 <dl class="m-dl">
 <dt>I hear no choir</dt><dd>Check that ${ui("CHOIR SIZE")} is up, the ${ui("CHOIR")} fader on MIX is up, and no section is muted (a faded singer icon on the main page). The choir sings when it hears a voice, or when you play MIDI chords.</dd>
+<dt>MIDI doesn't play the choir</dt><dd>Watch the ${ui("● MIDI")} light beside the key. If it never comes on, the MIDI isn't arriving: the MIDI track must be unmuted and its output set to Sanctuary Choir (in Cubase, the track's Inspector output, not its input). If the choir stops wherever the audio track is silent, turn off Cubase's <i>Suspend VST3 plug-in processing when no audio signals are received</i> (Studio › Studio Setup › VST Plug-ins). ${ui("● MIDI OFF")}: switch ${ui("MIDI chords")} on in Settings.</dd>
 <dt>The choir is in mono</dt><dd>The track is mono. Use a stereo track, or an FX channel fed by a send.</dd>
 <dt>I hear myself late while recording</dt><dd>Switch ${ui("MONITORING")} to ${ui("LIVE")}, and use a buffer of 128 or 256 samples.</dd>
 <dt>The choir is slightly off the beat when I mix</dt><dd>Switch ${ui("MONITORING")} back to ${ui("STUDIO")}.</dd>

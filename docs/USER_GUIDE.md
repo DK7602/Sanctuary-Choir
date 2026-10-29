@@ -197,7 +197,8 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
 - **FREEZE**: hold a big final chord, then keep it ringing while you sing over it.
 - **Chord Speed** (MIX page) sets how often the choir changes chord. Turn it down and quick passing notes ride over one chord, like a real choir; turn it up and every note gets its own chord.
 - **Response: Echo** (MIX page, or the *Call & Response* preset): the choir answers each phrase right after you sing it.
-- **MIDI chords**: hold chords on a keyboard to decide the harmony yourself. With no voice coming in, the choir becomes an instrument you can play.
+- **MIDI chords**: hold chords on a keyboard to decide the harmony yourself. With no voice coming in, the choir becomes an instrument you can play. There is nothing to LEARN or RENDER (those are for a sung take), so they are dimmed while MIDI plays the choir.
+  - A **● MIDI** light beside the key (top left of the main page) glows while notes are held and flashes with each new one. If it never comes on, the MIDI isn't reaching the plug-in: unmute the MIDI track and set its *output* to Sanctuary Choir. In Cubase, if the choir stops wherever the audio track is silent, turn off *Suspend VST3 plug-in processing when no audio signals are received* (Studio › Studio Setup › VST Plug-ins). **● MIDI OFF** means it arrives but *MIDI chords* is switched off in Settings.
 - **MIDI parts** (Settings → *Parts on channels 1–4*): write each part yourself. Notes on channel 1 are sung by the sopranos, channel 2 the altos, channel 3 the tenors and channel 4 the basses. Other channels still work as chords.
 - **Program Change** messages pick a preset by its number in the list, so a MIDI controller or a DAW track can switch sounds.
 - **Sung words** (Settings → **SUNG WORDS**): type words and the MIDI choir sings them.

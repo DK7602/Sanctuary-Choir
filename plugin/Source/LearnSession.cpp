@@ -700,7 +700,7 @@ void LearnSession::startAnalysis (std::vector<float> audio, double sampleRate, i
         if (empty)
         {
             renderWhenReady = false;
-            lastError = "No singing found in the take";
+            lastError = "No singing found in the take - playing from MIDI? No need to LEARN";
             setPhase (Phase::Failed);
             return;
         }
@@ -808,8 +808,8 @@ void LearnSession::render()
     renderWhenReady = false;
     if (owned == nullptr || owned->analysis == nullptr || owned->analysis->isEmpty())
     {
-        lastError = "Learn or load a vocal take first";
-        if (onStatusChanged) onStatusChanged();
+        notify ("RENDER is for a learned vocal take: press LEARN and sing, or LOAD one. "
+                "Playing from MIDI? There is nothing to render: the choir sings your chords live.");
         return;
     }
     cancelWork();
