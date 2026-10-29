@@ -137,6 +137,37 @@ namespace
             p ("Congregation",      { { ensemble, Congregation }, { harmonyMode, Unison }, { style, Sacred }, { vocalType, Words }, { choirSize, 80 }, { space, 65 }, { reverb, 50 }, { venue, Chapel } }),
             p ("Church Sing-Along", { { ensemble, Congregation }, { harmonyMode, Full }, { style, Worship }, { vocalType, Words }, { choirSize, 70 }, { space, 60 }, { reverb, 45 }, { venue, Hall } }),
         });
+
+        // Last in the list, so Program Change numbers of the presets before stay as they were.
+        // The choir is kept off the 808 and the kick (Low Cut 140-220 Hz, no Sub-Octave), in
+        // shorter rooms with the room held back by Pre-Delay, and closer mics: up front, not
+        // washing over the beat.
+        category = "Hip-Hop & Trap";
+        add ({
+            p ("Trap Choir",        { { harmonyMode, Full }, { style, Cinematic }, { vocalType, Ah }, { choirSize, 70 }, { space, 70 }, { reverb, 45 }, { tone, -2 }, { presence, 35 },
+                                      { humanize, 35 }, { glue, 40 }, { micClose, -6 }, { venue, Hall }, { decay, 80 }, { preDelay, 45 }, { lowCut, 200 } }),
+            p ("Dark Trap Intro",   { { harmonyMode, Lower }, { style, Cinematic }, { vocalType, Oh }, { choirSize, 85 }, { space, 85 }, { reverb, 68 }, { tone, -5 }, { presence, 20 },
+                                      { warmth, 30 }, { glue, 40 }, { harmonySpeed, 30 }, { venue, Cathedral }, { decay, 110 }, { preDelay, 40 }, { lowCut, 160 } }),
+            p ("Drill Choir",       { { harmonyMode, Open }, { style, Cinematic }, { vocalType, Oh }, { choirSize, 60 }, { space, 75 }, { reverb, 50 }, { tone, -3 }, { presence, 30 },
+                                      { humanize, 25 }, { glue, 45 }, { venue, Hall }, { decay, 90 }, { preDelay, 35 }, { lowCut, 220 },
+                                      { rhythmPattern, Syncopated }, { rhythmLength, 55 }, { rhythmDepth, 85 } }),
+            p ("Trap Stutter Build", { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Ah }, { choirSize, 90 }, { space, 80 }, { reverb, 40 }, { presence, 40 },
+                                       { glue, 55 }, { energy, 75 }, { singing, Belted }, { venue, Hall }, { decay, 70 }, { preDelay, 30 }, { lowCut, 200 },
+                                       { rhythmPattern, Stutter }, { rhythmRate, 2 }, { rhythmLength, 50 }, { rhythmDepth, 100 } }),
+            p ("Boom Bap Soul",     { { harmonyMode, Thirds }, { style, Gospel }, { vocalType, Oo }, { choirSize, 20 }, { space, 45 }, { reverb, 22 }, { tone, -2 }, { presence, 30 },
+                                      { humanize, 70 }, { warmth, 40 }, { glue, 45 }, { micClose, 0 }, { micTree, -8 }, { venue, Studio }, { lowCut, 140 }, { highCut, 9000 } }),
+            p ("Gospel Rap Hook",   { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 70 }, { space, 60 }, { reverb, 35 }, { presence, 50 },
+                                      { glue, 55 }, { energy, 85 }, { harmonySpeed, 60 }, { venue, GospelChurch }, { preDelay, 35 }, { lowCut, 130 } }),
+            p ("Melodic Rap Stack", { { harmonyMode, Thirds }, { style, Worship }, { vocalType, Words }, { choirSize, 10 }, { space, 55 }, { reverb, 15 }, { presence, 55 },
+                                      { humanize, 30 }, { vibrato, 10 }, { glide, 20 }, { pitchCorrection, 100 }, { micClose, 0 }, { micTree, -8 }, { venue, Studio }, { lowCut, 150 } }),
+            p ("Lo-Fi Choir",       { { harmonyMode, Full }, { style, Worship }, { vocalType, Oo }, { choirSize, 35 }, { space, 55 }, { reverb, 50 }, { tone, -4 }, { presence, 10 },
+                                      { humanize, 120 }, { vibrato, 30 }, { warmth, 45 }, { singing, Breathy }, { venue, Chapel }, { decay, 80 }, { lowCut, 150 }, { highCut, 6500 } }),
+            p ("Phonk Choir",       { { harmonyMode, Lower }, { style, Gregorian }, { vocalType, Ah }, { choirSize, 50 }, { space, 70 }, { reverb, 40 }, { tone, -3 }, { presence, 25 },
+                                      { warmth, 60 }, { glue, 50 }, { venue, Hall }, { decay, 70 }, { lowCut, 200 }, { highCut, 7000 },
+                                      { rhythmPattern, Pulse8 }, { rhythmLength, 40 }, { rhythmDepth, 80 } }),
+            p ("Hype Crowd",        { { ensemble, Gang }, { harmonyMode, Unison }, { style, Gospel }, { vocalType, Words }, { choirSize, 45 }, { space, 85 }, { reverb, 18 }, { presence, 55 },
+                                      { glue, 55 }, { energy, 80 }, { venue, Studio }, { lowCut, 180 } }),
+        });
         return list;
     }
 

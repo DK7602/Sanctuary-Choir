@@ -180,7 +180,8 @@ Moving the stage or changing the mics never needs a new RENDER: rendered takes f
 ## 7. More things to try
 
 - **The gear** (top left, beside the preset) opens a small menu: the manual, Settings, *Save this sound as a preset…* and the presets folder.
-- **Presets** (top left) come in categories: Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, and Kids & Crowds. Point at a category to see its presets. Presets change the choir's sound, not your song: the Key and Scale you set stay as they are.
+- **Presets** (top left) come in categories: Sacred & Classical, Worship, Gospel, Cinematic, Pop & Backing, Pads & Drones, Rhythmic, Kids & Crowds, and Hip-Hop & Trap. Point at a category to see its presets. Presets change the choir's sound, not your song: the Key and Scale you set stay as they are.
+- **Hip-Hop & Trap** presets keep the choir off your 808 and kick (Low Cut at 140-220 Hz, no Sub-Octave) and up front in shorter rooms: *Trap Choir* for the beat, *Dark Trap Intro* for intros and outros, *Drill Choir* and *Phonk Choir* chopped in time with your song, *Trap Stutter Build* for the bar before the drop, *Boom Bap Soul* and *Lo-Fi Choir* for warm, vintage chops, *Gospel Rap Hook* for a big hook, *Melodic Rap Stack* for tight, hard-tuned harmonies around your vocal, and *Hype Crowd* for shouted hooks. Play them from a MIDI track (minor chords work well), or sing into them. The key is yours: set it, or leave it on Auto.
 - **Ensemble** (MIX page) chooses who sings:
   - **Choir**: an adult choir.
   - **Children**: light, straight voices; every part is sung by trebles. They sound like children rather than grown-ups sped up: a child's pure tone (none of a trained singer's ring, no chest), a little higher in the vocal tract than the women, and some airy voices among them.

@@ -159,6 +159,16 @@
       ["Kids & Crowds", "Hey! Shouts"],
       ["Kids & Crowds", "Congregation"],
       ["Kids & Crowds", "Church Sing-Along"],
+      ["Hip-Hop & Trap", "Trap Choir"],
+      ["Hip-Hop & Trap", "Dark Trap Intro"],
+      ["Hip-Hop & Trap", "Drill Choir"],
+      ["Hip-Hop & Trap", "Trap Stutter Build"],
+      ["Hip-Hop & Trap", "Boom Bap Soul"],
+      ["Hip-Hop & Trap", "Gospel Rap Hook"],
+      ["Hip-Hop & Trap", "Melodic Rap Stack"],
+      ["Hip-Hop & Trap", "Lo-Fi Choir"],
+      ["Hip-Hop & Trap", "Phonk Choir"],
+      ["Hip-Hop & Trap", "Hype Crowd"],
     ].map(([category, name]) => ({ name, category, factory: true }));
     let presetIndex = 0;
     const learn = { phase: "empty", text: "Press LEARN and sing, or LOAD a vocal", progress: 0, hasTake: false, hasStems: false, stale: false, previewing: false,

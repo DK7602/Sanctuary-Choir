@@ -382,7 +382,8 @@ ${go("settings", "Show me Settings")}`,
       body: `
 <h4>Presets</h4>
 <ul>
-<li>Click the preset name at the top left. Presets come in categories (Sacred &amp; Classical, Worship, Gospel, Cinematic, Pop &amp; Backing, Pads &amp; Drones, Rhythmic, Kids &amp; Crowds): point at one to see its presets. The arrows step through them.</li>
+<li>Click the preset name at the top left. Presets come in categories (Sacred &amp; Classical, Worship, Gospel, Cinematic, Pop &amp; Backing, Pads &amp; Drones, Rhythmic, Kids &amp; Crowds, Hip-Hop &amp; Trap): point at one to see its presets. The arrows step through them.</li>
+<li><b>Hip-Hop &amp; Trap</b> keeps the choir off your 808 and kick (Low Cut at 140-220 Hz, no Sub-Octave) and up front in shorter rooms. <i>Trap Choir</i> sits on the beat, <i>Dark Trap Intro</i> opens and closes a song, <i>Drill Choir</i> and <i>Phonk Choir</i> are chopped in time with your song, <i>Trap Stutter Build</i> fills the bar before the drop, <i>Boom Bap Soul</i> and <i>Lo-Fi Choir</i> are warm, vintage chops, <i>Gospel Rap Hook</i> is a big hook, <i>Melodic Rap Stack</i> gives tight, hard-tuned harmonies around your vocal, and <i>Hype Crowd</i> shouts the hook with you. Play them from a MIDI track (minor chords work well) or sing into them.</li>
 <li>Presets change the choir's sound, not your song: the key and scale you set stay as they are, and so does where you stand on the stage.</li>
 <li>To save your own, open the preset menu (or the gear), type a name and choose ${ui("SAVE CURRENT SOUND")}. Your presets appear under <i>My Presets</i>.</li>
 </ul>
