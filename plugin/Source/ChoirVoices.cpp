@@ -133,6 +133,14 @@ void ChoirVoices::loadFolder (const File& dir)
         auto set = std::make_shared<sc::SampleSet>();
         set->name = displayName (dir).toStdString();
 
+        // Each file's place in the folder, worked out here before the decoding threads start.
+        // On Windows a File converts its path in place each time it reaches the disk, so no File
+        // is used by two threads at once: below, a decoding thread touches only its own file.
+        std::vector<std::string> paths;
+        paths.reserve ((size_t) files.size());
+        for (const auto& f : files)
+            paths.push_back (f.getRelativePathFrom (dir).toStdString());
+
         // Decode on a few threads (a full voice pack is thousands of files), adding the notes
         // to the set in file order as they arrive. Only a window of files runs ahead, so the
         // decoded audio waiting to be added stays small.
@@ -164,10 +172,9 @@ void ChoirVoices::loadFolder (const File& dir)
                     i = nextFile++;
                 }
                 Decoded d;
-                const auto& f = files.getReference (i);
-                if (sc::SampleSet::sectionFromPath (f.getRelativePathFrom (dir).toStdString()) >= 0)
+                if (sc::SampleSet::sectionFromPath (paths[(size_t) i]) >= 0)
                 {
-                    std::unique_ptr<AudioFormatReader> reader (formats.createReaderFor (f));
+                    std::unique_ptr<AudioFormatReader> reader (formats.createReaderFor (files.getReference (i)));
                     const int64 len = reader != nullptr && reader->sampleRate > 0.0
                                           ? jmin (reader->lengthInSamples, (int64) (reader->sampleRate * 600.0))   // up to 10 minutes per file
                                           : 0;
@@ -216,7 +223,7 @@ void ChoirVoices::loadFolder (const File& dir)
             progress = (float) (i + 1) / (float) count;
             if (d.mono.empty())
                 continue;
-            const auto path = files.getReference (i).getRelativePathFrom (dir).toStdString();
+            const auto& path = paths[(size_t) i];
             const int section = sc::SampleSet::sectionFromPath (path);
             const int vowel = std::max (0, sc::SampleSet::vowelFromPath (path));
             const auto len = (int64_t) d.mono.size();

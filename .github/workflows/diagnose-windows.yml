@@ -1,8 +1,9 @@
 name: Diagnose Windows session-test crash
 
-# Temporary: the session tests crash now and then on Windows only (heap corruption, 0xc0000374).
-# Runs the rooms and voice pack tests over and over under the debugger, then again with every
-# allocation on its own page, and prints the stack where it goes wrong.
+# Temporary: the session tests crashed now and then on Windows only (heap corruption, 0xc0000374):
+# the voice pack's decoding threads shared one File, whose path Windows converts in place. Runs
+# the rooms and voice pack tests over and over under the debugger, then again with every
+# allocation on its own page, and prints the stack if anything goes wrong.
 on:
   push:
     branches: [ccr-0c033f51-s0frt4]
