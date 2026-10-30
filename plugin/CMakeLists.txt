@@ -22,6 +22,10 @@ juce_add_plugin(SanctuaryChoir
     COPY_PLUGIN_AFTER_BUILD FALSE
     AU_MAIN_TYPE kAudioUnitType_MusicEffect
     VST3_CATEGORIES Fx Vocals
+    # The app icon (the standalone app on macOS and Windows), cut from design/icon/icon-artwork.webp
+    # by tools/icon/make_icon.py.
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon-1024.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon-256.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "Sanctuary Choir listens to your voice to turn it into a choir."
     NEEDS_WEB_BROWSER TRUE

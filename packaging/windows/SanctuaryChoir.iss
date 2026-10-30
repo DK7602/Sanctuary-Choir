@@ -24,7 +24,9 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
+SetupIconFile=SanctuaryChoir.ico
 UninstallDisplayName=Sanctuary Choir
+UninstallDisplayIcon={app}\SanctuaryChoir.ico
 
 [Types]
 Name: "full"; Description: "Full installation"
@@ -40,6 +42,7 @@ Source: "{#SourceDir}\Sanctuary Choir.vst3\*"; DestDir: "{commoncf64}\VST3\Sanct
 Source: "{#SourceDir}\Sanctuary Choir.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "{#SourceDir}\SanctuaryVoices\*"; DestDir: "{commonappdata}\Sanctuary Choir\Voices\SanctuaryVoices"; Components: voices; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\INSTALL.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "SanctuaryChoir.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ROOMS-CREDITS.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ROOMS-CREDITS.txt"; DestDir: "{commonappdata}\Sanctuary Choir"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
