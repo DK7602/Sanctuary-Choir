@@ -1,0 +1,97 @@
+name: Diagnose Windows session-test crash
+
+# Temporary: the session tests crash now and then on Windows only (heap corruption, 0xc0000374).
+# Runs the rooms and voice pack tests over and over under the debugger, then again with every
+# allocation on its own page, and prints the stack where it goes wrong.
+on:
+  push:
+    branches: [ccr-0c033f51-s0frt4]
+    paths: [.github/workflows/diagnose-windows.yml]
+
+jobs:
+  diagnose:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install WebView2 SDK
+        shell: pwsh
+        run: nuget install Microsoft.Web.WebView2 -Version 1.0.4314.35 -OutputDirectory C:/webview2 -NonInteractive
+
+      - name: Cache JUCE
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: .juce/JUCE
+          key: juce-9.0.4-src-${{ runner.os }}
+
+      - name: Fetch JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: git clone --depth 1 --branch 9.0.4 https://github.com/juce-framework/JUCE.git .juce/JUCE
+
+      - name: Build the session tests with symbols
+        shell: bash
+        run: |
+          cmake -S . -B build -DFETCHCONTENT_SOURCE_DIR_JUCE="$PWD/.juce/JUCE" -DJUCE_WEBVIEW2_PACKAGE_LOCATION=C:/webview2
+          cmake --build build --config RelWithDebInfo --target SanctuarySessionTests --parallel 4
+          ls build/plugin/SanctuarySessionTests_artefacts/RelWithDebInfo
+
+      - name: Find the debugger
+        shell: bash
+        run: |
+          D="/c/Program Files (x86)/Windows Kits/10/Debuggers/x64"
+          ls "$D" | head -40 || true
+          if [ -x "$D/cdb.exe" ]; then echo "CDB=$D/cdb.exe" >> "$GITHUB_ENV"; fi
+
+      # The debugger stops at the first access violation, heap corruption, failed security check or
+      # break (page heap's own reports), prints every thread's stack and quits.
+      - name: Debugger commands
+        shell: bash
+        run: |
+          STACKS='.lastevent; .exr -1; kn 80; ~*kn 50; .ecxr; kn 80'
+          {
+            echo "sxe -c \".echo ===== ACCESS VIOLATION =====; $STACKS; q\" av"
+            echo "sxe -c \".echo ===== HEAP CORRUPTION =====; $STACKS; q\" c0000374"
+            echo "sxe -c \".echo ===== SECURITY CHECK =====; $STACKS; q\" c0000409"
+            echo "sxe -c \".echo ===== BREAK =====; $STACKS; !avrf; q\" bpe"
+            echo "g"
+          } > cdb-commands.txt
+          cat cdb-commands.txt
+
+      - name: Repeat under the debugger
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          EXE=build/plugin/SanctuarySessionTests_artefacts/RelWithDebInfo/SanctuarySessionTests.exe
+          SYM="build/plugin/SanctuarySessionTests_artefacts/RelWithDebInfo;srv*C:/symcache*https://msdl.microsoft.com/download/symbols"
+          for i in 1 2 3; do
+            echo "=== process $i"
+            if [ -n "$CDB" ]; then
+              "$CDB" -G -lines -y "$SYM" -cf cdb-commands.txt "$EXE" --repeat 8 < /dev/null || echo "exit $?"
+            else
+              "$EXE" --repeat 8 || echo "exit $?"
+            fi
+          done
+
+      - name: Turn on full page heap
+        shell: pwsh
+        run: |
+          $k = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\SanctuarySessionTests.exe'
+          New-Item -Path $k -Force | Out-Null
+          New-ItemProperty -Path $k -Name GlobalFlag -PropertyType DWord -Value 0x02000000 -Force | Out-Null
+          New-ItemProperty -Path $k -Name PageHeapFlags -PropertyType DWord -Value 3 -Force | Out-Null
+          Get-ItemProperty -Path $k
+
+      - name: Repeat under the debugger with page heap
+        shell: bash
+        timeout-minutes: 25
+        run: |
+          EXE=build/plugin/SanctuarySessionTests_artefacts/RelWithDebInfo/SanctuarySessionTests.exe
+          SYM="build/plugin/SanctuarySessionTests_artefacts/RelWithDebInfo;srv*C:/symcache*https://msdl.microsoft.com/download/symbols"
+          if [ -n "$CDB" ]; then
+            "$CDB" -G -lines -y "$SYM" -cf cdb-commands.txt "$EXE" --repeat 3 < /dev/null || echo "exit $?"
+          else
+            "$EXE" --repeat 3 || echo "exit $?"
+          fi

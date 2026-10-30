@@ -813,10 +813,33 @@ static void measuredRoomsLoad()
     std::printf ("  concert hall built at once for a bounce in %.0f ms\n", nowMs);
 }
 
-int main()
+#if JUCE_WINDOWS
+// A crash prints where it happened (named when the build's .pdb is next to the program).
+static void printCrash (void*)
+{
+    std::printf ("\n*** crashed:\n%s\n", SystemStats::getStackBacktrace().toRawUTF8());
+}
+#endif
+
+int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0);   // a crash on CI still shows which test it was in
+   #if JUCE_WINDOWS
+    SystemStats::setApplicationCrashHandler (printCrash);
+   #endif
     ScopedJuceInitialiser_GUI juce;
+    // --repeat N: the rooms and the voice pack, N times over (a crash that only comes now and then).
+    if (argc > 2 && String (argv[1]) == "--repeat")
+    {
+        for (int i = 0, n = String (argv[2]).getIntValue(); i < n; ++i)
+        {
+            std::printf ("--- round %d of %d\n", i + 1, n);
+            measuredRoomsLoad();
+            voicePackLoads();
+        }
+        std::printf ("\n%d checks, %d failures\n", checks, failures);
+        return failures == 0 ? 0 : 1;
+    }
     measuredRoomsLoad();
     voicePackLoads();
     renderPressedWhileLearning();
