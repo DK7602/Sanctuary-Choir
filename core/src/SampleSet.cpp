@@ -1,5 +1,6 @@
 #include "sanctuary/SampleSet.h"
 #include "sanctuary/Learn.h"
+#include "sanctuary/Sinc.h"
 
 #include <algorithm>
 #include <atomic>
@@ -33,56 +34,6 @@ namespace
     inline float at (const SampleZone& z, int64_t i) noexcept
     {
         return i >= 0 && i < (int64_t) z.pcm.size() ? (float) z.pcm[(size_t) i] * z.scale : 0.0f;
-    }
-
-    /** Windowed-sinc interpolation: 8 taps (Kaiser, beta 6), 2048 positions between two samples
-        (the nearest is used), each normalised to unit gain. On the pack's 32 kHz recordings it is flat
-        to 8 kHz and 0.4 dB down at 10 kHz, where reading between two samples in a straight line
-        lost 2.8 dB, and up to 8 dB at 12 kHz that came and went as the pitch moved. */
-    struct SincTable
-    {
-        static constexpr int taps = 8, phases = 2048;
-        std::vector<float> w;
-
-        SincTable() : w ((size_t) ((phases + 1) * taps))
-        {
-            auto bessel0 = [] (double x)
-            {
-                double sum = 1.0, term = 1.0;
-                for (int k = 1; k < 32; ++k)
-                {
-                    term *= (x / (2.0 * k)) * (x / (2.0 * k));
-                    sum += term;
-                }
-                return sum;
-            };
-            const double beta = 6.0, cut = 0.95;
-            for (int p = 0; p <= phases; ++p)
-            {
-                const double frac = (double) p / phases;
-                double sum = 0.0;
-                float* row = w.data() + p * taps;
-                for (int k = 0; k < taps; ++k)
-                {
-                    // Tap k is the sample k - 3 places from the one before the read position.
-                    const double t = (double) (k - (taps / 2 - 1)) - frac;
-                    const double u = 2.0 * t / taps;
-                    const double window = std::abs (u) < 1.0 ? bessel0 (beta * std::sqrt (1.0 - u * u)) / bessel0 (beta) : 0.0;
-                    const double x = cut * t;
-                    const double sinc = std::abs (x) < 1.0e-9 ? 1.0 : std::sin (kPi * x) / (kPi * x);
-                    row[k] = (float) (sinc * window);
-                    sum += row[k];
-                }
-                for (int k = 0; k < taps; ++k)
-                    row[k] = (float) (row[k] / sum);
-            }
-        }
-    };
-
-    const SincTable& sincTable()
-    {
-        static const SincTable table;
-        return table;
     }
 
     inline float interp (const SampleZone& z, double pos) noexcept

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "PitchTracker.h"
+#include "Sinc.h"
 
 namespace sc
 {
@@ -59,18 +60,18 @@ public:
     /** How far ahead of a synthesis time marks are guaranteed to exist, given the input written. */
     int64_t getMarkedUntil() const noexcept { return markCount > 0 ? marks[(size_t) ((markCount - 1) & markMask)].pos : 0; }
 
-    inline float sampleAt (double pos) const
-    {
-        const double fl = std::floor (pos);
-        const int64_t i = (int64_t) fl;
-        const float fr = (float) (pos - fl);
-        const float a = ring[(size_t) (i & ringMask)];
-        const float b = ring[(size_t) ((i + 1) & ringMask)];
-        return a + (b - a) * fr;
-    }
+    /** The ring of input (the voice as the singers copy it): sample i is at i & getRingMask().
+        Grains read it with a windowed sinc (a straight line between two samples dulled every
+        singer's top end: 1 to 2.5 dB lost from 8 to 16 kHz). */
+    const float* getRing() const noexcept { return ring.data(); }
+    int64_t getRingMask() const noexcept { return ringMask; }
+
 
     /** Nearest mark to time t, using and updating a caller-owned cursor. nullptr if none. */
     const PsolaMark* nearestMark (double t, int64_t& cursor) const;
+    /** How far the voiced mark at t (as nearestMark finds it) is from the next one: the period
+        the voice actually sang there. Its estimated period if the next is not placed yet. */
+    float spacingAfter (const PsolaMark& m, int64_t cursor) const;
 
     // Freeze: snapshot recent voiced material so voices can sustain it indefinitely.
     bool captureFreeze (int64_t endPos, int lengthSamples);
@@ -83,9 +84,8 @@ public:
         const double rel = pos - (double) frozenStart;
         if (rel < 0.0 || rel >= (double) frozenData.size() - 1)
             return 0.0f;
-        const int i = (int) rel;
-        const float fr = (float) (rel - i);
-        return frozenData[(size_t) i] + (frozenData[(size_t) i + 1] - frozenData[(size_t) i]) * fr;
+        const auto size = (int64_t) frozenData.size();
+        return sincRead (smallSincTable(), rel, [this, size] (int64_t i) { return i >= 0 && i < size ? frozenData[(size_t) i] : 0.0f; });
     }
 
 private:

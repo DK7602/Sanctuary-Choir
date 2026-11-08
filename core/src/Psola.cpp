@@ -97,6 +97,7 @@ void PsolaAnalyzer::prepare (double sampleRate, int maxPer, int historySamples)
     sr = sampleRate;
     maxPeriod = std::max (32, maxPer);
     unvoicedHop = std::max (32, (int) std::lround (sr * 0.004));
+    smallSincTable();   // built here, not on the audio thread at the first grain
 
     const int64_t ringSize = nextPow2 ((int64_t) historySamples + 6 * maxPeriod + 8192);
     ring.assign ((size_t) ringSize, 0.0f);
@@ -362,6 +363,24 @@ const PsolaMark* PsolaAnalyzer::nearestMark (double t, int64_t& cursor) const
     return &a;
 }
 
+float PsolaAnalyzer::spacingAfter (const PsolaMark& m, int64_t cursor) const
+{
+    // The mark is the cursor's or the one after it.
+    for (int64_t i = cursor; i < std::min (markCount, cursor + 3); ++i)
+    {
+        if (i < 0 || marks[(size_t) (i & markMask)].pos != m.pos)
+            continue;
+        if (i + 1 >= markCount)
+            break;
+        const PsolaMark& next = marks[(size_t) ((i + 1) & markMask)];
+        const float gap = (float) (next.pos - m.pos);
+        if (next.voiced && gap > 0.7f * m.period && gap < 1.4f * m.period)
+            return gap;
+        break;
+    }
+    return m.period;
+}
+
 bool PsolaAnalyzer::captureFreeze (int64_t endPos, int lengthSamples)
 {
     frozenMarks.clear();
@@ -438,19 +457,63 @@ void PsolaVoice::addGrain (const PsolaAnalyzer& an, double centre, double src, f
     const double twoCos = 2.0 * std::cos (delta);
     double cPrev = std::cos (delta * (k0 - 1.0));
     double c = std::cos (delta * k0);
-    double pos = src + k0 * (double) formant;
+    double pos = src + k0 * (double) formant;   // where the grain reads the voice
     const float g = 0.5f * gain;
 
-    for (int64_t j = j0; j <= j1; ++j)
+    // The live voice, read with the windowed sinc straight from the ring; the frozen snapshot
+    // (rarely used) through its own bounds-checked reader.
+    if (frozenSrc)
     {
-        const float w = (float) (1.0 + c);
-        const float smp = frozenSrc ? an.frozenSampleAt (pos) : an.sampleAt (pos);
-        accum[(size_t) (j & accumMask)] += g * w * smp;
-        const double cNext = twoCos * c - cPrev;
-        cPrev = c;
-        c = cNext;
-        pos += formant;
+        for (int64_t j = j0; j <= j1; ++j)
+        {
+            accum[(size_t) (j & accumMask)] += g * (float) (1.0 + c) * an.frozenSampleAt (pos);
+            const double cNext = twoCos * c - cPrev;
+            cPrev = c;
+            c = cNext;
+            pos += formant;
+        }
+        return;
     }
+    constexpr int taps = SmallSincTable::taps;
+    const float* table = smallSincTable().w.data();
+    const float* ring = an.getRing();
+    const int64_t mask = an.getRingMask();
+    float* out = accum.data();
+    const int64_t outMask = accumMask;
+    // The read position as a whole sample and a fraction, stepped without a floor per sample.
+    const double startFloor = std::floor (pos);
+    int64_t first = (int64_t) startFloor - (taps / 2 - 1);
+    double frac = pos - startFloor;
+    const int64_t wholeStep = (int64_t) std::floor ((double) formant);
+    const double fracStep = (double) formant - (double) wholeStep;
+    auto run = [&] (auto tap)
+    {
+        for (int64_t j = j0; j <= j1; ++j)
+        {
+            const float* row = table + (int) (frac * SmallSincTable::phases + 0.5) * taps;
+            float smp = 0.0f;
+            for (int k = 0; k < taps; ++k)
+                smp += row[k] * tap (first + k);
+            out[j & outMask] += g * (float) (1.0 + c) * smp;
+            const double cNext = twoCos * c - cPrev;
+            cPrev = c;
+            c = cNext;
+            first += wholeStep;
+            frac += fracStep;
+            if (frac >= 1.0)
+            {
+                frac -= 1.0;
+                ++first;
+            }
+        }
+    };
+    // Almost every grain reads a stretch of the ring that does not wrap: read it directly.
+    const int64_t span = (int64_t) std::ceil ((double) (j1 - j0 + 1) * (double) formant) + taps + 2;
+    const int64_t shift = (first & mask) - first;
+    if ((first & mask) + span <= mask + 1)
+        run ([ring, shift] (int64_t i) { return ring[i + shift]; });
+    else
+        run ([ring, mask] (int64_t i) { return ring[i & mask]; });
 }
 
 void PsolaVoice::render (const PsolaAnalyzer& an, int64_t t0, int n, float* out, const PsolaControl& ctl, Rng& rng)
@@ -500,7 +563,12 @@ void PsolaVoice::render (const PsolaAnalyzer& an, int64_t t0, int n, float* out,
         const float overlap = ratio * half / m->period;
         const float norm = 1.0f / std::sqrt (std::max (overlap, 0.35f));
         addGrain (an, nextSynth, (double) m->pos, half, formant, gain * norm, frozenSrc);
-        nextSynth += (double) (m->period / ratio);
+        // Following the voice (a melody doubled, or sung an octave away): step by the period it
+        // actually sang, mark to mark. Stepping by the estimate drifted against the marks (by
+        // 0.4% of a period a grain, typically), so the grains met a little out of step and their
+        // top end partly cancelled.
+        const float step = m->voiced && ctl.fixedRatio > 0.0f && ! frozenSrc ? an.spacingAfter (*m, cursor) : m->period;
+        nextSynth += (double) (step / ratio);
     }
 
     for (int i = 0; i < n; ++i)

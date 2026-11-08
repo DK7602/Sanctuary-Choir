@@ -313,6 +313,83 @@ TEST (psolaShift)
     maybeWrite ("psola_fifth", y, y, sr);
 }
 
+TEST (psolaKeepsTheTopEnd)
+{
+    // The Words singers are grains of your own voice, read between its samples. Read in a straight
+    // line they lost 1.6 dB from 8 to 16 kHz here (the voice's air; 2.5 dB at the very top of a
+    // real voice); doubling the melody, the grains also stepped by the estimated period and
+    // drifted out of step with each other.
+    const double sr = 48000.0, twoPi = 6.283185307179586;
+    const int n = (int) (3.0 * sr);
+    std::vector<float> x ((size_t) n);
+    {
+        Rng rng (11);
+        std::array<double, 140> phase {};
+        for (auto& p : phase) p = twoPi * rng.uni();
+        double ph = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            const double t = i / sr;
+            ph += twoPi * 150.0 * std::exp2 (0.3 * std::sin (twoPi * 0.3 * t) / 12.0) / sr;   // a slow drift
+            double v = 0.0;
+            for (int k = 1; k < 140 && k * 160.0 < 20000.0; ++k)
+                v += std::sin (k * ph + phase[(size_t) k]) / std::pow ((double) k, 0.7);
+            x[(size_t) i] = (float) (0.04 * v) + 0.002f * rng.bi();
+        }
+    }
+    auto topOverBody = [&] (const std::vector<float>& y, int from)
+    {
+        FFT fft (11);
+        const int size = fft.getSize();
+        std::vector<std::complex<float>> buf ((size_t) size);
+        double top = 0.0, body = 0.0;
+        for (int start = from; start + size <= n; start += size / 2)
+        {
+            for (int i = 0; i < size; ++i)
+                buf[(size_t) i] = y[(size_t) (start + i)] * (0.5f - 0.5f * std::cos (kTwoPi * (float) i / (float) size));
+            fft.forward (buf.data());
+            for (int k = 0; k < size / 2; ++k)
+            {
+                const double hz = k * sr / size;
+                if (hz >= 8000.0 && hz < 16000.0) top += std::norm (buf[(size_t) k]);
+                else if (hz >= 300.0 && hz < 4000.0) body += std::norm (buf[(size_t) k]);
+            }
+        }
+        return 10.0 * std::log10 (top / body);
+    };
+    const double source = topOverBody (x, 0);
+    for (const float semitones : { 0.0f, 4.0f })
+    {
+        PitchTracker tracker;
+        PitchTracker::Settings ts;
+        ts.minHz = 75.0f;
+        tracker.prepare (sr, ts);
+        PsolaAnalyzer an;
+        const int maxPeriod = (int) (sr / 75.0) + 2;
+        an.prepare (sr, maxPeriod, 8192);
+        PsolaVoice voice;
+        voice.prepare (sr, 64, maxPeriod);
+        voice.reset (0.0);
+        Rng rng (3);
+        const int latency = 2200;
+        std::vector<float> y ((size_t) n, 0.0f);
+        for (int pos = 0; pos + 64 <= n; pos += 64)
+        {
+            tracker.push (x.data() + pos, 64);
+            for (int k = 0; k < tracker.getNumNewFrames(); ++k) an.addPitchFrame (tracker.getNewFrame (k));
+            an.pushInput (x.data() + pos, 64);
+            an.updateMarks();
+            PsolaControl ctl;
+            ctl.fixedRatio = std::exp2 (semitones / 12.0f);
+            if (pos - latency >= 0)
+                voice.render (an, pos - latency, 64, y.data() + pos, ctl, rng);
+        }
+        const double out = topOverBody (y, (int) (0.3 * sr));
+        std::printf ("  %+.0f semitones: 8-16 kHz against the body %+.2f dB from the voice\n", semitones, out - source);
+        CHECK (std::abs (out - source) < 0.6);
+    }
+}
+
 //==============================================================================
 static std::vector<float> runEngine (ChoirEngine& eng, const std::vector<float>& x, double sr, std::vector<float>* outR = nullptr,
                                      const std::function<void (int64_t)>& perBlock = {})
