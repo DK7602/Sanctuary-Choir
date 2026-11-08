@@ -3412,6 +3412,53 @@ TEST (recordedVoicesKeepTheirTop)
     CHECK (images < -15.0);
 }
 
+TEST (heldNotesLoopInStep)
+{
+    // A held note is looped: the end of its sustain crossfades back to an earlier point. A
+    // steady recorded tone shows the seam alone. Joined at any point, the two copies could be
+    // out of step and partly cancel in the crossfade (this tone dipped 2.6 dB every loop);
+    // lined up they hold the note level.
+    const double sr = 32000.0, twoPi = 6.283185307179586;
+    const float root = 57.3f;   // a period of no whole number of samples
+    const double f0 = midiToHz (root);
+    std::vector<float> x ((size_t) (0.9 * sr));
+    for (size_t i = 0; i < x.size(); ++i)
+    {
+        double v = 0.0;
+        for (int k = 1; k <= 8; ++k)
+            v += std::sin (twoPi * f0 * k * (double) i / sr + k) / k;
+        x[i] = 0.2f * (float) v;
+    }
+    SampleSet set;
+    set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), sr, root);
+    set.finalise();
+    const auto* layer = set.layerFor (Tenor, VocalType::Ah);
+    CHECK (layer != nullptr && layer->zones.size() == 1);
+    if (layer == nullptr || layer->zones.empty())
+        return;
+    float worst = 0.0f;
+    for (float jitter : { 0.05f, 0.2f, 0.35f, 0.5f, 0.65f, 0.8f, 0.95f })
+    {
+        SamplePlayer player;
+        const int n = 48000 * 4, w = (int) std::lround (20.0 * 48000.0 / f0);   // level over whole cycles
+        std::vector<float> amp ((size_t) n, 1.0f), out ((size_t) n);
+        for (int i = 0; i < n; i += 480)
+            player.render (*layer, (float) f0, amp.data() + i, out.data() + i, 480, 48000.0, 0, jitter, 0.0f);
+        double lo = 1e9, hi = 0.0;
+        for (int i = 24000; i + w <= n; i += w)
+        {
+            double e = 0.0;
+            for (int k = i; k < i + w; ++k)
+                e += (double) out[(size_t) k] * out[(size_t) k];
+            lo = std::min (lo, e);
+            hi = std::max (hi, e);
+        }
+        worst = std::max (worst, (float) (10.0 * std::log10 (hi / std::max (lo, 1e-12))));
+    }
+    std::printf ("  steady tone held 4 s by seven singers: level range at worst %.2f dB\n", worst);
+    CHECK (worst < 0.5f);
+}
+
 TEST (farNotesSungInTheNaturalVoice)
 {
     // The breathy, belted and classical takes have fewer notes than the natural voice: at the

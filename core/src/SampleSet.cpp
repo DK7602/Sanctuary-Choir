@@ -5,6 +5,8 @@
 #include <atomic>
 #include <cctype>
 #include <cstdio>
+#include <system_error>
+#include <thread>
 
 namespace sc
 {
@@ -105,10 +107,12 @@ namespace
         return acc;
     }
 
-    /** Sample at pos with the sustain loop crossfaded in (equal power: sustains are uncorrelated).
-        Each singer loops back to its own point, so copies of one recording drift apart in time
-        instead of stacking into a phasey comb. */
-    inline float readLooped (const SampleZone& z, double& pos, int64_t loopStart) noexcept
+    /** Sample at pos with the sustain loop crossfaded in. Each singer loops back to its own
+        point, so copies of one recording drift apart in time instead of stacking into a phasey
+        comb. The crossfade keeps the power steady for how alike the two sides are (match):
+        equal power for unlike sides, nearer equal gain for sides that line up, which would
+        otherwise swell by up to 3 dB in the middle. */
+    inline float readLooped (const SampleZone& z, double& pos, int64_t loopStart, float match) noexcept
     {
         const double loopLen = (double) (z.loopEnd - loopStart);
         if (loopLen > 0.0 && pos >= (double) z.loopEnd)
@@ -119,7 +123,9 @@ namespace
         {
             const float t = (float) ((pos - xfStart) / (double) z.crossfade);
             const float w = clampv (t, 0.0f, 1.0f) * 1.5707963f;
-            v = v * std::cos (w) + interp (z, pos - loopLen) * std::sin (w);
+            const float a = std::cos (w), b = std::sin (w);
+            const float k = 1.0f / std::sqrt (1.0f + 2.0f * match * a * b);
+            v = (v * a + interp (z, pos - loopLen) * b) * k;
         }
         return v;
     }
@@ -287,6 +293,55 @@ namespace
         return b > a ? std::sqrt (e / (double) (b - a)) * z.scale : 0.0;
     }
 
+    /** How alike (normalised correlation) n samples of z are from a and from b, every step-th. */
+    float alike (const SampleZone& z, int64_t a, int64_t b, int64_t n, int step)
+    {
+        const int16_t* x = z.pcm.data();
+        double xy = 0.0, xx = 0.0, yy = 0.0;
+        for (int64_t i = 0; i < n; i += step)
+        {
+            const double u = x[a + i], v = x[b + i];
+            xy += u * v; xx += u * u; yy += v * v;
+        }
+        return xx > 0.0 && yy > 0.0 ? (float) (xy / std::sqrt (xx * yy)) : 0.0f;
+    }
+
+    /** The held note's loop points. Each singer has its own, spread over the first 45% of the
+        sustain, and each is moved (by up to a pitch period) to where the waveform crossfaded
+        out of at the loop's end lines up with the one crossfaded into: the seam then joins in
+        step instead of beating as two copies of the note slide in and out of phase. */
+    void placeLoopPoints (SampleZone& z)
+    {
+        const int64_t len = z.length(), xf = z.crossfade, end = z.loopEnd;
+        const int64_t span = end - z.loopStart;
+        const int64_t period = std::max<int64_t> (8, (int64_t) std::lround (z.sampleRate / midiToHz (z.rootMidi)));
+        // Lined up around the middle of the crossfade, where both sides sound together, over
+        // two and a half periods (at least 20 ms).
+        const int64_t w = std::min<int64_t> (std::max<int64_t> ((int64_t) (0.02 * z.sampleRate), period * 5 / 2), std::max<int64_t> (xf, 1));
+        const int64_t mid = xf / 2 + w / 2;   // window start, back from the seam
+        const int64_t lowest = std::max (mid, xf), highest = end - 2 * xf;
+        for (int k = 0; k < SampleZone::kLoopPoints; ++k)
+        {
+            const int64_t want = std::min (z.loopStart + (int64_t) ((float) k / SampleZone::kLoopPoints * 0.45f * (float) span), highest);
+            int64_t best = want;
+            if (xf > 0 && highest > lowest && end - mid >= 0 && end - mid + w <= len)
+            {
+                // Coarse (every 1/24 period, every other sample), then to the sample.
+                const int64_t stride = std::max<int64_t> (1, period / 24);
+                const int64_t lo = std::max (lowest, want - period), hi = std::min (highest, want + period);
+                float top = -2.0f;
+                for (int64_t s = lo; s <= hi; s += stride)
+                    if (const float r = alike (z, end - mid, s - mid, w, 2); r > top) { top = r; best = s; }
+                const int64_t c = best;
+                for (int64_t s = std::max (lo, c - stride + 1); s <= std::min (hi, c + stride - 1); ++s)
+                    if (const float r = alike (z, end - mid, s - mid, w, 1); r > top) { top = r; best = s; }
+            }
+            z.loopPoints[(size_t) k] = std::max<int64_t> (best, 1);
+            // How alike the sides are over the whole crossfade, for its gain law.
+            z.loopMatch[(size_t) k] = xf > 0 && best >= xf ? clampv (alike (z, end - xf, best - xf, xf, 3), 0.0f, 1.0f) : 0.0f;
+        }
+    }
+
     /** Scales z so that `rms` (measured on it) becomes the common level. */
     void level (SampleZone& z, double rms)
     {
@@ -299,66 +354,84 @@ void SampleSet::finalise()
 {
     sincTable();   // built here, not on the audio thread at the first note
     auto byPitch = [] (const SampleZone& a, const SampleZone& b) { return a.rootMidi < b.rootMidi; };
-    for (auto& section : layers)
-    for (auto& vowel : section)
+    // The sections are independent: each on its own thread (lining up the loops takes a while).
+    auto finaliseSection = [&] (auto& section)
     {
-        for (size_t take = 0; take < vowel.size(); ++take)
+        for (auto& vowel : section)
         {
-            auto& layer = vowel[take];
-            // Onsets: levelled by where they settle, so they meet the held note they hand over to.
-            std::sort (layer.onsets.begin(), layer.onsets.end(), byPitch);
-            for (auto& z : layer.onsets)
+            for (size_t take = 0; take < vowel.size(); ++take)
             {
-                fadeEdges (z, 0.002, 0.03);
-                level (z, rmsOf (z, z.length() * 55 / 100, z.length() - (int64_t) (0.03 * z.sampleRate)));
-            }
-            // Syllables: levelled by the vowel they open into (the consonant keeps its own level
-            // against it).
-            std::sort (layer.syllables.begin(), layer.syllables.end(), byPitch);
-            for (auto& z : layer.syllables)
-            {
-                fadeEdges (z, 0.002, 0.025);
-                level (z, rmsOf (z, z.length() * 60 / 100, z.length() - (int64_t) (0.025 * z.sampleRate)));
-            }
-            // Moves: levelled by the notes either side of the move.
-            std::sort (layer.moves.begin(), layer.moves.end(), byPitch);
-            for (auto& z : layer.moves)
-            {
-                fadeEdges (z, 0.01, 0.03);
-                const auto w = (int64_t) (0.06 * z.sampleRate);
-                level (z, 0.5 * (rmsOf (z, 0, w) + rmsOf (z, z.length() - w - (int64_t) (0.03 * z.sampleRate), z.length())));
-            }
-
-            std::sort (layer.zones.begin(), layer.zones.end(), byPitch);
-            for (auto& z : layer.zones)
-            {
-                const int64_t len = z.length();
-                const double sr = z.sampleRate;
-
-                // Short fades so the edges never click.
-                const int64_t fadeIn = std::min<int64_t> (len / 4, (int64_t) (0.004 * sr));
-                const int64_t fadeOut = std::min<int64_t> (len / 4, (int64_t) (0.03 * sr));
-                for (int64_t i = 0; i < fadeIn; ++i) z.pcm[(size_t) i] = (int16_t) (z.pcm[(size_t) i] * i / fadeIn);
-                for (int64_t i = 0; i < fadeOut; ++i) z.pcm[(size_t) (len - 1 - i)] = (int16_t) (z.pcm[(size_t) (len - 1 - i)] * i / fadeOut);
-
-                // Sustain loop: after the attack, ending before the release.
-                z.loopStart = std::max<int64_t> ((int64_t) (0.3 * sr), len * 35 / 100);
-                z.loopEnd = len - std::max<int64_t> (fadeOut, (int64_t) (0.08 * sr));
-                if (z.loopEnd - z.loopStart < (int64_t) (0.15 * sr))
+                auto& layer = vowel[take];
+                // Onsets: levelled by where they settle, so they meet the held note they hand over to.
+                std::sort (layer.onsets.begin(), layer.onsets.end(), byPitch);
+                for (auto& z : layer.onsets)
                 {
-                    z.loopStart = len * 3 / 10;
-                    z.loopEnd = len * 9 / 10;
+                    fadeEdges (z, 0.002, 0.03);
+                    level (z, rmsOf (z, z.length() * 55 / 100, z.length() - (int64_t) (0.03 * z.sampleRate)));
                 }
-                // With vibrato the two ends of the loop are rarely at the same point of its cycle: a
-                // longer crossfade (more than a cycle) blends them instead of jumping.
-                const double fade = takeHasVibrato ((Take) take) ? 0.26 : 0.15;
-                z.crossfade = std::min<int64_t> ((z.loopEnd - z.loopStart) / 3, (int64_t) (fade * sr));
+                // Syllables: levelled by the vowel they open into (the consonant keeps its own level
+                // against it).
+                std::sort (layer.syllables.begin(), layer.syllables.end(), byPitch);
+                for (auto& z : layer.syllables)
+                {
+                    fadeEdges (z, 0.002, 0.025);
+                    level (z, rmsOf (z, z.length() * 60 / 100, z.length() - (int64_t) (0.025 * z.sampleRate)));
+                }
+                // Moves: levelled by the notes either side of the move.
+                std::sort (layer.moves.begin(), layer.moves.end(), byPitch);
+                for (auto& z : layer.moves)
+                {
+                    fadeEdges (z, 0.01, 0.03);
+                    const auto w = (int64_t) (0.06 * z.sampleRate);
+                    level (z, 0.5 * (rmsOf (z, 0, w) + rmsOf (z, z.length() - w - (int64_t) (0.03 * z.sampleRate), z.length())));
+                }
 
-                // Level: the sustain at a common loudness, so notes and singers blend evenly.
-                level (z, rmsOf (z, z.loopStart, z.loopEnd));
+                std::sort (layer.zones.begin(), layer.zones.end(), byPitch);
+                for (auto& z : layer.zones)
+                {
+                    const int64_t len = z.length();
+                    const double sr = z.sampleRate;
+
+                    // Short fades so the edges never click.
+                    const int64_t fadeIn = std::min<int64_t> (len / 4, (int64_t) (0.004 * sr));
+                    const int64_t fadeOut = std::min<int64_t> (len / 4, (int64_t) (0.03 * sr));
+                    for (int64_t i = 0; i < fadeIn; ++i) z.pcm[(size_t) i] = (int16_t) (z.pcm[(size_t) i] * i / fadeIn);
+                    for (int64_t i = 0; i < fadeOut; ++i) z.pcm[(size_t) (len - 1 - i)] = (int16_t) (z.pcm[(size_t) (len - 1 - i)] * i / fadeOut);
+
+                    // Sustain loop: after the attack, ending before the release. Most notes are short
+                    // (half a second or so): a loop starting at 0.3 s left 0.2 s to repeat, and the
+                    // seam every 0.2 s made one note in ten pulse 2.5 dB more than its recording.
+                    // From 0.15 s (or a quarter in) the loop is half as long again and the pulse 1.5
+                    // dB; the pitch has settled there just as well.
+                    z.loopStart = std::max<int64_t> ((int64_t) (0.15 * sr), len * 25 / 100);
+                    z.loopEnd = len - std::max<int64_t> (fadeOut, (int64_t) (0.08 * sr));
+                    if (z.loopEnd - z.loopStart < (int64_t) (0.15 * sr))
+                    {
+                        z.loopStart = len * 3 / 10;
+                        z.loopEnd = len * 9 / 10;
+                    }
+                    // With vibrato the two ends of the loop are rarely at the same point of its cycle: a
+                    // longer crossfade (more than a cycle) blends them instead of jumping.
+                    const double fade = takeHasVibrato ((Take) take) ? 0.26 : 0.15;
+                    z.crossfade = std::min<int64_t> ((z.loopEnd - z.loopStart) / 3, (int64_t) (fade * sr));
+
+                    placeLoopPoints (z);
+
+                    // Level: the sustain at a common loudness, so notes and singers blend evenly.
+                    level (z, rmsOf (z, z.loopStart, z.loopEnd));
+                }
             }
         }
+    };
+    std::vector<std::thread> threads;
+    for (size_t s = 1; s < layers.size(); ++s)
+    {
+        try { threads.emplace_back ([&, s] { finaliseSection (layers[s]); }); }
+        catch (const std::system_error&) { finaliseSection (layers[s]); }   // no thread to spare
     }
+    finaliseSection (layers[0]);
+    for (auto& t : threads)
+        t.join();
 }
 
 const SampleLayer* SampleSet::layerFor (int section, VocalType vowel, Take take) const noexcept
@@ -533,12 +606,21 @@ int SampleSet::vowelFromPath (const std::string& path)
 }
 
 //==============================================================================
-int64_t SamplePlayer::loopPointFor (const SampleZone& z, float jitter) noexcept
+void SamplePlayer::loopPointFor (Head& h, float jitter) noexcept
 {
-    // Somewhere in the first 45% of the sustain, always leaving room for the crossfade.
+    const SampleZone& z = *h.zone;
+    const int k = clampv ((int) (jitter * SampleZone::kLoopPoints), 0, SampleZone::kLoopPoints - 1);
+    if (z.loopPoints[(size_t) k] > 0)
+    {
+        h.loopStart = z.loopPoints[(size_t) k];
+        h.loopMatch = z.loopMatch[(size_t) k];
+        return;
+    }
+    // A zone that was never finalised: somewhere in the first 45% of the sustain, always
+    // leaving room for the crossfade.
     const int64_t span = z.loopEnd - z.loopStart;
-    const int64_t start = z.loopStart + (int64_t) (jitter * 0.45f * (float) span);
-    return std::min (start, z.loopEnd - 2 * z.crossfade);
+    h.loopStart = std::min (z.loopStart + (int64_t) (jitter * 0.45f * (float) span), z.loopEnd - 2 * z.crossfade);
+    h.loopMatch = 0.0f;
 }
 
 void SamplePlayer::reset() noexcept
@@ -613,6 +695,13 @@ void SamplePlayer::render (const SampleLayer& layer, const SampleNote& note, con
         hz = 220.0f;
     if (! (noteHz > 20.0f && noteHz < 20000.0f))
         noteHz = hz;
+    // Singers sharing a recording never lock in phase: the loops join in step, so copies a
+    // fixed time apart would hold one static comb that can hollow out the note. Each singer
+    // sings it a hair off (within 1.5 cents, by jitter) and the copies drift slowly past one
+    // another, as unison singers do.
+    const float apart = std::exp2 ((jitter - 0.5f) * (3.0f / 1200.0f));
+    hz *= apart;
+    noteHz *= apart;
     const float midi = hzToMidi (hz) + zoneOffset;
     const bool notes = note.noteMidi >= 0.0f;
     const float target = notes ? note.noteMidi + zoneOffset : midi;
@@ -622,7 +711,7 @@ void SamplePlayer::render (const SampleLayer& layer, const SampleNote& note, con
         Head h;
         h.zone = z;
         h.mode = Mode::Held;
-        h.loopStart = loopPointFor (*z, jitter);
+        loopPointFor (h, jitter);
         h.pos = fromStart ? jitter * 0.05 * z->sampleRate   // staggered a little per singer
                           : (double) z->loopStart + jitter * 0.5 * (double) (z->loopEnd - z->loopStart);
         return h;
@@ -782,7 +871,7 @@ void SamplePlayer::render (const SampleLayer& layer, const SampleNote& note, con
             const float w = std::sin (h.level * 1.5707963f);
             float v;
             if (h.mode == Mode::Held)
-                v = readLooped (z, h.pos, h.loopStart);
+                v = readLooped (z, h.pos, h.loopStart, h.loopMatch);
             else
                 v = h.pos < end ? interp (z, h.pos) : 0.0f;
             out[i] += v * w;

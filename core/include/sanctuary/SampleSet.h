@@ -29,6 +29,12 @@ struct SampleZone
     float toMidi = 0.0f;         // a move: the pitch it arrives at
     int64_t crossing = 0;        // a move: where the pitch is halfway there
     int64_t loopStart = 0, loopEnd = 0, crossfade = 0;   // held notes: the sustain loop
+    /** Held notes: the points singers loop back to (spread over the first part of the sustain,
+        each moved to where the waveform lines up with the loop's end), and how alike the two
+        sides of each seam are (0..1), which sets its crossfade. Unset (0) before finalise(). */
+    static constexpr int kLoopPoints = 8;
+    std::array<int64_t, kLoopPoints> loopPoints {};
+    std::array<float, kLoopPoints> loopMatch {};
     int singer = -1;             // who sang it, if known: a choir member keeps to one singer
     uint32_t phones = 0;         // a syllable: the consonants it opens with (SampleSet::phonesKey)
 
@@ -179,6 +185,7 @@ private:
         Mode mode = Mode::Held;
         double pos = 0.0;
         int64_t loopStart = 0;      // held: this singer's own loop point in the zone
+        float loopMatch = 0.0f;     // ... and how alike the seam's two sides are (SampleZone::loopMatch)
         bool onNote = false;        // pitched at the note, not the gliding pitch (after a move)
         float stretch = 0.0f;       // a move: semitones added before its slide, so a recorded
                                     // step can sing a slightly wider or narrower one
@@ -188,7 +195,8 @@ private:
         float step = 0.0f;          // per output sample, + fading in, - fading out
     };
     static constexpr int kHeads = 4;
-    static int64_t loopPointFor (const SampleZone& z, float jitter) noexcept;
+    /** Sets h's loop point in its zone: one per singer (by jitter). */
+    static void loopPointFor (Head& h, float jitter) noexcept;
     /** Makes h the sounding head, fading every other head out over the same time (at the
         pitch they had, if `freeze`). */
     void start (const Head& h, float fadeSeconds, double outRate, bool freeze = false) noexcept;
