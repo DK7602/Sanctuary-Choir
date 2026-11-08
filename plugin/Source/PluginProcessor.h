@@ -96,6 +96,17 @@ public:
     /** { text, sung: ["Ky", "ri", ...], starts: [true, false, ...], latin } for the UI. */
     juce::var getLyricsStatus() const;
 
+    // AI singers (VoxaVersa's trained singers) for Words mode renders. Message thread; saved with the project.
+    void setAiEnabled (bool on);
+    void setAiPerSection (int count);
+    /** A singer for a place in a section (empty id: the place goes back to the automatic choice). */
+    void setAiSinger (int section, int slot, const juce::String& id);
+    void setAiAutomatic();
+    /** Looks for VoxaVersa's singers and engine again (the settings page opened, or voices were imported). */
+    void refreshAiSingers();
+    /** { enabled, perSection, auto, cast: [[{id, name}...] x4], singers: [...], engine, engineText, ... } */
+    juce::var getAiStatus();
+
 private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void timerCallback() override;
@@ -125,6 +136,14 @@ private:
     std::array<std::array<bool, 128>, 16> sustained {};
     bool sustain = false;
     std::array<int, 16> noteOns {};   // note-ons per channel in this block
+
+    bool aiEnabled = false;
+    int aiPerSection = 2;
+    sanctuary::ai::Cast aiCast;                 // chosen by hand; the rest is the automatic choice
+    std::vector<sanctuary::ai::Singer> aiSingers;
+    juce::var aiAvailability;
+    bool aiSearched = false;
+    void aiSettingsChanged();
 
     juce::String lyricsText;
     sc::Lyrics lyricsParsed;

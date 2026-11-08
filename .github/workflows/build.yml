@@ -100,6 +100,19 @@ jobs:
         shell: bash
         run: cmake --build build --config Release --parallel 4
 
+      # The AI singers' test needs ONNX Runtime and stand-in voice models (Linux only; elsewhere it is skipped).
+      - name: AI singers test setup
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ort.tgz" https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz
+          tar xzf "$RUNNER_TEMP/ort.tgz" -C "$RUNNER_TEMP"
+          python3 -m venv "$RUNNER_TEMP/aienv"
+          "$RUNNER_TEMP/aienv/bin/pip" install --quiet onnx==1.23.2 numpy
+          "$RUNNER_TEMP/aienv/bin/python" tools/ai/make_dummy_models.py --out "$RUNNER_TEMP/ai-models"
+          echo "SANCTUARY_TEST_ORT_LIB=$RUNNER_TEMP/onnxruntime-linux-x64-1.20.1/lib/libonnxruntime.so.1.20.1" >> "$GITHUB_ENV"
+          echo "SANCTUARY_TEST_MODELS_DIR=$RUNNER_TEMP/ai-models" >> "$GITHUB_ENV"
+
       - name: Unit tests
         shell: bash
         run: ctest --test-dir build -C Release --output-on-failure

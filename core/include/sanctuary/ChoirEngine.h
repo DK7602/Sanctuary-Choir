@@ -218,6 +218,11 @@ public:
         passInputs = passes;
         passCount = passes != nullptr ? std::clamp (count, 0, kMaxExtraPasses) : 0;
     }
+    /** The passes are other singers singing this section's own part with the input's words (AI
+        singers): the Words singers then sing only from them, never from the input, and keep those
+        voices as they are (no voice prints, no change of vocal tract). Offline renders set it once,
+        before the first process(). */
+    void setPassesAreSingers (bool shouldBe) noexcept { passesAreSingers = shouldBe; }
     /** Side-chain audio for this block (the band, keys or a backing track), or nullptr. Call
         before process(); the pointers are used during that call only. */
     void setSidechain (const float* left, const float* right) noexcept { scL = left; scR = right; }
@@ -318,6 +323,7 @@ private:
     std::array<PassSource, kMaxExtraPasses> passSources;
     const float* const* passInputs = nullptr;
     int passCount = 0, activePasses = 0;
+    bool passesAreSingers = false, singersApplied = false;   // see setPassesAreSingers
     LiveHarmonizer harmonizer;
     KeyTracker keyTracker;
     GlottalTables glottal;

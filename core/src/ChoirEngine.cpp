@@ -1028,7 +1028,8 @@ void ChoirEngine::applyVoicePrint (Singer& s)
     int count = 0;
     const VoicePrint* prints = getVoicePrints (count);
     const float a = clampv (params.realVoices / 100.0f, 0.0f, 1.5f);
-    if (s.print < 0 || s.print >= count || a <= 0.0f)
+    // Singing from other singers (AI singers): their voices are real already.
+    if (s.print < 0 || s.print >= count || a <= 0.0f || (singersApplied && activePasses > 0))
     {
         s.printFormant = 1.0f;
         s.wordsVibRate = s.rVibRate;
@@ -1082,7 +1083,10 @@ void ChoirEngine::spreadOverPasses()
     for (auto& sp : singers)
     {
         Singer& s = *sp;
-        const int source = activePasses > 0 ? (s.index + s.section) % (activePasses + 1) : 0;
+        // Passes that are other singers (AI singers on this part) take the input's place.
+        const int source = activePasses <= 0 ? 0
+                         : passesAreSingers ? 1 + (s.index + s.section) % activePasses
+                                            : (s.index + s.section) % (activePasses + 1);
         if (source == s.source)
             continue;
         s.source = source;
@@ -1400,7 +1404,8 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
     const float formantParam = std::exp2 (clampv (params.formant, -100.0f, 100.0f) / 100.0f * 0.3f);
     if (cf.voiced && cf.inputHz > 30.0f)
         s.lastFollow = clampv (std::pow (hz / cf.inputHz, 0.08f), 0.9f, 1.12f);
-    if (s.doublesMelody && correction < 0.999f)
+    const bool otherSingers = singersApplied && activePasses > 0;   // already singing this part
+    if (s.doublesMelody && correction < 0.999f && ! otherSingers)
     {
         s.pctl.fixedRatio = std::exp2 ((s.octaveShift + melodyMicro) / 12.0f);
     }
@@ -1412,7 +1417,10 @@ void ChoirEngine::updateSingerControl (Singer& s, const ControlFrame& cf, float 
     // The voice print's vocal tract takes over from the random spread as Voices goes up.
     const float voicesAmount = clampv (params.realVoices / 100.0f, 0.0f, 1.0f);
     const float individual = std::pow (singerFormant (s), 1.0f - voicesAmount) * s.printFormant;
-    s.pctl.formant = vocalTract[(size_t) sec] * individual * formantParam * s.lastFollow;
+    // Other singers' voices keep their own vocal tract: only a touch of each copy's own, so two
+    // copies of one singer are not quite the same voice.
+    s.pctl.formant = otherSingers ? std::pow (singerFormant (s), 0.35f) * formantParam
+                                  : vocalTract[(size_t) sec] * individual * formantParam * s.lastFollow;
     s.pctl.gain = s.rGain;
     s.pctl.unvoicedGain = 0.6f;
 
@@ -1518,7 +1526,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
     // Passes added or taken away: start the new ones from here, and spread the singers again.
     // Only Words singers sing from the passes, so other voices leave them unanalysed.
     const int wantedPasses = params.vocalType == VocalType::Words ? passCount : 0;
-    if (wantedPasses != activePasses)
+    if (wantedPasses != activePasses || passesAreSingers != singersApplied)
     {
         for (int k = activePasses; k < wantedPasses; ++k)
         {
@@ -1528,7 +1536,12 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
             ps.base = analyzer.getWritten();
         }
         activePasses = wantedPasses;
+        const bool printsChanged = passesAreSingers != singersApplied;
+        singersApplied = passesAreSingers;
         spreadOverPasses();
+        if (printsChanged)
+            for (auto& sp : singers)
+                applyVoicePrint (*sp);
     }
 
     // Reconfigure on parameter changes that affect the singers.
@@ -1759,7 +1772,7 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
         const float normK = 1.0f - std::exp (-dt / 0.06f);
         // The singers on one pass add up nearly in phase; different passes add up only in
         // power, and would sound quieter for it: lift them by what that costs.
-        const float passLift = words && activePasses > 0 ? std::sqrt ((float) (activePasses + 1)) : 1.0f;
+        const float passLift = words && activePasses > 0 ? std::sqrt ((float) (activePasses + (singersApplied ? 0 : 1))) : 1.0f;
         for (int s = 0; s < NumSections; ++s)
         {
             float& cur = sectionNorm[(size_t) s];

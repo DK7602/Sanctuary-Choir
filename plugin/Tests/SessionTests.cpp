@@ -5,9 +5,11 @@
 #include "../Source/ChoirVoices.h"
 #include "../Source/LearnSession.h"
 #include "../Source/MeasuredRooms.h"
+#include "../Source/ai/AiSingers.h"
 #include "TestSignals.h"
 
 #include <sanctuary/FFT.h>
+#include <sanctuary/PitchTracker.h>
 
 #include <algorithm>
 #include <complex>
@@ -900,6 +902,174 @@ static void measuredRoomsLoad()
     std::printf ("  concert hall built at once for a bounce in %.0f ms\n", nowMs);
 }
 
+//==============================================================================
+/** Energy above 1.5 kHz against all of it (dB): how much of a voice's sound is more than its note. */
+static double topShareDb (const std::vector<float>& x, size_t from, size_t to)
+{
+    sc::FFT fft (12);
+    const int size = fft.getSize();
+    std::vector<std::complex<float>> buf ((size_t) size);
+    double top = 0.0, all = 0.0;
+    for (size_t start = from; start + (size_t) size <= to && start + (size_t) size <= x.size(); start += (size_t) size / 2)
+    {
+        for (int i = 0; i < size; ++i)
+            buf[(size_t) i] = x[start + (size_t) i] * (0.5f - 0.5f * std::cos (sc::kTwoPi * (float) i / (float) size));
+        fft.forward (buf.data());
+        for (int k = 1; k < size / 2; ++k)
+        {
+            const double e = std::norm (buf[(size_t) k]);
+            all += e;
+            if (k * 48000.0 / size >= 1500.0) top += e;
+        }
+    }
+    return 10.0 * std::log10 ((top + 1e-20) / (all + 1e-20));
+}
+
+/** The take's section stems as rendered (left channel of each section), read through playback. */
+static std::array<std::vector<float>, sc::NumSections> renderedSections (LearnSession& session, size_t length)
+{
+    std::array<std::vector<float>, sc::NumSections> out;
+    for (auto& o : out) o.assign (length, 0.0f);
+    session.togglePreview();   // plays the take from its start
+    for (size_t pos = 0; pos < length; pos += 512)
+    {
+        LearnSession::BlockInfo info;
+        info.hostPlaying = true;
+        info.hasPosition = true;
+        info.hostPosition = (int64_t) pos;
+        const sc::ScoreSource* score = nullptr;
+        const float* const* passes = nullptr;
+        int numPasses = 0;
+        const int n = (int) std::min<size_t> (512, length - pos);
+        if (const auto* stems = session.preparePlayback (info, n, score, passes, numPasses))
+            for (int s = 0; s < sc::NumSections; ++s)
+                if (stems->sections[(size_t) s * 2] != nullptr)
+                    std::copy_n (stems->sections[(size_t) s * 2], n, out[(size_t) s].begin() + (long) pos);
+    }
+    session.togglePreview();
+    return out;
+}
+
+/** Sets (or, with an empty value, clears) an environment variable for this process. */
+static void setEnv (const char* name, const String& value)
+{
+   #if JUCE_WINDOWS
+    _putenv_s (name, value.toRawUTF8());
+   #else
+    if (value.isEmpty()) unsetenv (name);
+    else setenv (name, value.toRawUTF8(), 1);
+   #endif
+}
+
+static void aiSingersSingTheParts()
+{
+    std::printf ("AI singers: VoxaVersa's singers sing each section's part with the take's words\n");
+    // Stand-in models (tools/ai/make_dummy_models.py): a singer sings a pure tone at the pitch it is given,
+    // as loud as the take's sound, so the choir's pitch and purity show what the AI singers did.
+    const auto ortLib = SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_ORT_LIB", {});
+    const auto modelsDir = File (SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_MODELS_DIR", "/nonexistent"));
+    if (ortLib.isEmpty() || ! modelsDir.getChildFile ("generator_40k.onnx").existsAsFile())
+    {
+        std::printf ("  skipped: set SANCTUARY_TEST_ORT_LIB and SANCTUARY_TEST_MODELS_DIR\n");
+        return;
+    }
+    const auto root = File::getSpecialLocation (File::tempDirectory).getNonexistentChildFile ("SanctuaryAiTest", {}, false);
+    const auto voicesDir = root.getChildFile ("VoxaVersa").getChildFile ("Voices");
+    root.getChildFile ("VoxaVersa").getChildFile ("Encoders").createDirectory();
+    modelsDir.getChildFile ("encoder_768.onnx").copyFileTo (root.getChildFile ("VoxaVersa").getChildFile ("Encoders").getChildFile ("contentvec-768.onnx"));
+    struct Pack { const char* id; const char* gender; int low, high; };
+    for (const Pack& p : { Pack { "band-female-1", "female", 57, 77 }, Pack { "band-female-2", "female", 53, 72 },
+                           Pack { "band-male-1", "male", 45, 66 }, Pack { "vocalset-male8", "male", 40, 62 } })
+    {
+        const auto dir = voicesDir.getChildFile (p.id);
+        dir.createDirectory();
+        modelsDir.getChildFile ("generator_40k.onnx").copyFileTo (dir.getChildFile ("model_e100.onnx"));
+        dir.getChildFile ("voice.json").replaceWithText (String ("{ \"id\": \"") + p.id + "\", \"name\": \"" + p.id + "\", \"gender\": \"" + p.gender
+            + "\", \"range\": [" + String (p.low) + ", " + String (p.high) + "], \"model\": { \"file\": \"model_e100.onnx\", \"encoder\": \"contentvec-768\", \"sampleRate\": 40000 } }");
+    }
+    voicesDir.getChildFile ("voice_assignment.json").replaceWithText ("{ \"packs\": { \"vocalset-male8\": { \"name\": \"VocalSet Male 8\", \"median\": 50 } } }");
+    const auto cacheDir = root.getChildFile ("cache");
+    setEnv ("SANCTUARY_VOXAVERSA_DIR", root.getChildFile ("VoxaVersa").getFullPathName());
+    setEnv ("SANCTUARY_ONNXRUNTIME_PATH", ortLib);
+    setEnv ("SANCTUARY_AI_CACHE_DIR", cacheDir.getFullPathName());
+
+    const auto singers = sanctuary::ai::findSingers();
+    check (singers.size() == 4, "the four singers are found");
+    bool named = false;
+    for (const auto& s : singers)
+        named = named || (s.name == "Basso Profundo" && s.median == 50.0f && s.classical);
+    check (named, "with VoxaVersa's names and the assignment's ranges");
+    const auto cast = sanctuary::ai::completeCast (singers, {}, 1, sc::Style::Gospel, sc::defaultSectionRanges());
+    check (cast[0].size() == 1 && cast[0][0].startsWith ("band-female") && cast[2][0] == "band-male-1" && cast[3][0] == "vocalset-male8",
+           "each section gets a singer of its own voice (women above, men below; the bass the deepest)");
+
+    const double rate = 48000.0;
+    const auto take = melody (rate, 0.0f, 2);
+    Rig rig (rate);
+    rig.params.vocalType = sc::VocalType::Words;
+    rig.params.harmonyMode = sc::HarmonyMode::FullChoir;
+    rig.params.style = sc::Style::Gospel;
+    bool aiOn = false;
+    rig.session.getAiPlan = [&] { sanctuary::ai::Plan p; p.enabled = aiOn; p.perSection = 1; return p; };
+    rig.session.startRecording();
+    rig.sing (take);
+    rig.session.stopRecording();
+    check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "the take is learned");
+
+    rig.session.render();
+    check (waitFor (rig.session, [&] { return phaseName (rig.session) == "rendered"; }, 120000), "rendered with the take's own voice");
+    const auto own = renderedSections (rig.session, take.size());
+
+    aiOn = true;
+    const auto t0 = Time::getMillisecondCounterHiRes();
+    rig.session.render();
+    check (waitFor (rig.session, [&] { return phaseName (rig.session) == "rendered"; }, 300000), "rendered with the AI singers");
+    const double firstSeconds = (Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+    const String text = rig.session.getStatus().getProperty ("text", "").toString();
+    std::printf ("  %s (%.1f s)\n", text.toRawUTF8(), firstSeconds);
+    check (text.contains ("4 AI SINGERS"), "the status says four AI singers sang");
+    const auto ai = renderedSections (rig.session, take.size());
+
+    const size_t from = (size_t) (0.5 * rate), to = take.size() - (size_t) (0.5 * rate);
+    float previous = 200.0f;
+    bool ordered = true, purer = true;
+    for (int s = 0; s < sc::NumSections; ++s)
+    {
+        const double ownTop = topShareDb (own[(size_t) s], from, to), aiTop = topShareDb (ai[(size_t) s], from, to);
+        // The section's pitch: the median of a pitch track of its stem.
+        auto frames = sc::PitchTracker::analyse (ai[(size_t) s].data() + from, (int64_t) (to - from), rate);
+        std::vector<float> m;
+        for (const auto& f : frames)
+            if (f.voiced)
+                m.push_back (f.midi);
+        std::sort (m.begin(), m.end());
+        const float median = m.empty() ? 0.0f : m[m.size() / 2];
+        std::printf ("  section %d: above 1.5 kHz %.1f dB with the take's voice, %.1f dB with the AI singer; median pitch %.1f\n",
+                     s, ownTop, aiTop, median);
+        purer = purer && aiTop < ownTop - 10.0;
+        ordered = ordered && median > 0.0f && median < previous;
+        previous = median;
+    }
+    check (purer, "every section sings from its AI singer, not the take (the stand-in singers sing pure tones)");
+    check (ordered, "and the sections stay in order, sopranos on top");
+
+    // The same again: every voice comes from the cache.
+    const auto cached = cacheDir.findChildFiles (File::findFiles, false, "*.wav").size();
+    check (cached == 4, "the four voices are kept on disk");
+    rig.mixSignature = "mix 2";
+    rig.session.renderSettingsChanged();
+    const auto t1 = Time::getMillisecondCounterHiRes();
+    rig.session.render();
+    check (waitFor (rig.session, [&] { return phaseName (rig.session) == "rendered"; }, 120000), "rendered again");
+    const double againSeconds = (Time::getMillisecondCounterHiRes() - t1) / 1000.0;
+    std::printf ("  again from the cache: %.1f s\n", againSeconds);
+    check (cacheDir.findChildFiles (File::findFiles, false, "*.wav").size() == 4, "nothing sung twice");
+
+    setEnv ("SANCTUARY_VOXAVERSA_DIR", {});
+    setEnv ("SANCTUARY_AI_CACHE_DIR", {});
+    root.deleteRecursively();
+}
+
 #if JUCE_WINDOWS
 // A crash prints where it happened (named when the build's .pdb is next to the program).
 static void printCrash (void*)
@@ -936,6 +1106,7 @@ int main (int argc, char** argv)
     learnRecordsTheBand();
     chordLaneAndDragOut();
     passesMakeAMultiTakeChoir();
+    aiSingersSingTheParts();
     std::printf ("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

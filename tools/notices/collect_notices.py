@@ -135,6 +135,13 @@ def main():
                  "https://developer.microsoft.com/microsoft-edge/webview2"],
                 read(min(found, key=len)))
 
+    # The AI singers: ONNX Runtime's C API header (types and the function table) is compiled in; the
+    # runtime itself is loaded at run time from VoxaVersa's install and is not shipped.
+    section("ONNX Runtime C API header 1.20.1",
+            ["onnxruntime_c_api.h, compiled into the plug-in (the runtime is not shipped).",
+             "https://github.com/microsoft/onnxruntime", "Licence: MIT"],
+            read(os.path.join(REPO, "plugin", "Source", "ai", "third_party", "onnxruntime", "LICENSE")))
+
     for font, file in FONTS:
         section("Font: " + font, ["Licence: OFL-1.1"],
                 read(os.path.join(REPO, "ui", "assets", "fonts", "OFL-%s.txt" % file)))

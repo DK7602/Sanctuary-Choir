@@ -144,11 +144,23 @@ struct RenderedStems
 
 using ProgressFn = std::function<void (float)>;
 
-/** Render the learned take with the given settings. Runs one engine per section in parallel. */
+/** A recording of a section's part (16-bit, lined up with the take): an AI singer singing it with
+    the take's words. */
+struct SectionVoice
+{
+    const int16_t* pcm = nullptr;
+    int64_t length = 0;
+    float scale = 1.0f / 32767.0f;
+};
+using SectionVoices = std::array<std::vector<SectionVoice>, NumSections>;
+
+/** Render the learned take with the given settings. Runs one engine per section in parallel.
+    In Words mode a section with sectionVoices (up to kMaxExtraPasses) sings from those singers
+    instead of the take and its passes. */
 bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParams& params,
                  const LearnedScore& score, RenderedStems& out, const ProgressFn& progress = {},
                  const std::atomic<bool>* cancel = nullptr, const SampleSet* voices = nullptr,
-                 const std::vector<const float*>& passes = {});
+                 const std::vector<const float*>& passes = {}, const SectionVoices* sectionVoices = nullptr);
 
 /** Mix rendered stems through the choir bus and room (reverb). Returns stereo (2 channels).
     With a lead (the take), your voice is in the mix too (see mixdownStemsStreaming). */

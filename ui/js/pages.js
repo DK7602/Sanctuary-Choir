@@ -261,8 +261,14 @@
     const take = el("div", "group take-group", left);
     take.style.position = "relative";
     el("h3", "", take, "LEARNED TAKE");
-    const passesBtn = el("button", "pill", take, "MULTI-TAKE");
-    passesBtn.style.cssText = "position:absolute;right:12px;top:7px;height:24px";
+    const takePills = el("div", "pill-row", take);
+    takePills.style.cssText = "position:absolute;right:12px;top:7px;gap:6px";
+    const aiBtn = el("button", "pill", takePills, "AI SINGERS");
+    aiBtn.style.height = "24px";
+    aiBtn.title = "Your VoxaVersa singers sing the parts with your words";
+    aiBtn.addEventListener("click", () => info.openAi && info.openAi());
+    const passesBtn = el("button", "pill", takePills, "MULTI-TAKE");
+    passesBtn.style.height = "24px";
     passesBtn.title = "Sing the part again: the Words choir sings from every pass";
     passesBtn.addEventListener("click", () => info.openPasses && info.openPasses());
     const btns = el("div", "take-btns", take);
@@ -292,6 +298,9 @@
       const passCount = (l.passes || []).length;
       passesBtn.textContent = passCount ? "MULTI-TAKE · " + (passCount + 1) + " PASSES" : "MULTI-TAKE";
       passesBtn.classList.toggle("on", passCount > 0 || !!l.recordingPass);
+      const ai = st.ai || {};
+      aiBtn.textContent = ai.enabled ? "AI SINGERS · ON" : "AI SINGERS";
+      aiBtn.classList.toggle("on", !!ai.enabled);
       takeInfo.textContent = l.hasTake ? (l.text || "") : "No take yet. Press LEARN and sing, or LOAD a vocal file.";
       takeInfo.title = takeInfo.textContent;
     };
@@ -1354,5 +1363,146 @@
     show({});
   }
 
-  window.SCPages = { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords, buildPasses };
+  //==========================================================================
+  // AI SINGERS: VoxaVersa's trained singers sing the sections' parts with the words of the take.
+  function buildAi(page, info) {
+    const { Menu, stageRect } = window.SCW;
+    page.innerHTML = "";
+    el("h2", "", page, "AI SINGERS");
+    const close = el("button", "page-close", page, "✕");
+    close.title = "Back";
+    close.addEventListener("click", () => info.close && info.close());
+
+    const intro = el("div", "passes-intro", page);
+    el("p", "", intro).innerHTML = "The singers you trained in <b>VoxaVersa</b> sing the choir's parts with the words you sang. "
+      + "After <b>LEARN</b>, <b>RENDER</b> has each one sing their section's notes, in the octave that suits them; the section's "
+      + "singers then sing from those voices, each with their own timing, on the stage and in the room.";
+    const modeNote = el("div", "passes-mode", intro);
+    el("span", "", modeNote, "AI singers sing in WORDS mode");
+    const useWords = el("button", "pill", modeNote, "USE WORDS");
+    useWords.title = "Switch Vocal Type to Words (Your Voice)";
+    useWords.addEventListener("click", () => Params.set("vocalType", 6));
+
+    const controls = el("div", "group ai-controls", page);
+    const onOff = el("div", "pill-row", controls);
+    const onBtn = el("button", "pill", onOff, "ON");
+    onBtn.title = "Renders in Words mode use the AI singers";
+    onBtn.addEventListener("click", () => SC.send({ type: "cmd", name: "aiEnable", on: true }));
+    const offBtn = el("button", "pill", onOff, "OFF");
+    offBtn.title = "The Words choir sings from your own voice";
+    offBtn.addEventListener("click", () => SC.send({ type: "cmd", name: "aiEnable", on: false }));
+    el("span", "ai-label", controls, "PER SECTION");
+    const perRow = el("div", "pill-row", controls);
+    const perBtns = [1, 2, 3].map((n) => {
+      const b = el("button", "pill", perRow, String(n));
+      b.title = n + (n === 1 ? " AI singer" : " AI singers") + " in each section (each one takes minutes to render the first time)";
+      b.addEventListener("click", () => SC.send({ type: "cmd", name: "aiPerSection", count: n }));
+      return b;
+    });
+    const right = el("div", "pill-row ai-right", controls);
+    const autoBtn = el("button", "pill", right, "AUTOMATIC");
+    autoBtn.title = "Let Sanctuary cast every section (women above, men below, the style's kind of voice)";
+    autoBtn.addEventListener("click", () => SC.send({ type: "cmd", name: "aiAuto" }));
+    const again = el("button", "pill", right, "LOOK AGAIN");
+    again.title = "Look for VoxaVersa's singers again (after importing voices)";
+    again.addEventListener("click", () => SC.send({ type: "cmd", name: "aiRefresh" }));
+    const folder = el("button", "pill", right, "VOICES FOLDER");
+    folder.title = "Open VoxaVersa's Voices folder";
+    folder.addEventListener("click", () => SC.send({ type: "cmd", name: "aiFolder" }));
+
+    const cardRow = el("div", "passes-cards ai-cards", page);
+    const cards = SECTIONS.map((sec, i) => {
+      const c = el("div", "group pass-card ai-card filled", cardRow);
+      const rgb = [1, 3, 5].map((k) => parseInt(sec.color.slice(k, k + 2), 16)).join(",");
+      c.style.setProperty("--pc", sec.color);
+      c.style.setProperty("--pc-edge", "rgba(" + rgb + ",0.6)");
+      c.style.setProperty("--pc-wash", "rgba(" + rgb + ",0.08)");
+      const head = el("div", "pass-head", c);
+      el("span", "pass-num", head, sec.name[0]);
+      el("h3", "", head, ["SOPRANOS", "ALTOS", "TENORS", "BASSES"][i]);
+      const tag = el("span", "passes-note ai-tag", head);
+      const slots = el("div", "ai-slots", c);
+      return { c, tag, slots, key: "" };
+    });
+
+    const lower = el("div", "passes-lower", page);
+    const eng = el("div", "group passes-how ai-engine", lower);
+    el("h3", "", eng, "VOXAVERSA");
+    const engText = el("p", "", eng);
+    const how = el("div", "group passes-how", lower);
+    el("h3", "", how, "HOW");
+    el("p", "", how).innerHTML = "Each AI singer takes <b>minutes</b> to sing a song the first time (about as long as the song, "
+      + "or less on a fast computer); it is kept, so rendering again after a mix change is quick. Change a singer or the notes, "
+      + "and only that part is sung again. Live playing uses your own voice; the AI singers are heard once rendered.";
+
+    const rangeName = (lo, hi) => {
+      const n = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+      const f = (m) => n[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+      return f(lo) + "–" + f(hi);
+    };
+
+    let last = {};
+    function pick(anchor, section, slot, current, singers) {
+      Menu.open(stageRect(anchor), (m) => {
+        m.classList.add("ai-menu");
+        [["WOMEN", true], ["MEN", false]].forEach(([title, female]) => {
+          const list = singers.filter((x) => !!x.female === female);
+          if (!list.length) return;
+          Menu.heading(m, title);
+          list.forEach((x) => {
+            const it = Menu.item(m, x.name, x.id === current, () => SC.send({ type: "cmd", name: "aiSinger", section, slot, id: x.id }));
+            const r = document.createElement("span");
+            r.className = "ai-range";
+            r.textContent = rangeName(x.low, x.high) + (x.classical ? " · classical" : "");
+            it.appendChild(r);
+          });
+        });
+        Menu.sep(m);
+        Menu.item(m, "LET SANCTUARY CHOOSE", false, () => SC.send({ type: "cmd", name: "aiSinger", section, slot, id: "" }), "action");
+      });
+    }
+
+    function show(ai) {
+      ai = ai || {};
+      last = ai;
+      const words = Math.round(Params.get("vocalType")) === 6;
+      modeNote.classList.toggle("hidden", words);
+      onBtn.classList.toggle("on", !!ai.enabled);
+      offBtn.classList.toggle("on", !ai.enabled);
+      perBtns.forEach((b, i) => b.classList.toggle("on", (ai.perSection || 2) === i + 1));
+      const singers = ai.singers || [];
+      const found = singers.length;
+      cards.forEach((card, i) => {
+        const sec = (ai.cast || [])[i] || {};
+        const list = sec.singers || [];
+        card.c.classList.toggle("later", !ai.enabled);
+        card.tag.textContent = sec.chosen ? "CHOSEN" : "AUTOMATIC";
+        const key = JSON.stringify([list, ai.perSection, found, ai.enabled]);
+        if (key === card.key) return;
+        card.key = key;
+        card.slots.innerHTML = "";
+        for (let slot = 0; slot < (ai.perSection || 2); slot++) {
+          const who = list[slot];
+          const b = el("button", "pill ai-slot", card.slots, who ? who.name : (found ? "—" : "NO SINGERS"));
+          b.title = found ? "Choose who sings here" : "No VoxaVersa singers found";
+          b.disabled = !found;
+          b.addEventListener("click", () => pick(b, i, slot, who ? who.id : "", singers));
+        }
+      });
+      if (!ai.searched) engText.innerHTML = "Looking for VoxaVersa…";
+      else {
+        const parts = [];
+        parts.push(ai.engine ? "<b>AI engine ready</b>" : "<b>No AI engine</b>: " + String(ai.engineText || "").replace(/[<>&]/g, ""));
+        parts.push(found ? "<b>" + found + "</b> singers found" : "no singers found");
+        if (!ai.encoder) parts.push("the content encoder (contentvec-768) is missing: use VoxaVersa's <b>Import Voices</b>");
+        engText.innerHTML = parts.join(" · ") + "<br><span class=\"ai-folder\">" + String(ai.folder || "").replace(/[<>&]/g, "") + "</span>";
+      }
+    }
+    info.onStatus = (st) => show((st && st.ai) || {});
+    info.onOpen = () => SC.send({ type: "cmd", name: "aiRefresh" });
+    Params.on("vocalType", () => show(last));
+    show({});
+  }
+
+  window.SCPages = { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords, buildPasses, buildAi };
 })();

@@ -858,7 +858,8 @@ std::vector<ChordOption> chordAlternatives (const TakeAnalysis& take, const Lear
 //==============================================================================
 bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParams& paramsIn,
                  const LearnedScore& score, RenderedStems& out, const ProgressFn& progress,
-                 const std::atomic<bool>* cancel, const SampleSet* voices, const std::vector<const float*>& passes)
+                 const std::atomic<bool>* cancel, const SampleSet* voices, const std::vector<const float*>& passes,
+                 const SectionVoices* sectionVoices)
 {
     out = RenderedStems{};
     if (n <= 0)
@@ -907,8 +908,13 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
         engine.setStemTap (taps);
 
         std::vector<float> in ((size_t) block), outL ((size_t) block), outR ((size_t) block);
-        // The other passes (lined up with the take, n samples each), block by block with it.
-        const int numPasses = std::min ((int) passes.size(), kMaxExtraPasses);
+        // The other passes (lined up with the take, n samples each), block by block with it; or,
+        // in Words mode, the singers who sing this section's part (they replace the take).
+        const std::vector<SectionVoice>* singersHere = sectionVoices != nullptr && params.vocalType == VocalType::Words
+                                                           && ! (*sectionVoices)[(size_t) section].empty()
+                                                         ? &(*sectionVoices)[(size_t) section] : nullptr;
+        engine.setPassesAreSingers (singersHere != nullptr);
+        const int numPasses = std::min (singersHere != nullptr ? (int) singersHere->size() : (int) passes.size(), kMaxExtraPasses);
         std::vector<std::vector<float>> passBlocks ((size_t) numPasses, std::vector<float> ((size_t) block));
         std::array<const float*, kMaxExtraPasses> passPtrs {};
         for (int k = 0; k < numPasses; ++k)
@@ -919,8 +925,20 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
             for (int i = 0; i < block; ++i)
                 in[(size_t) i] = pos + i < n ? x[pos + i] : 0.0f;
             for (int k = 0; k < numPasses; ++k)
-                for (int i = 0; i < block; ++i)
-                    passBlocks[(size_t) k][(size_t) i] = pos + i < n && passes[(size_t) k] != nullptr ? passes[(size_t) k][pos + i] : 0.0f;
+            {
+                auto& dst = passBlocks[(size_t) k];
+                if (singersHere != nullptr)
+                {
+                    const auto& v = (*singersHere)[(size_t) k];
+                    for (int i = 0; i < block; ++i)
+                        dst[(size_t) i] = pos + i < v.length && v.pcm != nullptr ? (float) v.pcm[pos + i] * v.scale : 0.0f;
+                }
+                else
+                {
+                    for (int i = 0; i < block; ++i)
+                        dst[(size_t) i] = pos + i < n && passes[(size_t) k] != nullptr ? passes[(size_t) k][pos + i] : 0.0f;
+                }
+            }
             engine.setPasses (passPtrs.data(), numPasses);
             engine.process (in.data(), nullptr, outL.data(), outR.data(), block);
             sectionProgress[(size_t) section].store ((float) ((double) pos / (double) total));

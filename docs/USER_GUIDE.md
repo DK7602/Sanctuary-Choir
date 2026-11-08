@@ -94,6 +94,20 @@ Open **Settings → Multi-Take** after LEARN:
 
 The passes are saved with the project, and taking them away or adding one makes RENDER glow in Words mode. They only change the Words choir: the vowel modes sound the same with or without them. **Use Words** on the page switches Vocal Type to Words. A new take starts again with one pass.
 
+### AI singers: your VoxaVersa singers sing the parts
+
+If you trained singers in **VoxaVersa**, they can sing the choir's parts with the words you sang, so each section has real-sounding voices of its own instead of copies of yours.
+
+1. Switch **Vocal Type** to **Words** and LEARN your take.
+2. Open **Settings → AI Singers** and press **ON**. Sanctuary finds the singers VoxaVersa installed (its Voices folder: `%APPDATA%\VoxaVersa\Voices` on Windows, `~/Library/Application Support/VoxaVersa/Voices` on a Mac) and casts each section:
+   - women for the sopranos and altos, men for the tenors and basses (a high man or a low woman only when no one else fits);
+   - contemporary voices for **Gospel**, **Worship**, **Spiritual** and **Cinematic**, classical ones for **Sacred**, **Gregorian** and **Chamber**;
+   - everyone once before anyone twice.
+3. Choose **Per section** 1, 2 or 3, and click a name to choose another singer for that place. **Automatic** casts them all again.
+4. Press **RENDER**. Each AI singer sings their section's notes in the octave that suits them, wherever you sang, with your words and timing; consonants and breaths come through as you sang them. The section's singers then sing from those voices, each with their own timing and tuning, on the stage and in the room.
+
+The first render takes minutes: about as long as the song for each AI singer, or less on a fast computer (RENDER shows who is singing). Every voice is kept on disk, so rendering again after a mix change is quick; change a singer or the notes and only that part is sung again. Live playing still uses your own voice: the AI singers are heard once rendered. Sanctuary uses VoxaVersa's AI engine and voices where they are, on the computer's processor; if the page says the content encoder is missing, use VoxaVersa's **Import Voices**.
+
 ### Chords & Stems: change a chord, drag the parts into your DAW
 
 Click the plaque after LEARN (*LEARNED 0:43 · ...*), or **Settings → Chords & Stems**. The page shows the take's chords in a lane, and under them your melody and the four parts the choir sings (soprano pink, alto gold, tenor blue, bass green), plus where the take starts in the song (e.g. *starts at bar 17*). Click **MELODY**, **SOPRANO**, **ALTO**, **TENOR** or **BASS** above the lane to hide or show a line.

@@ -829,10 +829,20 @@ void LearnSession::render()
     const auto passes = owned->passes;
     auto result = std::make_shared<std::unique_ptr<PlaybackData>>();
     const auto t0 = Time::getMillisecondCounterHiRes();
+    // AI singers: Words mode only (they sing the take's words).
+    ai::Plan aiPlan = getAiPlan ? getAiPlan() : ai::Plan{};
+    aiPlan.enabled = aiPlan.enabled && params.vocalType == sc::VocalType::Words;
+    auto aiProblems = std::make_shared<StringArray>();
+    {
+        const std::lock_guard<std::mutex> sl (aiTextLock);
+        aiActivity.clear();
+        aiSummary.clear();
+    }
 
     cancel = false;
     workDone = false;
-    worker = std::make_unique<std::thread> ([this, result, params, hs, voices, take, analysis, rate, timelineStart, takeId, timing, passes]
+    worker = std::make_unique<std::thread> ([this, result, params, hs, voices, take, analysis, rate, timelineStart, takeId, timing, passes,
+                                             aiPlan, aiProblems]
     {
         auto d = std::make_unique<PlaybackData>();
         d->sampleRate = rate;
@@ -847,9 +857,44 @@ void LearnSession::render()
         std::vector<const float*> passAudio;
         for (const auto& pass : passes)
             passAudio.push_back (pass.audio->data());
+        // The AI singers sing their parts first (most of the time), then the choir sings from them.
+        sc::SectionVoices sectionVoices;
+        ai::Renderer::Result aiResult;
+        bool aiUsed = false;
+        if (aiPlan.enabled)
+        {
+            const auto singers = ai::findSingers();
+            const auto cast = ai::completeCast (singers, aiPlan.cast, aiPlan.perSection, params.style, hs.ranges);
+            if (singers.empty())
+                aiProblems->add ("no AI singers found in " + ai::getVoicesDirectory().getFullPathName()
+                                 + " (install VoxaVersa and import your voices)");
+            else if (! aiRenderer.render (*take, rate, *analysis, d->score, cast, singers, params.a4, aiResult,
+                                          [this] (float f, const String& who)
+                                          {
+                                              progress = 0.85f * f;
+                                              const std::lock_guard<std::mutex> sl (aiTextLock);
+                                              aiActivity = who;
+                                          }, &cancel))
+            {
+                workDone = true;   // cancelled
+                return;
+            }
+            aiProblems->addArray (aiResult.problems);
+            for (int s = 0; s < sc::NumSections; ++s)
+                for (const auto& v : aiResult.voices[(size_t) s])
+                {
+                    sectionVoices[(size_t) s].push_back ({ v.pcm->data(), (int64_t) v.pcm->size(), v.scale });
+                    aiUsed = true;
+                }
+            const std::lock_guard<std::mutex> sl (aiTextLock);
+            aiActivity.clear();
+            aiVoicesRendered = aiResult.sung + aiResult.fromCache;
+        }
+        const float before = aiUsed ? 0.85f : 0.0f;
         sc::RenderedStems stems;
         if (sc::renderTake (take->data(), (int64_t) take->size(), rate, params, d->score, stems,
-                            [this] (float f) { progress = f; }, &cancel, voices.get(), passAudio))
+                            [this, before] (float f) { progress = before + (1.0f - before) * f; }, &cancel, voices.get(), passAudio,
+                            aiUsed ? &sectionVoices : nullptr))
         {
             d->stems = toStemSet (stems);
             *result = std::move (d);
@@ -857,8 +902,14 @@ void LearnSession::render()
         workDone = true;
     });
 
-    onWorkDone = [this, result, t0, params]
+    onWorkDone = [this, result, t0, params, aiPlan, aiProblems]
     {
+        if (! aiProblems->isEmpty())
+            notify ("AI singers: " + aiProblems->joinIntoString ("; "));
+        {
+            const std::lock_guard<std::mutex> sl (aiTextLock);
+            aiSummary = aiPlan.enabled && aiVoicesRendered > 0 ? String (aiVoicesRendered) + " AI SINGERS" : String();
+        }
         if (*result == nullptr)
         {
             setPhase (Phase::Learned);
@@ -1480,7 +1531,15 @@ String LearnSession::describe() const
             return aligningPass ? "LINING UP PASS " + String (getNumPasses() + 2) + " WITH YOUR TAKE..."
                                 : String ("LISTENING TO YOUR TAKE...");
         case Phase::Rendering:
-            return "RENDERING " + String (roundToInt (progress.load() * 100.0f)) + "%";
+        {
+            String activity;
+            {
+                const std::lock_guard<std::mutex> sl (aiTextLock);
+                activity = aiActivity;
+            }
+            return "RENDERING " + String (roundToInt (progress.load() * 100.0f)) + "%"
+                   + (activity.isNotEmpty() ? "  -  AI SINGER: " + activity.toUpperCase() : String());
+        }
         case Phase::Failed:
             return lastError;
         case Phase::Learned:
@@ -1495,7 +1554,12 @@ String LearnSession::describe() const
     if (! d->passes.empty())
         s << dot << ((int) d->passes.size() + 1) << " PASSES";
     if (p == Phase::Rendered && d->stems != nullptr && ! d->stale.load())
+    {
         s << dot << renderedSingers << " SINGERS RENDERED IN " << String (lastRenderSeconds, 1) << " S";
+        const std::lock_guard<std::mutex> sl (aiTextLock);
+        if (aiSummary.isNotEmpty())
+            s << dot << aiSummary;
+    }
     else if (d->stems != nullptr)
         s << dot << "RENDER TO UPDATE";
     return s;

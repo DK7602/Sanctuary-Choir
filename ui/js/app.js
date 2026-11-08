@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const { Params, BigKnob, Dropdown, Menu, hiDpiCanvas, stageRect, noteName, dragValue } = window.SCW;
-  const { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords, buildPasses } = window.SCPages;
+  const { SECTIONS, VENUES, buildMix, buildFx, buildSettings, buildTake, buildStage, buildWords, buildPasses, buildAi } = window.SCPages;
 
   // Each venue has its own room and choir; monks sing Gregorian chant in the abbey.
   const ROOMS = ["cathedral", "abbey", "chapel", "hall", "gospel", "studio"];
@@ -320,7 +320,7 @@
   //==========================================================================
   // Tabs and pages
   // Pages opened from another page (not a tab) keep that page's tab lit.
-  const SUB_PAGES = { take: "settings", stage: "mix", words: "settings", passes: "settings" };
+  const SUB_PAGES = { take: "settings", stage: "mix", words: "settings", passes: "settings", ai: "settings" };
   function setTab(tab) {
     // Remember the tab a sub-page was opened from, so its ✕ goes back there.
     if (SUB_PAGES[tab] && !SUB_PAGES[state.tab]) state.returnTab = state.tab;
@@ -330,8 +330,9 @@
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === (SUB_PAGES[tab] || tab)));
     const mixTab = document.querySelector('.tab[data-tab="mix"]');
     if (mixTab) mixTab.title = tab === "mix" ? "Click again for the stage" : tab === "stage" ? "Click again for the mix knobs" : "";
-    ["mix", "fx", "settings", "take", "stage", "words", "passes"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
+    ["mix", "fx", "settings", "take", "stage", "words", "passes", "ai"].forEach((p) => $("page-" + p).classList.toggle("hidden", p !== tab));
     if (tab === "take") SC.send({ type: "cmd", name: "lane" });
+    if (tab === "ai" && state.aiInfo && state.aiInfo.onOpen) state.aiInfo.onOpen();
     SC.send({ type: "cmd", name: "tab", value: tab });
     Menu.close();
   }
@@ -459,7 +460,8 @@
     $("loftHit").addEventListener("click", () => setTab("stage"));
     buildFx($("page-fx"));
     const settingsInfo = { version: info.version, latencyMs: info.latencyMs, liveChoirMs: info.liveChoirMs, standalone: !!info.standalone,
-                           openTake: () => setTab("take"), openWords: () => setTab("words"), openPasses: () => setTab("passes") };
+                           openTake: () => setTab("take"), openWords: () => setTab("words"), openPasses: () => setTab("passes"),
+                           openAi: () => setTab("ai") };
     buildSettings($("page-settings"), settingsInfo);
     state.settingsInfo = settingsInfo;
     const wordsInfo = { close: () => setTab("settings") };
@@ -468,6 +470,9 @@
     const passesInfo = { close: () => setTab("settings"), standalone: !!info.standalone, maxSingers: info.maxSingers };
     buildPasses($("page-passes"), passesInfo);
     state.passesInfo = passesInfo;
+    const aiInfo = { close: () => setTab("settings") };
+    buildAi($("page-ai"), aiInfo);
+    state.aiInfo = aiInfo;
     window.SCManual.build($("stage"), { goto: (p) => setTab(p) });
     settingsInfo.openManual = (id) => window.SCManual.open(id);
     const takeInfo = { toast, close: () => setTab(state.returnTab && !SUB_PAGES[state.returnTab] ? state.returnTab : "settings"), visible: () => state.tab === "take" };
@@ -582,7 +587,7 @@
       Choir.setCount(Math.min(Math.round(Params.get("choirSize") / 100 * (info.maxSingers || MAX_ENGINE_SINGERS)), Choir.maxSingers() || MAX_ENGINE_SINGERS), true);
       showRoom(true);
     });
-    setTab(info.tab && ["perform", "mix", "fx", "settings", "take", "stage", "words", "passes"].includes(info.tab) ? info.tab : "perform");
+    setTab(info.tab && ["perform", "mix", "fx", "settings", "take", "stage", "words", "passes", "ai"].includes(info.tab) ? info.tab : "perform");
   }
 
   //==========================================================================
@@ -699,6 +704,7 @@
     if (state.settingsInfo && state.settingsInfo.onStatus) state.settingsInfo.onStatus(st);
     if (state.wordsInfo && state.wordsInfo.onStatus) state.wordsInfo.onStatus(st);
     if (state.passesInfo && state.passesInfo.onStatus) state.passesInfo.onStatus(st);
+    if (state.aiInfo && state.aiInfo.onStatus) state.aiInfo.onStatus(st);
     // One-off messages from the take (a pass that could not be used).
     if (typeof l.noticeId === "number") {
       if (state.noticeId !== undefined && l.noticeId > state.noticeId && l.notice) toast(l.notice, 5500);

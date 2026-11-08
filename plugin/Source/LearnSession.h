@@ -7,6 +7,7 @@
 #pragma once
 
 #include "TakeExport.h"
+#include "ai/AiSingers.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -28,6 +29,7 @@ public:
     std::function<sc::EngineParams()> getParams;   // set by the processor
     std::function<std::shared_ptr<const sc::SampleSet>()> getVoices;   // recorded choir voices, if any
     std::function<bool()> voicesBusy;               // recorded voices still loading: renders wait for them
+    std::function<ai::Plan()> getAiPlan;            // AI singers for Words mode renders (set by the processor)
     bool standalone = false;                        // capture immediately instead of waiting for the host
     std::function<void()> onStatusChanged;          // message thread
 
@@ -213,6 +215,11 @@ private:
     juce::String notice;    // a one-off message for the page (a pass that could not be used)
     int noticeId = 0;
     double lastRenderSeconds = 0.0;
+    ai::Renderer aiRenderer;
+    mutable std::mutex aiTextLock;
+    juce::String aiActivity;          // the AI singer being sung (worker writes, describe() reads)
+    juce::String aiSummary;           // after a render: how the AI singers went
+    int aiVoicesRendered = 0;
     int renderedSingers = 0;
     bool renderStale = false;
     bool renderWhenReady = false;     // RENDER pressed while learning, or a rendered project reloaded

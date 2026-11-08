@@ -224,10 +224,31 @@
       const latinWords = /\b(kyrie|eleison|christe|gloria|excelsis|deo|sanctus|agnus|dei|ave|maria|alleluia|hosanna|dona|nobis|pacem|amen|dominus)\b/i;
       lyrics = { text, sung, starts, latin: latinWords.test(text) };
     }
+    // AI singers (in the plugin: the singers trained for VoxaVersa, found in its Voices folder).
+    const aiSingers = [
+      ["studio-female-a", "Studio Female A", true, 53, 72, false], ["studio-female-b", "Studio Female B", true, 55, 69, false],
+      ["studio-female-blend", "Studio Diva", true, 53, 71, false], ["band-female-1", "Band Female 1", true, 55, 74, false],
+      ["band-female-2", "Band Female 2", true, 53, 72, false], ["band-female-3", "Band Female 3", true, 55, 72, false],
+      ["vocalset-female1", "Lyric Soprano", true, 60, 78, true], ["vocalset-female4", "Velvet Mezzo", true, 60, 78, true],
+      ["studio-male-a", "Studio Male A", false, 45, 68, false], ["band-male-1", "Band Male 1", false, 45, 66, false],
+      ["band-male-2", "Band Male 2", false, 45, 65, false], ["vocalset-male3", "Lyric Tenor", false, 47, 70, true],
+      ["vocalset-male8", "Basso Profundo", false, 41, 66, true]
+    ].map(([id, name, female, low, high, classical]) => ({ id, name, female, low, high, classical }));
+    const ai = { enabled: false, perSection: 2, chosen: [[], [], [], []] };
+    const aiAuto = [["studio-female-a", "band-female-3", "band-female-1"], ["studio-female-blend", "studio-female-b", "band-female-2"],
+                    ["studio-male-a", "band-male-1", "band-male-2"], ["vocalset-male8", "band-male-2", "vocalset-male3"]];
+    function aiStatus() {
+      const byId = (id) => aiSingers.find((x) => x.id === id);
+      return { enabled: ai.enabled, perSection: ai.perSection, maxPerSection: 3, searched: true, words: Math.round(values.vocalType) === 6,
+               engine: true, engineText: "AI engine ready", encoder: true, singers: aiSingers,
+               folder: "C:\\Users\\you\\AppData\\Roaming\\VoxaVersa\\Voices",
+               cast: ai.chosen.map((c, i) => ({ chosen: c.length > 0,
+                   singers: (c.length ? c : aiAuto[i]).slice(0, ai.perSection).map((id) => ({ id, name: byId(id).name })) })) };
+    }
     function status() {
       learn.export = !learn.hasStems || learn.stale ? "none" : exportState;
       learn.tiedToTimeline = true;
-      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices), scenes: scenes.slice(), lyrics });
+      emit("status", { learn: Object.assign({}, learn), presets, presetIndex, presetName: presets[presetIndex] ? presets[presetIndex].name : "", voices: Object.assign({}, voices), scenes: scenes.slice(), lyrics, ai: aiStatus() });
     }
     function setParam(id, v) {
       values[id] = v;
@@ -383,6 +404,18 @@
           case "voicesBundled": Object.assign(voices, { loading: false, name: "Sanctuary Voices", text: "4 SECTIONS \u00b7 5 VOWELS \u00b7 753 NOTES", error: "", usingBundled: true }); status(); break;
           case "voicesClear": Object.assign(voices, { loading: false, name: "", text: "", error: "", usingBundled: false }); status(); break;
           case "lyrics": setLyrics(msg.text || ""); status(); break;
+          case "aiEnable": ai.enabled = !!msg.on; status(); break;
+          case "aiPerSection": ai.perSection = msg.count; ai.chosen = ai.chosen.map((c) => c.slice(0, msg.count)); status(); break;
+          case "aiAuto": ai.chosen = [[], [], [], []]; status(); break;
+          case "aiRefresh": status(); break;
+          case "aiFolder": emit("toast", { text: "In the plugin this opens VoxaVersa's Voices folder" }); break;
+          case "aiSinger": {
+            const c = ai.chosen[msg.section].length ? ai.chosen[msg.section] : aiAuto[msg.section].slice(0, ai.perSection);
+            if (msg.id) c[msg.slot] = msg.id; else c.splice(msg.slot, 1);
+            ai.chosen[msg.section] = c.filter(Boolean);
+            status();
+            break;
+          }
           case "preview": learn.previewing = !learn.previewing; status(); break;
           case "presetLoad": presetIndex = msg.index; status(); break;
           case "presetNext": presetIndex = (presetIndex + 1) % presets.length; status(); break;

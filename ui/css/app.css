@@ -593,6 +593,17 @@ html, body {
 .passes-canvas { display: block; margin-top: 8px; }
 .passes-how { flex: 1; padding: 10px 14px !important; }
 .passes-how p { font-size: 14.5px !important; line-height: 1.32 !important; margin: 0 !important; color: #b9a98d; }
+.ai-controls { display: flex; align-items: center; gap: 12px; padding: 9px 14px !important; margin-bottom: 12px; }
+.ai-label { font-family: "Montserrat", sans-serif; font-weight: 600; font-size: 10px; letter-spacing: 1.6px; color: var(--muted); margin-left: 10px; }
+.ai-right { margin-left: auto; gap: 6px; }
+.ai-cards .pass-card { min-height: 0; }
+.ai-tag { margin-left: auto; }
+.ai-slots { display: flex; flex-direction: column; gap: 6px; }
+.ai-slot { width: 100%; justify-content: flex-start; text-align: left; height: 30px; font-size: 14px; letter-spacing: 0.4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-engine { width: 630px; flex: none !important; }
+.ai-folder { font-size: 12px; color: var(--muted); word-break: break-all; }
+.menu.ai-menu { max-height: 520px; overflow-y: auto; }
+.menu.ai-menu .ai-range { float: right; margin-left: 18px; color: var(--muted); font-size: 12px; }
 /* CHORDS & STEMS: which lines the lane shows */
 .lane-legend { display: flex; gap: 4px; margin-left: auto; }
 .lane-legend button { background: none; border: none; cursor: pointer; padding: 2px 6px; font: 700 10px Montserrat, sans-serif; letter-spacing: 1.6px; color: var(--c); text-shadow: 0 0 8px rgba(255, 210, 140, 0.25); }

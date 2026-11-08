@@ -242,6 +242,7 @@ void SanctuaryEditor::sendStatus()
     o->setProperty ("voices", processor.getVoices().getStatus());
     o->setProperty ("scenes", processor.getSceneSlots());
     o->setProperty ("lyrics", processor.getLyricsStatus());
+    o->setProperty ("ai", processor.getAiStatus());
     addLatencyInfo (*o);
     web->emitEventIfBrowserIsVisible ("status", var (o.release()));
 }
@@ -511,6 +512,19 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
         learn.unlockAllChords();
     else if (name == "lyrics")
         processor.setLyrics (message.getProperty ("text", "").toString());
+    else if (name == "aiEnable")
+        processor.setAiEnabled ((bool) message.getProperty ("on", false));
+    else if (name == "aiPerSection")
+        processor.setAiPerSection ((int) message.getProperty ("count", 2));
+    else if (name == "aiSinger")
+        processor.setAiSinger ((int) message.getProperty ("section", -1), (int) message.getProperty ("slot", -1),
+                               message.getProperty ("id", "").toString());
+    else if (name == "aiAuto")
+        processor.setAiAutomatic();
+    else if (name == "aiRefresh")
+        processor.refreshAiSingers();
+    else if (name == "aiFolder")
+        sanctuary::ai::getVoicesDirectory().revealToUser();
     else if (name == "presetLoad")
         presets.load ((int) message.getProperty ("index", 0));
     else if (name == "presetNext")

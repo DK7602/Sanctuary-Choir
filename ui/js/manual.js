@@ -222,6 +222,20 @@ ${tip("Click the plaque after learning to see the chords the choir chose, change
 ${go("passes", "Show me Multi-Take")}`,
     },
     {
+      id: "ai", title: "AI singers", summary: "The singers you trained in VoxaVersa sing the parts with your words: a real-sounding group in Words mode.",
+      body: `
+<p>If you trained singers in <b>VoxaVersa</b>, they can sing the choir's parts with the words you sang. Each section gets real-sounding voices of its own, instead of copies of yours.</p>
+<ol class="m-steps">
+<li>Switch Vocal Type to <b>Words</b>, then LEARN your take.</li>
+<li>Open ${ui("SETTINGS")} › ${ui("AI SINGERS")} and press ${ui("ON")}. Sanctuary finds the singers VoxaVersa installed (its Voices folder) and casts each section: women for the sopranos and altos, men for the tenors and basses, contemporary voices for Gospel, Worship, Spiritual and Cinematic, classical ones for Sacred, Gregorian and Chamber.</li>
+<li>Choose ${ui("PER SECTION")} 1, 2 or 3, and click a name to pick another singer for that place. ${ui("AUTOMATIC")} lets Sanctuary cast them all again.</li>
+<li>Press ${ui("RENDER")}. Each AI singer sings their section's notes, in the octave that suits them, wherever you sang, with your words and timing. The section's singers then sing from those voices, each with their own timing and tuning, on the stage and in the room.</li>
+</ol>
+<p>The first render takes minutes: about as long as the song for each AI singer, or less on a fast computer. Every voice is kept, so rendering again after a mix change is quick; change a singer or the notes, and only that part is sung again. Live playing uses your own voice: the AI singers are heard once rendered.</p>
+${tip("Nothing to set up if VoxaVersa is installed and your voices imported: Sanctuary uses its AI engine and singers where they are. If the page says the content encoder is missing, use VoxaVersa's Import Voices.")}
+${go("ai", "Show me AI Singers")}`,
+    },
+    {
       id: "chords", title: "Chords & Stems", summary: "See and change the chords the choir sings, and drag the parts and audio into your DAW.",
       body: `
 <p>After LEARN, click the plaque in the church (or ${ui("SETTINGS")} › ${ui("CHORDS & STEMS")}). You see the take's chords in a lane and, under them, your melody and the four parts the choir sings: soprano pink, alto gold, tenor blue, bass green. Click ${ui("MELODY")}, ${ui("SOPRANO")}, ${ui("ALTO")}, ${ui("TENOR")} or ${ui("BASS")} to hide or show a line.</p>

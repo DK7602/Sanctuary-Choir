@@ -57,7 +57,18 @@ juce_add_binary_data(SanctuaryRooms
     NAMESPACE SanctuaryRoomsData
     SOURCES ${SANCTUARY_ROOM_FILES} "${PROJECT_SOURCE_DIR}/rooms/SOURCES.json")
 
+# AI singers (VoxaVersa's trained singers, run through ONNX Runtime, which is loaded at run time: nothing to link)
+set(SANCTUARY_AI_SOURCES
+    Source/ai/AiSingers.cpp
+    Source/ai/NeuralDsp.cpp
+    Source/ai/NeuralPlatform.cpp
+    Source/ai/NeuralRuntime.cpp
+    Source/ai/NeuralVoice.cpp
+    Source/ai/RvcModel.cpp
+)
+
 target_sources(SanctuaryChoir PRIVATE
+    ${SANCTUARY_AI_SOURCES}
     Source/ChoirVoices.cpp
     Source/LearnSession.cpp
     Source/MeasuredRooms.cpp
@@ -119,6 +130,7 @@ if(SANCTUARY_BUILD_TESTS)
     juce_add_console_app(SanctuarySessionTests PRODUCT_NAME "SanctuarySessionTests")
     target_sources(SanctuarySessionTests PRIVATE
         Tests/SessionTests.cpp
+        ${SANCTUARY_AI_SOURCES}
         Source/ChoirVoices.cpp
         Source/LearnSession.cpp
         Source/MeasuredRooms.cpp

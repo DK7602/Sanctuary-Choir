@@ -59,6 +59,7 @@ The plug-in carries its own manual: **Settings → Manual**, or the gear at the 
 - **Your own choir**: record a few held notes per section and the vowel modes sing with those real voices ([guide](docs/RECORDING_YOUR_CHOIR.md)).
 - **Voice character**: in Words mode the upper sections sound like women when a man sings lead (and the lower sections like men with a female lead).
 - **Real voices in Words mode**: each singer takes on the vocal tract, tone and vibrato of one of 19 real singers (measured from VocalSet), so the choir sounds like different people singing your words. No AI involved.
+- **AI singers** (with VoxaVersa): the singers you trained in VoxaVersa sing the parts with your words. After LEARN, RENDER has each one sing their section's notes in the octave that suits them, with your words and timing; the section's singers then sing from those voices on the stage. Up to three per section, cast automatically (women above, men below, contemporary or classical voices by style) or by hand. Sanctuary uses VoxaVersa's AI engine and voices where they are installed; nothing is bundled.
 - **Multi-take choir**: sing the part two to four times and the Words choir sings from every pass, lined up note by note with your take (dynamic time warping on the voice's sound, then a time-stretch that leaves the pitch alone). Real doubles with their own breaths and timing, not copies of one voice.
 - **Chord Speed** and a one-click **key lock** for the detected key.
 - **Chord lane**: after LEARN, see every chord of the take over your melody and the four parts the choir sings. Click one for ranked alternatives (with how well each fits the melody), pick one, and the harmony around it is worked out again. Chosen chords are kept with the project.
@@ -122,6 +123,7 @@ input ─► YIN pitch tracker ─► harmoniser ─────────► 
 
 | Folder | What's inside |
 | --- | --- |
+| `plugin/Source/ai/` | AI singers: VoxaVersa's RVC voice models run through ONNX Runtime (loaded at run time from VoxaVersa's install), offline only; the singers, casting, the parts' pitch and the render cache. |
 | `core/` | The DSP engine in plain C++20 (no framework). Pitch tracking, PSOLA, vowel synthesis, music theory and voice leading, harmoniser, reverb (measured rooms by partitioned convolution, and an FDN), Learn analysis, lining up extra passes, and offline rendering. |
 | `plugin/` | The JUCE wrapper: parameters, presets, the Learn session (timeline capture, background analysis/render, playback, saving takes with the project) and the WebView editor. |
 | `ui/` | The interface: HTML/CSS/JS drawn over artwork taken from the design mockups. Opening `ui/index.html` through a local web server runs it in a browser with a simulated engine. |

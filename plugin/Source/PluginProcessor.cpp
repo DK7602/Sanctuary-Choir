@@ -28,6 +28,7 @@ SanctuaryProcessor::SanctuaryProcessor()
     learn.standalone = standaloneApp;
     learn.onStatusChanged = [this] { ++statusVersion; };
     learn.getVoices = [this] { return voices.getCurrent(); };
+    learn.getAiPlan = [this] { return sanctuary::ai::Plan { aiEnabled, aiPerSection, aiCast }; };
     learn.voicesBusy = [this] { return voices.isBusy(); };
     learn.getHostBpm = [this] { return hostBpm.load (std::memory_order_relaxed); };
     learn.getMixSignature = [this]
@@ -634,6 +635,19 @@ void SanctuaryProcessor::getStateInformation (MemoryBlock& destData)
     tree.setProperty ("voicesFolder", voices.getFolder().getFullPathName(), nullptr);
     tree.setProperty ("voicesBuiltIn", voices.userChoseBuiltIn(), nullptr);
     tree.setProperty ("lyrics", lyricsText, nullptr);
+    tree.setProperty ("aiSingers", aiEnabled, nullptr);
+    tree.setProperty ("aiPerSection", aiPerSection, nullptr);
+    {
+        Array<var> sections;
+        for (const auto& ids : aiCast)
+        {
+            Array<var> list;
+            for (const auto& id : ids)
+                list.add (id);
+            sections.add (list);
+        }
+        tree.setProperty ("aiCast", JSON::toString (var (sections), true), nullptr);
+    }
     tree.setProperty ("stageVersion", kStageVersion, nullptr);
     {
         Array<var> sceneList;
@@ -712,6 +726,16 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
         // Choir voices: the user's own folder, the built-in synth on purpose, or (default) the
         // installed Sanctuary Voices that the constructor already started loading.
         setLyrics (tree.getProperty ("lyrics", "").toString());
+        aiEnabled = (bool) tree.getProperty ("aiSingers", false);
+        aiPerSection = jlimit (1, sanctuary::ai::kMaxPerSection, (int) tree.getProperty ("aiPerSection", 2));
+        aiCast = {};
+        const var castJson = JSON::parse (tree.getProperty ("aiCast", "[]").toString());   // kept: the arrays live in it
+        if (const auto* sections = castJson.getArray())
+            for (int s = 0; s < jmin ((int) sc::NumSections, sections->size()); ++s)
+                if (const auto* ids = (*sections)[s].getArray())
+                    for (const auto& id : *ids)
+                        if (aiCast[(size_t) s].size() < sanctuary::ai::kMaxPerSection)
+                            aiCast[(size_t) s].add (id.toString());
         const String voicesFolder = tree.getProperty ("voicesFolder", "").toString();
         if ((bool) tree.getProperty ("voicesBuiltIn", false))
         {
@@ -751,6 +775,112 @@ void SanctuaryProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (hasLearn)
         learn.readState (in);
     ++statusVersion;
+}
+
+//==============================================================================
+void SanctuaryProcessor::aiSettingsChanged()
+{
+    learn.renderSettingsChanged();   // a rendered take now needs RENDER to sing with the new singers
+    ++statusVersion;
+}
+
+void SanctuaryProcessor::setAiEnabled (bool on)
+{
+    if (on == aiEnabled)
+        return;
+    aiEnabled = on;
+    if (on && ! aiSearched)
+        refreshAiSingers();
+    aiSettingsChanged();
+}
+
+void SanctuaryProcessor::setAiPerSection (int count)
+{
+    count = jlimit (1, sanctuary::ai::kMaxPerSection, count);
+    if (count == aiPerSection)
+        return;
+    aiPerSection = count;
+    for (auto& ids : aiCast)
+        while (ids.size() > count)
+            ids.remove (ids.size() - 1);
+    aiSettingsChanged();
+}
+
+void SanctuaryProcessor::setAiSinger (int section, int slot, const String& id)
+{
+    if (! isPositiveAndBelow (section, sc::NumSections) || ! isPositiveAndBelow (slot, sanctuary::ai::kMaxPerSection))
+        return;
+    // A section chosen by hand starts from what it sings now, so changing one place keeps the others.
+    auto& ids = aiCast[(size_t) section];
+    if (ids.isEmpty())
+    {
+        const auto current = sanctuary::ai::completeCast (aiSingers, aiCast, aiPerSection, currentParams().style,
+                                                          sc::defaultSectionRanges());
+        ids = current[(size_t) section];
+    }
+    while (ids.size() <= slot)
+        ids.add ({});
+    if (id.isEmpty())
+        ids.remove (slot);
+    else
+        ids.set (slot, id);
+    ids.removeEmptyStrings();
+    aiSettingsChanged();
+}
+
+void SanctuaryProcessor::setAiAutomatic()
+{
+    aiCast = {};
+    aiSettingsChanged();
+}
+
+void SanctuaryProcessor::refreshAiSingers()
+{
+    aiSingers = sanctuary::ai::findSingers();
+    aiAvailability = sanctuary::ai::describeAvailability (aiSingers);
+    aiSearched = true;
+    ++statusVersion;
+}
+
+var SanctuaryProcessor::getAiStatus()
+{
+    auto o = std::make_unique<DynamicObject>();
+    o->setProperty ("enabled", aiEnabled);
+    o->setProperty ("perSection", aiPerSection);
+    o->setProperty ("maxPerSection", sanctuary::ai::kMaxPerSection);
+    o->setProperty ("searched", aiSearched);
+    o->setProperty ("words", currentParams().vocalType == sc::VocalType::Words);
+    o->setProperty ("folder", sanctuary::ai::getVoicesDirectory().getFullPathName());
+    if (aiSearched)
+    {
+        o->setProperty ("engine", aiAvailability.getProperty ("engine", false));
+        o->setProperty ("engineText", aiAvailability.getProperty ("engineText", ""));
+        o->setProperty ("encoder", aiAvailability.getProperty ("encoder", false));
+        o->setProperty ("singers", aiAvailability.getProperty ("singers", Array<var>()));
+    }
+    // Who sings each section on the next render: the hand-picked ones and the automatic choice.
+    const auto cast = sanctuary::ai::completeCast (aiSingers, aiCast, aiPerSection, currentParams().style,
+                                                   sc::defaultSectionRanges());
+    Array<var> sections;
+    for (int s = 0; s < sc::NumSections; ++s)
+    {
+        auto so = std::make_unique<DynamicObject>();
+        so->setProperty ("chosen", ! aiCast[(size_t) s].isEmpty());
+        Array<var> list;
+        for (const auto& id : cast[(size_t) s])
+            for (const auto& singer : aiSingers)
+                if (singer.id == id)
+                {
+                    auto e = std::make_unique<DynamicObject>();
+                    e->setProperty ("id", id);
+                    e->setProperty ("name", singer.name);
+                    list.add (var (e.release()));
+                }
+        so->setProperty ("singers", list);
+        sections.add (var (so.release()));
+    }
+    o->setProperty ("cast", sections);
+    return var (o.release());
 }
 
 AudioProcessorEditor* SanctuaryProcessor::createEditor()
