@@ -7,6 +7,10 @@
 #include "../Source/MeasuredRooms.h"
 #include "TestSignals.h"
 
+#include <sanctuary/FFT.h>
+
+#include <algorithm>
+#include <complex>
 #include <cstdio>
 
 using namespace juce;
@@ -490,6 +494,64 @@ static void chordLaneAndDragOut()
     }
 }
 
+// The middle of a held note's recording, as floats.
+static std::vector<float> middleOf (const sc::SampleZone& z)
+{
+    const auto n = (size_t) z.length();
+    std::vector<float> x;
+    for (size_t i = n / 5; i < n - n / 5; ++i)
+        x.push_back ((float) z.pcm[i] * z.scale);
+    return x;
+}
+
+// How far the odd harmonics of the note's named pitch (f, 3f, 5f) stand above the level between
+// its harmonics (1.5f, 2.5f...), in dB: against the typical gap and against the quietest one.
+static std::pair<double, double> oddHarmonicsAboveGaps (const sc::SampleZone& z)
+{
+    const auto x = middleOf (z);
+    int order = 10;
+    while ((1 << order) < (int) x.size() * 2 && order < 17)
+        ++order;
+    sc::FFT fft (order);
+    const int size = fft.getSize();
+    std::vector<std::complex<float>> buf ((size_t) size);
+    const size_t len = std::min (x.size(), (size_t) size);
+    for (size_t i = 0; i < len; ++i)
+        buf[i] = x[i] * (float) (0.5 - 0.5 * std::cos (2.0 * MathConstants<double>::pi * (double) i / (double) (len - 1)));
+    fft.forward (buf.data());
+    const double f0 = 440.0 * std::pow (2.0, (z.rootMidi - 69.0) / 12.0), binHz = z.sampleRate / size;
+    auto peakDb = [&] (double hz, double width)
+    {
+        float m = 0.0f;
+        for (int k = (int) (hz * (1.0 - width) / binHz); k <= (int) (hz * (1.0 + width) / binHz) && k < size / 2; ++k)
+            m = std::max (m, std::abs (buf[(size_t) k]));
+        return 20.0 * std::log10 (m + 1.0e-12);
+    };
+    double odd = -1.0e9;
+    for (int h : { 1, 3, 5 })
+        odd = std::max (odd, peakDb (f0 * h, 0.02));
+    std::vector<double> gaps;
+    for (double h : { 1.5, 2.5, 3.5, 4.5 })
+        gaps.push_back (peakDb (f0 * h, 0.01));
+    std::sort (gaps.begin(), gaps.end());
+    return { odd - 0.5 * (gaps[1] + gaps[2]), odd - gaps[0] };
+}
+
+// Correlation of the note's waveform with itself half a named period later.
+static double halfPeriodRepeat (const sc::SampleZone& z)
+{
+    const auto x = middleOf (z);
+    const int lag = (int) std::lround (0.5 * z.sampleRate / (440.0 * std::pow (2.0, (z.rootMidi - 69.0) / 12.0)));
+    double ab = 0.0, aa = 0.0, bb = 0.0;
+    for (size_t i = 0; i + (size_t) lag < x.size(); ++i)
+    {
+        ab += (double) x[i] * x[i + (size_t) lag];
+        aa += (double) x[i] * x[i];
+        bb += (double) x[i + (size_t) lag] * x[i + (size_t) lag];
+    }
+    return ab / std::sqrt (aa * bb + 1.0e-12);
+}
+
 static void voicePackLoads()
 {
     // The voice pack that ships with the plug-in: held notes, onsets, legato moves, the
@@ -526,6 +588,31 @@ static void voicePackLoads()
             }
     std::printf ("  Ah: %zu onsets, %zu moves\n", onsets, moves);
     check (onsets > 40 && moves > 200, "onsets and moves");
+
+    // Every held note sounds at the pitch in its name, not an octave above it. Named an octave
+    // low, a note's odd harmonics (f, 3f, 5f) are only the noise between its real ones, and its
+    // waveform repeats every half period. 53 notes (mostly the basses' lowest) once were, and
+    // sang an octave high; this catches 52 of them and none of the 3,365 named right.
+    {
+        int held = 0, octaveUp = 0;
+        for (int s = 0; s < sc::NumSections; ++s)
+            for (int v = 0; v < sc::SampleSet::kVowels; ++v)
+                for (int t = 0; t < sc::SampleSet::kTakes; ++t)
+                    if (const auto* l = set->exactLayer (s, (sc::VocalType) v, (sc::Take) t))
+                        for (const auto& z : l->zones)
+                        {
+                            ++held;
+                            const auto [typical, quietest] = oddHarmonicsAboveGaps (z);
+                            const double half = halfPeriodRepeat (z);
+                            if (typical < 12.0 || (typical <= 31.0 && half > 0.6 && quietest < 35.0))
+                            {
+                                ++octaveUp;
+                                std::printf ("    an octave above its name? section %d vowel %d take %d, %.2f: %.1f / %.1f dB, %.2f\n", s, v, t, z.rootMidi, typical, quietest, half);
+                            }
+                        }
+        std::printf ("  %d held notes checked against their names: %d an octave above\n", held, octaveUp);
+        check (held > 3000 && octaveUp == 0, "every held note sings the pitch in its name");
+    }
 
     // Sing a melody (learned, so every section moves note to note) in each way of singing.
     for (auto how : { sc::Singing::Natural, sc::Singing::Breathy, sc::Singing::Belt })

@@ -24,9 +24,12 @@
 //             singer's consonant.
 #include "TestSignals.h"
 
+#include <sanctuary/FFT.h>
 #include <sanctuary/Learn.h>
 
 #include <algorithm>
+#include <cmath>
+#include <complex>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -46,6 +49,55 @@ enum Kind { Sustain = 0, Onset, Legato, SyllableCut, NumKinds };
 const char* kTechniqueDirs[] = { "", "breathy", "belt", "vibrato", "fullvoice" };
 const char* kKindDirs[] = { "", "short", "legato", "syllables" };
 const char* kSectionDirs[] = { "Sopranos", "Altos", "Tenors", "Basses" };
+
+// The pitch tracker can read a note an octave low (the dip at twice the period). Named an octave
+// low, a note's odd harmonics (f, 3f, 5f) are only the noise between its real ones and its
+// waveform repeats every half period: 53 held notes of the first pack were, and sang an octave
+// high. Returns midi, or midi + 12 for such a note (the same test as the session tests' check
+// of the pack).
+float checkOctave (const std::vector<float>& x, int64_t start, int64_t end, double sr, float midi)
+{
+    start = std::max<int64_t> (0, start);
+    end = std::min<int64_t> ((int64_t) x.size(), end);
+    if (end - start < 2048)
+        return midi;
+    int order = 11;
+    while ((1 << order) < (end - start) * 2 && order < 18)
+        ++order;
+    FFT fft (order);
+    const int size = fft.getSize();
+    const int64_t len = std::min<int64_t> (end - start, size);
+    std::vector<std::complex<float>> buf ((size_t) size);
+    for (int64_t i = 0; i < len; ++i)
+        buf[(size_t) i] = x[(size_t) (start + i)] * (float) (0.5 - 0.5 * std::cos (2.0 * kPi * (double) i / (double) (len - 1)));
+    fft.forward (buf.data());
+    const double f0 = 440.0 * std::pow (2.0, (midi - 69.0) / 12.0), binHz = sr / size;
+    auto peakDb = [&] (double hz, double width)
+    {
+        float m = 0.0f;
+        for (int k = (int) (hz * (1.0 - width) / binHz); k <= (int) (hz * (1.0 + width) / binHz) && k < size / 2; ++k)
+            m = std::max (m, std::abs (buf[(size_t) k]));
+        return 20.0 * std::log10 (m + 1.0e-12);
+    };
+    double odd = -1.0e9;
+    for (int h : { 1, 3, 5 })
+        odd = std::max (odd, peakDb (f0 * h, 0.02));
+    std::vector<double> gaps;
+    for (double h : { 1.5, 2.5, 3.5, 4.5 })
+        gaps.push_back (peakDb (f0 * h, 0.01));
+    std::sort (gaps.begin(), gaps.end());
+    const double typical = odd - 0.5 * (gaps[1] + gaps[2]), quietest = odd - gaps[0];
+    const int lag = (int) std::lround (0.5 * sr / f0);
+    double ab = 0.0, aa = 0.0, bb = 0.0;
+    for (int64_t i = start; i + lag < end; ++i)
+    {
+        ab += (double) x[(size_t) i] * x[(size_t) (i + lag)];
+        aa += (double) x[(size_t) i] * x[(size_t) i];
+        bb += (double) x[(size_t) (i + lag)] * x[(size_t) (i + lag)];
+    }
+    const double half = ab / std::sqrt (aa * bb + 1.0e-12);
+    return typical < 12.0 || (typical <= 31.0 && half > 0.6 && quietest < 35.0) ? midi + 12.0f : midi;
+}
 const char* kVowelDirs[] = { "ah", "oh", "oo", "ee", "eh" };
 
 // The classical voice moves around its note (VocalSet's slow scales: about 45 cents of standard
@@ -186,8 +238,8 @@ void cutMoves (const TakeAnalysis& take, const std::vector<float>& x, double sr,
 
         Cut cut = proto;
         cut.kind = Legato;
-        cut.root = from;
-        cut.to = to;
+        cut.root = checkOctave (x, start, c, sr, from);
+        cut.to = checkOctave (x, c, end, sr, to);
         cut.crossing = crossing;
         cut.wobble = wobble;
         cut.seconds = seconds;
@@ -248,7 +300,7 @@ void cutFile (const fs::path& file, const std::string& singer, bool female, bool
                 if (spread <= maxWobble && centred)
                 {
                     Cut c = proto;
-                    c.root = m[m.size() / 2];
+                    c.root = checkOctave (x, start + (end - start) / 5, end - (end - start) / 5, sr, m[m.size() / 2]);
                     c.seconds = secs;
                     c.wobble = spread;
                     c.longTone = want.longTone;
@@ -285,7 +337,7 @@ void cutFile (const fs::path& file, const std::string& singer, bool female, bool
                 }
             Cut c = proto;
             c.kind = Onset;
-            c.root = m[m.size() / 2];
+            c.root = checkOctave (x, start + (end - start) / 2, end, sr, m[m.size() / 2]);
             c.seconds = secs;
             c.wobble = spread;
             c.attack = attack;
