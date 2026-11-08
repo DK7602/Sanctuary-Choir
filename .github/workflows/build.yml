@@ -100,17 +100,32 @@ jobs:
         shell: bash
         run: cmake --build build --config Release --parallel 4
 
+      # The AI singers' engine: ONNX Runtime (CPU build, MIT), shipped with the plug-in and loaded at run time.
+      - name: Get ONNX Runtime
+        shell: bash
+        run: |
+          ORT_VERSION=1.20.1
+          base="https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}"
+          case "$RUNNER_OS" in
+            Linux)   name="onnxruntime-linux-x64-${ORT_VERSION}"; file="$name.tgz" ;;
+            macOS)   name="onnxruntime-osx-universal2-${ORT_VERSION}"; file="$name.tgz" ;;
+            Windows) name="onnxruntime-win-x64-${ORT_VERSION}"; file="$name.zip" ;;
+          esac
+          curl -fsSL -o "$RUNNER_TEMP/$file" "$base/$file"
+          (cd "$RUNNER_TEMP" && cmake -E tar xf "$file")
+          ORT_DIR="$RUNNER_TEMP/$name"
+          ls "$ORT_DIR" "$ORT_DIR/lib"
+          echo "ORT_DIR=$ORT_DIR" >> "$GITHUB_ENV"
+
       # The AI singers' test needs ONNX Runtime and stand-in voice models (Linux only; elsewhere it is skipped).
       - name: AI singers test setup
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/ort.tgz" https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz
-          tar xzf "$RUNNER_TEMP/ort.tgz" -C "$RUNNER_TEMP"
           python3 -m venv "$RUNNER_TEMP/aienv"
           "$RUNNER_TEMP/aienv/bin/pip" install --quiet onnx==1.23.2 numpy
           "$RUNNER_TEMP/aienv/bin/python" tools/ai/make_dummy_models.py --out "$RUNNER_TEMP/ai-models"
-          echo "SANCTUARY_TEST_ORT_LIB=$RUNNER_TEMP/onnxruntime-linux-x64-1.20.1/lib/libonnxruntime.so.1.20.1" >> "$GITHUB_ENV"
+          echo "SANCTUARY_TEST_ORT_LIB=$ORT_DIR/lib/libonnxruntime.so.1.20.1" >> "$GITHUB_ENV"
           echo "SANCTUARY_TEST_MODELS_DIR=$RUNNER_TEMP/ai-models" >> "$GITHUB_ENV"
 
       - name: Unit tests
@@ -158,9 +173,25 @@ jobs:
           cp rooms/CREDITS.txt "dist/$OUT/ROOMS-CREDITS.txt"
           cp LICENSE "dist/$OUT/LICENSE.txt"
           case "$RUNNER_OS" in
-            macOS)   python3 tools/notices/collect_notices.py .juce/JUCE "dist/$OUT/THIRD-PARTY-NOTICES.txt" --platform macos ;;
-            Windows) python tools/notices/collect_notices.py .juce/JUCE "dist/$OUT/THIRD-PARTY-NOTICES.txt" --platform windows --webview2 C:/webview2 ;;
-            *)       python3 tools/notices/collect_notices.py .juce/JUCE "dist/$OUT/THIRD-PARTY-NOTICES.txt" --platform linux ;;
+            macOS)   python3 tools/notices/collect_notices.py .juce/JUCE "dist/$OUT/THIRD-PARTY-NOTICES.txt" --platform macos --onnxruntime "$ORT_DIR" ;;
+            Windows) python tools/notices/collect_notices.py .juce/JUCE "dist/$OUT/THIRD-PARTY-NOTICES.txt" --platform windows --webview2 C:/webview2 --onnxruntime "$(cygpath -w "$ORT_DIR")" ;;
+            *)       python3 tools/notices/collect_notices.py .juce/JUCE "dist/$OUT/THIRD-PARTY-NOTICES.txt" --platform linux --onnxruntime "$ORT_DIR" ;;
+          esac
+          # The AI engine: next to the plug-in and app binaries (Windows, Linux); one shared copy on macOS,
+          # in /Library/Application Support/Sanctuary Choir/Runtime (the installer puts it there).
+          case "$RUNNER_OS" in
+            Windows)
+              mkdir -p "dist/$OUT/Sanctuary Choir.vst3/Contents/x86_64-win"
+              cp "$ORT_DIR/lib/onnxruntime.dll" "dist/$OUT/Sanctuary Choir.vst3/Contents/x86_64-win/"
+              cp "$ORT_DIR/lib/onnxruntime.dll" "dist/$OUT/" ;;
+            macOS)
+              mkdir -p "dist/$OUT/Runtime"
+              cp -L "$ORT_DIR/lib/libonnxruntime.dylib" "dist/$OUT/Runtime/libonnxruntime.dylib"
+              codesign --force --sign - "dist/$OUT/Runtime/libonnxruntime.dylib" ;;
+            *)
+              mkdir -p "dist/$OUT/Sanctuary Choir.vst3/Contents/x86_64-linux"
+              cp -L "$ORT_DIR/lib/libonnxruntime.so.1.20.1" "dist/$OUT/Sanctuary Choir.vst3/Contents/x86_64-linux/libonnxruntime.so"
+              cp -L "$ORT_DIR/lib/libonnxruntime.so.1.20.1" "dist/$OUT/libonnxruntime.so" ;;
           esac
           if [ "$RUNNER_OS" = "macOS" ]; then
             cp -R "$REL/AU/Sanctuary Choir.component" "dist/$OUT/"

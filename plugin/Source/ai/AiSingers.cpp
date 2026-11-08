@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <set>
+#include <thread>
 
 namespace sanctuary::ai
 {
@@ -74,11 +75,23 @@ namespace
 }
 
 //==============================================================================
-std::vector<Singer> findSingers (const juce::File& voicesDir)
+/** May this singer be given to someone else? Only voices trained on recordings whose licence allows it:
+    VocalSet's singers (CC BY 4.0), or a pack whose licence says CC BY or CC0. Never singers from sample packs
+    in someone's own library, or from recordings whose singers never agreed (the band singers). */
+bool isShareable (const juce::String& licenceAndDescription)
 {
-    std::vector<Singer> out;
+    const auto t = licenceAndDescription.toLowerCase();
+    for (auto* no : { "owner's library", "owners library", "personal use", "testing only", "do not share", "military",
+                      "band member", "not for sale", "private" })
+        if (t.contains (no))
+            return false;
+    return t.contains ("vocalset") || t.contains ("cc by") || t.contains ("cc-by") || t.contains ("cc0");
+}
+
+static void findSingersIn (const juce::File& voicesDir, bool fromVoxaVersa, std::vector<Singer>& out)
+{
     if (! voicesDir.isDirectory())
-        return out;
+        return;
 
     const auto assignment = juce::JSON::parse (voicesDir.getChildFile ("voice_assignment.json"));
     const auto packs = assignment.getProperty ("packs", {});
@@ -106,6 +119,14 @@ std::vector<Singer> findSingers (const juce::File& voicesDir)
             s.name = "Studio Diva";
         s.female = json.getProperty ("gender", "").toString().equalsIgnoreCase ("female");
         s.licence = json.getProperty ("license", "").toString();
+        s.fromVoxaVersa = fromVoxaVersa;
+        s.shareable = isShareable (s.licence + " " + json.getProperty ("description", "").toString() + " "
+                                   + (loose (packId).startsWith ("vocalset") ? "VocalSet" : ""));
+        bool already = false;
+        for (const auto& o : out)
+            already = already || o.id == s.id;
+        if (already)
+            continue;   // the same singer in VoxaVersa and in Sanctuary's folder: VoxaVersa's (newer) one
 
         const auto style = json.getProperty ("style", "").toString();
         s.classical = style.equalsIgnoreCase ("classical") || loose (packId).startsWith ("vocalset");
@@ -125,11 +146,204 @@ std::vector<Singer> findSingers (const juce::File& voicesDir)
             std::swap (s.low, s.high);
         const juce::var median = entry.getProperty ("median", json.getProperty ("median", {}));
         s.median = median.isVoid() ? 0.5f * (float) (s.low + s.high) : (float) (double) median;
+        s.assignment = entry;
         out.push_back (s);
     }
+}
 
+std::vector<Singer> findSingers()
+{
+    std::vector<Singer> out;
+    findSingersIn (getVoicesDirectory(), true, out);
+    findSingersIn (getSanctuaryVoicesDirectory(), false, out);
     std::sort (out.begin(), out.end(), [] (const Singer& a, const Singer& b) { return a.name.compareNatural (b.name) < 0; });
     return out;
+}
+
+//==============================================================================
+static const char* sharePackCredits()
+{
+    return "Sanctuary Choir - AI singers\n"
+           "============================\n\n"
+           "Singers that may be shared: voice models trained for VoxaVersa on recordings whose licence allows it.\n\n"
+           "VocalSet singers: the models were trained on recordings from\n"
+           "  VocalSet: A Singing Voice Dataset, J. Wilkins, P. Seetharaman, A. Wahl, B. Pardo, ISMIR 2018,\n"
+           "  https://zenodo.org/records/1442513, licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).\n"
+           "  Changed: the recordings were cleaned and used to train a voice conversion model (RVC) of each singer.\n\n"
+           "Content encoder (Encoders/contentvec-768.onnx): RVC's HuBERT/ContentVec base model\n"
+           "  (lj1995/VoiceConversionWebUI, MIT licence), exported to ONNX.\n\n"
+           "To install: in Sanctuary Choir, Settings > AI SINGERS > INSTALL VOICES, and choose this file.\n";
+}
+
+int makeSharePack (const std::vector<Singer>& singers, const juce::File& zipFile,
+                   const std::function<void (float)>& progress, const std::atomic<bool>* cancel, juce::String& error)
+{
+    juce::ZipFile::Builder zip;
+    int count = 0;
+    auto assignments = std::make_unique<juce::DynamicObject>();
+    for (const auto& s : singers)
+    {
+        if (! s.shareable)
+            continue;
+        for (const auto& f : s.folder.findChildFiles (juce::File::findFiles, true))
+            zip.addFile (f, 0, "Voices/" + s.id + "/" + f.getRelativePathFrom (s.folder).replaceCharacter ('\\', '/'));
+        if (! s.assignment.isVoid())
+            assignments->setProperty (s.id, s.assignment);   // the measured range and middle note go along
+        ++count;
+    }
+    if (count == 0)
+    {
+        error = "none of your singers may be shared (only those trained on VocalSet or other CC BY recordings)";
+        return 0;
+    }
+    juce::File encoder;
+    for (const auto& dir : { getEncodersDirectory(), getSanctuaryEncodersDirectory() })
+        for (auto* name : { "contentvec-768.onnx", "vec-768-layer-12.onnx" })
+            if (! encoder.existsAsFile() && dir.getChildFile (name).existsAsFile())
+                encoder = dir.getChildFile (name);
+    if (! encoder.existsAsFile())
+    {
+        error = "the content encoder (contentvec-768.onnx) was not found: import your voices in VoxaVersa first";
+        return 0;
+    }
+    zip.addFile (encoder, 0, "Encoders/contentvec-768.onnx");
+
+    auto root = std::make_unique<juce::DynamicObject>();
+    root->setProperty ("packs", juce::var (assignments.release()));
+    const auto json = juce::JSON::toString (juce::var (root.release()));
+    zip.addEntry (std::make_unique<juce::MemoryInputStream> (json.toRawUTF8(), json.getNumBytesAsUTF8(), true), 0,
+                  "Voices/voice_assignment.json", juce::Time::getCurrentTime());
+    const juce::String credits (sharePackCredits());
+    zip.addEntry (std::make_unique<juce::MemoryInputStream> (credits.toRawUTF8(), credits.getNumBytesAsUTF8(), true), 0,
+                  "CREDITS.txt", juce::Time::getCurrentTime());
+
+    const auto tmp = zipFile.getSiblingFile (zipFile.getFileNameWithoutExtension() + ".part");
+    tmp.deleteFile();
+    zipFile.getParentDirectory().createDirectory();
+    bool ok = false;
+    {
+        juce::FileOutputStream out (tmp);
+        if (out.openedOk())
+        {
+            double p = 0.0;
+            // The builder reports its progress through a double it updates; a thread passes it on.
+            std::atomic<bool> done { false };
+            std::thread reporter ([&] { while (! done.load()) { if (progress) progress ((float) p); std::this_thread::sleep_for (std::chrono::milliseconds (200)); } });
+            ok = zip.writeToStream (out, &p) && ! (cancel != nullptr && cancel->load());
+            done = true;
+            reporter.join();
+            out.flush();
+            ok = ok && ! out.getStatus().failed();
+        }
+    }
+    if (! ok)
+    {
+        tmp.deleteFile();
+        error = cancel != nullptr && cancel->load() ? juce::String ("Cancelled") : "could not write " + zipFile.getFullPathName();
+        return 0;
+    }
+    zipFile.deleteFile();
+    tmp.moveFileTo (zipFile);
+    if (progress) progress (1.0f);
+    return count;
+}
+
+juce::StringArray installVoices (const juce::File& source, juce::String& error)
+{
+    juce::StringArray installed;
+    const auto voicesDir = getSanctuaryVoicesDirectory();
+    const auto encodersDir = getSanctuaryEncodersDirectory();
+    voicesDir.createDirectory();
+    encodersDir.createDirectory();
+
+    // Merges a pack's voice assignment entries (names, ranges) into Sanctuary's.
+    auto mergeAssignment = [&] (const juce::var& packs)
+    {
+        auto* incoming = packs.getDynamicObject();
+        if (incoming == nullptr)
+            return;
+        const auto file = voicesDir.getChildFile ("voice_assignment.json");
+        auto current = juce::JSON::parse (file);
+        if (current.getDynamicObject() == nullptr)
+            current = juce::var (new juce::DynamicObject());
+        auto existing = current.getProperty ("packs", {});
+        if (existing.getDynamicObject() == nullptr)
+        {
+            existing = juce::var (new juce::DynamicObject());
+            current.getDynamicObject()->setProperty ("packs", existing);
+        }
+        for (const auto& e : incoming->getProperties())
+            existing.getDynamicObject()->setProperty (e.name, e.value);
+        file.replaceWithText (juce::JSON::toString (current));
+    };
+
+    if (source.isDirectory())
+    {
+        // A pack folder (voice.json inside) or a folder of them.
+        auto copyPack = [&] (const juce::File& dir)
+        {
+            const auto dest = voicesDir.getChildFile (dir.getFileName());
+            dest.deleteRecursively();
+            if (dir.copyDirectoryTo (dest))
+                installed.add (dir.getFileName());
+        };
+        if (source.getChildFile ("voice.json").existsAsFile())
+            copyPack (source);
+        else
+            for (const auto& d : source.findChildFiles (juce::File::findDirectories, false))
+                if (d.getChildFile ("voice.json").existsAsFile())
+                    copyPack (d);
+    }
+    else
+    {
+        juce::ZipFile zip (source);
+        if (zip.getNumEntries() == 0)
+        {
+            error = source.getFileName() + " is not a singers pack (a .zip or VoxaVersa .vxpack)";
+            return {};
+        }
+        if (zip.getEntry ("voice.json") != nullptr)
+        {
+            // One VoxaVersa .vxpack: voice.json and the model at its root.
+            const auto json = juce::JSON::parse (zip.createStreamForEntry (*zip.getEntry ("voice.json"))->readEntireStreamAsString());
+            const auto id = json.getProperty ("id", source.getFileNameWithoutExtension()).toString()
+                                .retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ");
+            const auto dest = voicesDir.getChildFile (id.isNotEmpty() ? id : source.getFileNameWithoutExtension());
+            dest.deleteRecursively();
+            if (zip.uncompressTo (dest, true).wasOk())
+                installed.add (dest.getFileName());
+        }
+        else
+        {
+            // A Sanctuary singers pack: Voices/<pack>/..., Encoders/..., CREDITS.txt.
+            const auto staging = voicesDir.getParentDirectory().getChildFile ("Installing");
+            staging.deleteRecursively();
+            if (! zip.uncompressTo (staging, true).wasOk())
+            {
+                staging.deleteRecursively();
+                error = "could not unpack " + source.getFileName();
+                return {};
+            }
+            for (const auto& d : staging.getChildFile ("Voices").findChildFiles (juce::File::findDirectories, false))
+            {
+                if (! d.getChildFile ("voice.json").existsAsFile())
+                    continue;
+                const auto dest = voicesDir.getChildFile (d.getFileName());
+                dest.deleteRecursively();
+                if (d.moveFileTo (dest))
+                    installed.add (d.getFileName());
+            }
+            for (const auto& f : staging.getChildFile ("Encoders").findChildFiles (juce::File::findFiles, false, "*.onnx"))
+                f.moveFileTo (encodersDir.getChildFile (f.getFileName()));
+            mergeAssignment (juce::JSON::parse (staging.getChildFile ("Voices").getChildFile ("voice_assignment.json")).getProperty ("packs", {}));
+            if (staging.getChildFile ("CREDITS.txt").existsAsFile())
+                staging.getChildFile ("CREDITS.txt").moveFileTo (getSanctuaryAiDirectory().getChildFile ("CREDITS.txt"));
+            staging.deleteRecursively();
+        }
+    }
+    if (installed.isEmpty() && error.isEmpty())
+        error = "no singers found in " + source.getFileName();
+    return installed;
 }
 
 //==============================================================================
@@ -316,8 +530,7 @@ juce::File Renderer::getCacheDirectory()
     const auto custom = juce::SystemStats::getEnvironmentVariable ("SANCTUARY_AI_CACHE_DIR", {});
     if (custom.isNotEmpty() && juce::File::isAbsolutePath (custom))
         return juce::File (custom);
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-        .getChildFile ("Sanctuary Choir").getChildFile ("AI Singers");
+    return getSanctuaryAiDirectory().getChildFile ("Cache");
 }
 
 void Renderer::trimCache (int64_t maxBytes)
@@ -516,9 +729,16 @@ juce::var describeAvailability (const std::vector<Singer>& singers)
     o->setProperty ("engine", engine);
     o->setProperty ("engineText", engine ? juce::String ("AI engine ready") : runtime.getStatusMessage());
     o->setProperty ("folder", getVoicesDirectory().getFullPathName());
-    const bool encoder = getEncodersDirectory().getChildFile ("contentvec-768.onnx").existsAsFile()
-                      || getEncodersDirectory().getChildFile ("vec-768-layer-12.onnx").existsAsFile();
+    bool encoder = false;
+    for (const auto& dir : { getEncodersDirectory(), getSanctuaryEncodersDirectory() })
+        encoder = encoder || dir.getChildFile ("contentvec-768.onnx").existsAsFile() || dir.getChildFile ("vec-768-layer-12.onnx").existsAsFile();
     o->setProperty ("encoder", encoder);
+    o->setProperty ("voxaversa", getVoicesDirectory().isDirectory());
+    o->setProperty ("sanctuaryFolder", getSanctuaryVoicesDirectory().getFullPathName());
+    int shareable = 0;
+    for (const auto& s : singers)
+        shareable += s.shareable ? 1 : 0;
+    o->setProperty ("shareable", shareable);
     juce::Array<juce::var> list;
     for (const auto& s : singers)
     {
@@ -529,6 +749,7 @@ juce::var describeAvailability (const std::vector<Singer>& singers)
         e->setProperty ("low", s.low);
         e->setProperty ("high", s.high);
         e->setProperty ("classical", s.classical);
+        e->setProperty ("shareable", s.shareable);
         list.add (juce::var (e.release()));
     }
     o->setProperty ("singers", list);

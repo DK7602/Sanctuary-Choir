@@ -40,6 +40,8 @@ Name: "voices"; Description: "Sanctuary Voices: real recorded singers for the ch
 [Files]
 Source: "{#SourceDir}\Sanctuary Choir.vst3\*"; DestDir: "{commoncf64}\VST3\Sanctuary Choir.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\Sanctuary Choir.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
+; The AI singers' engine (ONNX Runtime) for the app; the VST3 bundle carries its own copy.
+Source: "{#SourceDir}\onnxruntime.dll"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "{#SourceDir}\SanctuaryVoices\*"; DestDir: "{commonappdata}\Sanctuary Choir\Voices\SanctuaryVoices"; Components: voices; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\INSTALL.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "SanctuaryChoir.ico"; DestDir: "{app}"; Flags: ignoreversion

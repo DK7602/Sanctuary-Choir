@@ -1403,11 +1403,14 @@
     const autoBtn = el("button", "pill", right, "AUTOMATIC");
     autoBtn.title = "Let Sanctuary cast every section (women above, men below, the style's kind of voice)";
     autoBtn.addEventListener("click", () => SC.send({ type: "cmd", name: "aiAuto" }));
-    const again = el("button", "pill", right, "LOOK AGAIN");
-    again.title = "Look for VoxaVersa's singers again (after importing voices)";
-    again.addEventListener("click", () => SC.send({ type: "cmd", name: "aiRefresh" }));
-    const folder = el("button", "pill", right, "VOICES FOLDER");
-    folder.title = "Open VoxaVersa's Voices folder";
+    const install = el("button", "pill", right, "INSTALL VOICES…");
+    install.title = "Install singers from a pack a friend made (or a VoxaVersa .vxpack): no VoxaVersa needed";
+    install.addEventListener("click", () => SC.send({ type: "cmd", name: "aiInstall" }));
+    const share = el("button", "pill", right, "SHARE PACK…");
+    share.title = "Make a file of the singers you may give away (trained on VocalSet), for a friend to install";
+    share.addEventListener("click", () => SC.send({ type: "cmd", name: "aiSharePack" }));
+    const folder = el("button", "pill", right, "FOLDER");
+    folder.title = "Open the folder the singers are in";
     folder.addEventListener("click", () => SC.send({ type: "cmd", name: "aiFolder" }));
 
     const cardRow = el("div", "passes-cards ai-cards", page);
@@ -1427,13 +1430,15 @@
 
     const lower = el("div", "passes-lower", page);
     const eng = el("div", "group passes-how ai-engine", lower);
-    el("h3", "", eng, "VOXAVERSA");
+    el("h3", "", eng, "SINGERS");
     const engText = el("p", "", eng);
     const how = el("div", "group passes-how", lower);
     el("h3", "", how, "HOW");
     el("p", "", how).innerHTML = "Each AI singer takes <b>minutes</b> to sing a song the first time (about as long as the song, "
       + "or less on a fast computer); it is kept, so rendering again after a mix change is quick. Change a singer or the notes, "
-      + "and only that part is sung again. Live playing uses your own voice; the AI singers are heard once rendered.";
+      + "and only that part is sung again. Live playing uses your own voice; the AI singers are heard once rendered. "
+      + "<b>SHARE PACK</b> makes a file of the singers you may give away (those trained on VocalSet) for a friend, "
+      + "who installs it with <b>INSTALL VOICES</b>: no VoxaVersa needed.";
 
     const rangeName = (lo, hi) => {
       const n = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -1453,7 +1458,7 @@
             const it = Menu.item(m, x.name, x.id === current, () => SC.send({ type: "cmd", name: "aiSinger", section, slot, id: x.id }));
             const r = document.createElement("span");
             r.className = "ai-range";
-            r.textContent = rangeName(x.low, x.high) + (x.classical ? " · classical" : "");
+            r.textContent = rangeName(x.low, x.high) + (x.classical ? " · classical" : "") + (x.shareable ? " · shareable" : "");
             it.appendChild(r);
           });
         });
@@ -1489,13 +1494,20 @@
           b.addEventListener("click", () => pick(b, i, slot, who ? who.id : "", singers));
         }
       });
-      if (!ai.searched) engText.innerHTML = "Looking for VoxaVersa…";
+      const busy = !!ai.job;
+      install.disabled = busy;
+      share.disabled = busy || !(ai.shareable > 0);
+      const esc = (t) => String(t || "").replace(/[<>&]/g, "");
+      if (busy) engText.innerHTML = "<b>" + esc(ai.job) + "</b> " + Math.round((ai.jobProgress || 0) * 100) + "%…";
+      else if (!ai.searched) engText.innerHTML = "Looking for singers…";
       else {
         const parts = [];
-        parts.push(ai.engine ? "<b>AI engine ready</b>" : "<b>No AI engine</b>: " + String(ai.engineText || "").replace(/[<>&]/g, ""));
-        parts.push(found ? "<b>" + found + "</b> singers found" : "no singers found");
-        if (!ai.encoder) parts.push("the content encoder (contentvec-768) is missing: use VoxaVersa's <b>Import Voices</b>");
-        engText.innerHTML = parts.join(" · ") + "<br><span class=\"ai-folder\">" + String(ai.folder || "").replace(/[<>&]/g, "") + "</span>";
+        parts.push(ai.engine ? "<b>AI engine ready</b>" : "<b>No AI engine</b>: " + esc(ai.engineText));
+        parts.push(found ? "<b>" + found + "</b> singers" + (ai.shareable ? " (" + ai.shareable + " you can share)" : "")
+                         : "no singers yet" + (ai.voxaversa ? "" : ": <b>INSTALL VOICES</b> from a pack a friend made"));
+        if (found && !ai.encoder) parts.push("the content encoder (contentvec-768) is missing: install a singers pack, or use VoxaVersa's <b>Import Voices</b>");
+        engText.innerHTML = parts.join(" · ") + "<br><span class=\"ai-folder\">"
+          + (ai.voxaversa ? "VoxaVersa: " + esc(ai.folder) + "<br>" : "") + "Sanctuary: " + esc(ai.sanctuaryFolder) + "</span>";
       }
     }
     info.onStatus = (st) => show((st && st.ai) || {});

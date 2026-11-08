@@ -866,8 +866,7 @@ void LearnSession::render()
             const auto singers = ai::findSingers();
             const auto cast = ai::completeCast (singers, aiPlan.cast, aiPlan.perSection, params.style, hs.ranges);
             if (singers.empty())
-                aiProblems->add ("no AI singers found in " + ai::getVoicesDirectory().getFullPathName()
-                                 + " (install VoxaVersa and import your voices)");
+                aiProblems->add ("no AI singers found (VoxaVersa's voices, or a singers pack installed on the AI SINGERS page)");
             else if (! aiRenderer.render (*take, rate, *analysis, d->score, cast, singers, params.a4, aiResult,
                                           [this] (float f, const String& who)
                                           {

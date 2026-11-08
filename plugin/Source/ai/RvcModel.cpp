@@ -172,6 +172,7 @@ juce::Array<juce::File> ModelConfig::getEncoderCandidates (int featureChannels) 
     if (packDirectory != juce::File())
         dirs.add (packDirectory);
     dirs.add (getEncodersDirectory());
+    dirs.add (getSanctuaryEncodersDirectory());
 
     juce::Array<juce::File> result;
     for (auto& dir : dirs)
@@ -234,7 +235,7 @@ bool NeuralVoiceModel::Impl::initialise (const ModelConfig& c, juce::String& err
             {
                 const auto id = config.encoderId.isNotEmpty() ? config.encoderId : candidates.getFirst().getFileNameWithoutExtension();
                 encoderError = "Content encoder '" + id + "' not found - put " + id + ".onnx into "
-                                 + getEncodersDirectory().getFullPathName() + " (VoxaVersa's Import Voices puts it there)";
+                                 + getSanctuaryEncodersDirectory().getFullPathName() + " (a singers pack or VoxaVersa's Import Voices brings it)";
             }
         }
 

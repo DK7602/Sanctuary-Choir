@@ -73,6 +73,7 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--platform", required=True, choices=["macos", "windows", "linux"])
     ap.add_argument("--webview2")
+    ap.add_argument("--onnxruntime", help="the ONNX Runtime release folder shipped with the plug-in (its LICENSE and notices)")
     args = ap.parse_args()
 
     bom = json.load(open(os.path.join(args.juce, "JUCE.spdx.json"), encoding="utf-8"))
@@ -135,12 +136,22 @@ def main():
                  "https://developer.microsoft.com/microsoft-edge/webview2"],
                 read(min(found, key=len)))
 
-    # The AI singers: ONNX Runtime's C API header (types and the function table) is compiled in; the
-    # runtime itself is loaded at run time from VoxaVersa's install and is not shipped.
-    section("ONNX Runtime C API header 1.20.1",
-            ["onnxruntime_c_api.h, compiled into the plug-in (the runtime is not shipped).",
-             "https://github.com/microsoft/onnxruntime", "Licence: MIT"],
-            read(os.path.join(REPO, "plugin", "Source", "ai", "third_party", "onnxruntime", "LICENSE")))
+    # The AI singers' engine: ONNX Runtime's C API header is compiled in, and the runtime library ships next
+    # to the plug-in (--onnxruntime: the release folder it came from, with its licence and notices).
+    if args.onnxruntime:
+        ort_version = read(os.path.join(args.onnxruntime, "VERSION_NUMBER")).strip() if os.path.exists(os.path.join(args.onnxruntime, "VERSION_NUMBER")) else ""
+        body = read(os.path.join(args.onnxruntime, "LICENSE"))
+        tpn = os.path.join(args.onnxruntime, "ThirdPartyNotices.txt")
+        if os.path.exists(tpn):
+            body += "\n\nONNX Runtime's own third-party notices:\n\n" + read(tpn)
+        section("ONNX Runtime " + ort_version,
+                ["The AI singers' engine: shipped with the plug-in, loaded when AI singers sing.",
+                 "https://github.com/microsoft/onnxruntime", "Licence: MIT"], body)
+    else:
+        section("ONNX Runtime C API header 1.20.1",
+                ["onnxruntime_c_api.h, compiled into the plug-in.",
+                 "https://github.com/microsoft/onnxruntime", "Licence: MIT"],
+                read(os.path.join(REPO, "plugin", "Source", "ai", "third_party", "onnxruntime", "LICENSE")))
 
     for font, file in FONTS:
         section("Font: " + font, ["Licence: OFL-1.1"],

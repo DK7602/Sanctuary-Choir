@@ -961,6 +961,99 @@ static void setEnv (const char* name, const String& value)
    #endif
 }
 
+static void aiSingersShareAndInstall()
+{
+    std::printf ("AI singers: a pack of the singers that may be shared, installed on a computer without VoxaVersa\n");
+    const auto root = File::getSpecialLocation (File::tempDirectory).getNonexistentChildFile ("SanctuaryAiShare", {}, false);
+    const auto voxa = root.getChildFile ("VoxaVersa");
+    const auto models = File (SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_MODELS_DIR", "/nonexistent"));
+    const bool realModels = models.getChildFile ("generator_40k.onnx").existsAsFile()
+                            && SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_ORT_LIB", {}).isNotEmpty();
+    struct Pack { const char* id; const char* gender; const char* licence; };
+    for (const Pack& p : { Pack { "vocalset-female1", "female", "VocalSet: A Singing Voice Dataset, J. Wilkins et al., ISMIR 2018, CC BY 4.0" },
+                           Pack { "studio-female-a", "female", "Trained from licence-free studio vocals in the owner's library" },
+                           Pack { "band-male-1", "male", "Public domain recordings: works of US military band members made as part of their duties" } })
+    {
+        const auto dir = voxa.getChildFile ("Voices").getChildFile (p.id);
+        dir.createDirectory();
+        if (realModels)
+            models.getChildFile ("generator_40k.onnx").copyFileTo (dir.getChildFile ("model_e100.onnx"));
+        else
+            dir.getChildFile ("model_e100.onnx").replaceWithText ("a model");
+        dir.getChildFile ("voice.json").replaceWithText (String ("{ \"id\": \"") + p.id + "\", \"name\": \"" + p.id + "\", \"gender\": \"" + p.gender
+            + "\", \"license\": \"" + p.licence + "\", \"model\": { \"file\": \"model_e100.onnx\", \"encoder\": \"contentvec-768\", \"sampleRate\": 40000 } }");
+    }
+    voxa.getChildFile ("Voices").getChildFile ("voice_assignment.json").replaceWithText (
+        "{ \"packs\": { \"vocalset-female1\": { \"name\": \"VocalSet Female 1\", \"range\": [60, 78], \"median\": 68 } } }");
+    voxa.getChildFile ("Encoders").createDirectory();
+    if (realModels)
+        models.getChildFile ("encoder_768.onnx").copyFileTo (voxa.getChildFile ("Encoders").getChildFile ("contentvec-768.onnx"));
+    else
+        voxa.getChildFile ("Encoders").getChildFile ("contentvec-768.onnx").replaceWithText ("an encoder");
+
+    // Your computer: VoxaVersa's singers.
+    setEnv ("SANCTUARY_VOXAVERSA_DIR", voxa.getFullPathName());
+    setEnv ("SANCTUARY_AI_DIR", root.getChildFile ("mine").getFullPathName());
+    const auto mine = sanctuary::ai::findSingers();
+    int shareable = 0;
+    for (const auto& s : mine)
+        shareable += s.shareable ? 1 : 0;
+    check (mine.size() == 3 && shareable == 1, "of the three singers only the VocalSet one may be shared");
+    const auto zipFile = root.getChildFile ("Sanctuary AI Singers.zip");
+    String error;
+    const int packed = sanctuary::ai::makeSharePack (mine, zipFile, {}, nullptr, error);
+    check (packed == 1, "the pack holds one singer");
+    {
+        ZipFile zip (zipFile);
+        bool studio = false, band = false;
+        for (int i = 0; i < zip.getNumEntries(); ++i)
+        {
+            const auto name = zip.getEntry (i)->filename;
+            studio = studio || name.contains ("studio");
+            band = band || name.contains ("band");
+        }
+        check (! studio && ! band, "and never a sample-pack or band singer");
+        check (zip.getEntry ("Voices/vocalset-female1/voice.json") != nullptr && zip.getEntry ("Encoders/contentvec-768.onnx") != nullptr
+               && zip.getEntry ("CREDITS.txt") != nullptr && zip.getEntry ("Voices/voice_assignment.json") != nullptr,
+               "with the content encoder, the singer's measured range and the credits");
+    }
+
+    // A friend's computer: no VoxaVersa.
+    setEnv ("SANCTUARY_VOXAVERSA_DIR", root.getChildFile ("no VoxaVersa here").getFullPathName());
+    setEnv ("SANCTUARY_AI_DIR", root.getChildFile ("friend").getFullPathName());
+    check (sanctuary::ai::findSingers().empty(), "a friend without VoxaVersa has no singers at first");
+    const auto installed = sanctuary::ai::installVoices (zipFile, error);
+    const auto theirs = sanctuary::ai::findSingers();
+    check (installed.size() == 1 && theirs.size() == 1 && theirs[0].name == "Lyric Soprano" && theirs[0].low == 60 && theirs[0].median == 68.0f,
+           "INSTALL VOICES puts the singer in Sanctuary's own folder, with their name and range");
+    check (sanctuary::ai::getSanctuaryEncodersDirectory().getChildFile ("contentvec-768.onnx").existsAsFile(), "and the content encoder");
+    if (realModels)
+    {
+        setEnv ("SANCTUARY_ONNXRUNTIME_PATH", SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_ORT_LIB", {}));
+        String loadError;
+        const auto model = sanctuary::ai::NeuralVoiceModel::load (theirs[0].folder, loadError);
+        check (model != nullptr, "and the singer loads from there, encoder and all");
+        if (model == nullptr)
+            std::printf ("  %s\n", loadError.toRawUTF8());
+    }
+
+    // A single VoxaVersa .vxpack installs too.
+    const auto vxpack = root.getChildFile ("one.vxpack");
+    {
+        ZipFile::Builder b;
+        b.addFile (voxa.getChildFile ("Voices").getChildFile ("band-male-1").getChildFile ("voice.json"), 0, "voice.json");
+        b.addFile (voxa.getChildFile ("Voices").getChildFile ("band-male-1").getChildFile ("model_e100.onnx"), 0, "model_e100.onnx");
+        FileOutputStream out (vxpack);
+        b.writeToStream (out, nullptr);
+    }
+    const auto one = sanctuary::ai::installVoices (vxpack, error);
+    check (one.size() == 1 && sanctuary::ai::findSingers().size() == 2, "a VoxaVersa .vxpack installs as one more singer");
+
+    setEnv ("SANCTUARY_VOXAVERSA_DIR", {});
+    setEnv ("SANCTUARY_AI_DIR", {});
+    root.deleteRecursively();
+}
+
 static void aiSingersSingTheParts()
 {
     std::printf ("AI singers: VoxaVersa's singers sing each section's part with the take's words\n");
@@ -992,6 +1085,7 @@ static void aiSingersSingTheParts()
     setEnv ("SANCTUARY_VOXAVERSA_DIR", root.getChildFile ("VoxaVersa").getFullPathName());
     setEnv ("SANCTUARY_ONNXRUNTIME_PATH", ortLib);
     setEnv ("SANCTUARY_AI_CACHE_DIR", cacheDir.getFullPathName());
+    setEnv ("SANCTUARY_AI_DIR", root.getChildFile ("Sanctuary").getFullPathName());   // nothing installed into Sanctuary
 
     const auto singers = sanctuary::ai::findSingers();
     check (singers.size() == 4, "the four singers are found");
@@ -1067,6 +1161,7 @@ static void aiSingersSingTheParts()
 
     setEnv ("SANCTUARY_VOXAVERSA_DIR", {});
     setEnv ("SANCTUARY_AI_CACHE_DIR", {});
+    setEnv ("SANCTUARY_AI_DIR", {});
     root.deleteRecursively();
 }
 
@@ -1107,6 +1202,7 @@ int main (int argc, char** argv)
     chordLaneAndDragOut();
     passesMakeAMultiTakeChoir();
     aiSingersSingTheParts();
+    aiSingersShareAndInstall();
     std::printf ("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

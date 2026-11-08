@@ -2,7 +2,8 @@ Sanctuary Choir for Linux (x86_64)
 ==================================
 
 Copy "Sanctuary Choir.vst3" to ~/.vst3/
-"Sanctuary Choir" is a standalone version.
+"Sanctuary Choir" is a standalone version (keep libonnxruntime.so, the AI singers' engine, next to it;
+the .vst3 folder carries its own copy).
 
 Recorded choir voices: copy the "SanctuaryVoices" folder to
   ~/.local/share/Sanctuary Choir/Voices/SanctuaryVoices

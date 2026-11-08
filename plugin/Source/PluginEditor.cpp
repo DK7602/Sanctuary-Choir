@@ -272,6 +272,8 @@ void SanctuaryEditor::timerCallback()
         return;
     sendParams (processor.takeChangedParameters());
     sendMeters();
+    if (const auto aiNews = processor.pollAiJob(); aiNews.isNotEmpty())
+        toast (aiNews, 9000);
     const int v = processor.statusVersion.load();
     const bool latencyChanged = std::abs (processor.getSampleRate() - sentRate) > 0.5 || processor.getAlignedLatency() != sentLatency;
     if (v != lastStatusVersion || latencyChanged)
@@ -524,7 +526,43 @@ void SanctuaryEditor::handleCommand (const String& name, const var& message)
     else if (name == "aiRefresh")
         processor.refreshAiSingers();
     else if (name == "aiFolder")
-        sanctuary::ai::getVoicesDirectory().revealToUser();
+    {
+        const auto voxa = sanctuary::ai::getVoicesDirectory();
+        const auto own = sanctuary::ai::getSanctuaryVoicesDirectory();
+        own.createDirectory();
+        (voxa.isDirectory() ? voxa : own).revealToUser();
+    }
+    else if (name == "aiSharePack")
+    {
+        const auto dir = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Sanctuary Choir");
+        dir.createDirectory();
+        chooser = std::make_unique<FileChooser> ("Save the singers you can share", dir.getChildFile ("Sanctuary AI Singers.zip"), "*.zip");
+        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+                              [this] (const FileChooser& fc)
+                              {
+                                  auto file = fc.getResult();
+                                  if (file == File())
+                                      return;
+                                  if (! file.hasFileExtension ("zip"))
+                                      file = file.withFileExtension ("zip");
+                                  processor.makeAiSharePack (file);
+                                  toast ("Making the pack in the background: this can take a few minutes");
+                              });
+    }
+    else if (name == "aiInstall")
+    {
+        chooser = std::make_unique<FileChooser> ("Install AI singers (a Sanctuary singers pack or a VoxaVersa .vxpack)",
+                                                 File::getSpecialLocation (File::userDocumentsDirectory), "*.zip;*.vxpack");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::canSelectDirectories,
+                              [this] (const FileChooser& fc)
+                              {
+                                  const auto file = fc.getResult();
+                                  if (file.exists())
+                                      processor.installAiVoices (file);
+                              });
+    }
+    else if (name == "aiCancelJob")
+        processor.cancelAiJob();
     else if (name == "presetLoad")
         presets.load ((int) message.getProperty ("index", 0));
     else if (name == "presetNext")

@@ -3,8 +3,9 @@
 // Sanctuary Choir - AI singers: the singers trained for VoxaVersa (RVC voice models), run through ONNX Runtime
 // to sing a section's part with the lead's words. Ported from VoxaVersa's engine (Source/neural/), offline only.
 //
-// Nothing is bundled: the runtime, the content encoder and the voice packs are the ones VoxaVersa installed
-// (its plug-in folder, and %APPDATA%\VoxaVersa or ~/Library/Application Support/VoxaVersa).
+// Sanctuary's installer brings the AI engine (ONNX Runtime). The singers and the content encoder are VoxaVersa's
+// (%APPDATA%\VoxaVersa, ~/Library/Application Support/VoxaVersa) and those installed into Sanctuary's own AI
+// Singers folder (from a pack a VoxaVersa user made of the singers that may be shared).
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -21,6 +22,14 @@ juce::File getVoxaVersaDataDirectory();
 inline juce::File getVoicesDirectory()   { return getVoxaVersaDataDirectory().getChildFile ("Voices"); }
 inline juce::File getEncodersDirectory() { return getVoxaVersaDataDirectory().getChildFile ("Encoders"); }
 
+/** Sanctuary's own AI singers folder (Voices, Encoders, Cache): singers installed into Sanctuary, for a
+    computer without VoxaVersa. SANCTUARY_AI_DIR overrides it. */
+juce::File getSanctuaryAiDirectory();
+inline juce::File getSanctuaryVoicesDirectory()   { return getSanctuaryAiDirectory().getChildFile ("Voices"); }
+inline juce::File getSanctuaryEncodersDirectory() { return getSanctuaryAiDirectory().getChildFile ("Encoders"); }
+/** Where Sanctuary's installer puts the AI engine (ONNX Runtime) shared by the plug-ins and the app. */
+juce::File getSanctuaryRuntimeDirectory();
+
 /** Dynamically loads the ONNX Runtime shared library at run time (no link-time dependency).
     If the library cannot be found, AI singers are unavailable and the choir sings as before. */
 class OnnxRuntime
@@ -34,8 +43,8 @@ public:
     juce::String getStatusMessage() const;
     juce::File getLoadedLibraryFile() const;
 
-    /** Locations searched, in order: next to Sanctuary's binary, VoxaVersa's Runtime folder, VoxaVersa's
-        plug-ins and app, then the system's paths. */
+    /** Locations searched, in order: next to Sanctuary's binary, Sanctuary's Runtime folder (the installer
+        puts the engine there), VoxaVersa's Runtime folder, VoxaVersa's plug-ins and app, then the system's. */
     static juce::Array<juce::File> getSearchLocations();
 
     struct Impl;

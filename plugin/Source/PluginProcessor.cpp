@@ -62,6 +62,11 @@ SanctuaryProcessor::SanctuaryProcessor()
 
 SanctuaryProcessor::~SanctuaryProcessor()
 {
+    if (aiJob != nullptr)
+    {
+        aiJobCancel = true;
+        aiJob->join();
+    }
     stopTimer();
     for (const auto& id : paramIds)
         state.removeParameterListener (id, this);
@@ -842,9 +847,84 @@ void SanctuaryProcessor::refreshAiSingers()
     ++statusVersion;
 }
 
+void SanctuaryProcessor::startAiJob (const String& what, std::function<String (const std::function<void (float)>&, const std::atomic<bool>*)> job)
+{
+    if (aiJob != nullptr)
+        return;   // one at a time
+    aiJobWhat = what;
+    aiJobResult.clear();
+    aiJobProgress = 0.0f;
+    aiJobCancel = false;
+    aiJobDone = false;
+    aiJobShownPercent = -1;
+    aiJob = std::make_unique<std::thread> ([this, job]
+    {
+        aiJobResult = job ([this] (float p) { aiJobProgress = p; }, &aiJobCancel);
+        aiJobDone = true;
+    });
+    ++statusVersion;
+}
+
+String SanctuaryProcessor::pollAiJob()
+{
+    if (aiJob == nullptr)
+        return {};
+    if (! aiJobDone.load())
+    {
+        // The progress on the page, a step at a time.
+        const int percent = roundToInt (aiJobProgress.load() * 100.0f);
+        if (percent != aiJobShownPercent)
+        {
+            aiJobShownPercent = percent;
+            ++statusVersion;
+        }
+        return {};
+    }
+    aiJob->join();
+    aiJob.reset();
+    aiJobWhat.clear();
+    refreshAiSingers();
+    return aiJobResult;
+}
+
+void SanctuaryProcessor::makeAiSharePack (const File& zipFile)
+{
+    if (! aiSearched)
+        refreshAiSingers();
+    const auto singers = aiSingers;
+    startAiJob ("MAKING THE PACK", [singers, zipFile] (const std::function<void (float)>& progress, const std::atomic<bool>* cancel)
+    {
+        String error;
+        const int n = sanctuary::ai::makeSharePack (singers, zipFile, progress, cancel, error);
+        if (n == 0)
+            return "No pack made: " + error;
+        zipFile.revealToUser();
+        return "Made " + zipFile.getFileName() + ": " + String (n) + (n == 1 ? " singer" : " singers")
+               + " a friend can install (Settings > AI SINGERS > INSTALL VOICES)";
+    });
+}
+
+void SanctuaryProcessor::installAiVoices (const File& source)
+{
+    startAiJob ("INSTALLING VOICES", [source] (const std::function<void (float)>& progress, const std::atomic<bool>*)
+    {
+        progress (0.5f);
+        String error;
+        const auto ids = sanctuary::ai::installVoices (source, error);
+        if (ids.isEmpty())
+            return "No singers installed: " + error;
+        return "Installed " + String (ids.size()) + (ids.size() == 1 ? " singer" : " singers") + " into Sanctuary";
+    });
+}
+
 var SanctuaryProcessor::getAiStatus()
 {
     auto o = std::make_unique<DynamicObject>();
+    if (aiJob != nullptr)
+    {
+        o->setProperty ("job", aiJobWhat);
+        o->setProperty ("jobProgress", aiJobProgress.load());
+    }
     o->setProperty ("enabled", aiEnabled);
     o->setProperty ("perSection", aiPerSection);
     o->setProperty ("maxPerSection", sanctuary::ai::kMaxPerSection);
@@ -853,6 +933,9 @@ var SanctuaryProcessor::getAiStatus()
     o->setProperty ("folder", sanctuary::ai::getVoicesDirectory().getFullPathName());
     if (aiSearched)
     {
+        o->setProperty ("voxaversa", aiAvailability.getProperty ("voxaversa", false));
+        o->setProperty ("sanctuaryFolder", aiAvailability.getProperty ("sanctuaryFolder", ""));
+        o->setProperty ("shareable", aiAvailability.getProperty ("shareable", 0));
         o->setProperty ("engine", aiAvailability.getProperty ("engine", false));
         o->setProperty ("engineText", aiAvailability.getProperty ("engineText", ""));
         o->setProperty ("encoder", aiAvailability.getProperty ("encoder", false));

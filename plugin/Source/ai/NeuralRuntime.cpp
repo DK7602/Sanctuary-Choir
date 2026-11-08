@@ -69,9 +69,9 @@ namespace
 
     juce::String getInstallHint()
     {
-        return "install VoxaVersa (its AI engine comes with it), or copy ONNX Runtime "
+        return "reinstall Sanctuary Choir (its installer brings the AI engine), or copy ONNX Runtime "
                  + juce::String (minimumOrtVersionString) + " or newer (" + platform::getRuntimeLibraryNames()[0] + ") into "
-                 + getVoxaVersaDataDirectory().getChildFile ("Runtime").getFullPathName();
+                 + getSanctuaryRuntimeDirectory().getFullPathName();
     }
 } // namespace
 
@@ -987,6 +987,9 @@ juce::Array<juce::File> OnnxRuntime::getSearchLocations()
         dirs.add (contents.getChildFile ("Resources"));
     }
    #endif
+
+    // Sanctuary's own copy, where its installer puts it.
+    dirs.add (getSanctuaryRuntimeDirectory());
 
     const auto userRuntime = getVoxaVersaDataDirectory().getChildFile ("Runtime");
     dirs.add (userRuntime);

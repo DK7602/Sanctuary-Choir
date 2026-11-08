@@ -233,14 +233,16 @@
       ["studio-male-a", "Studio Male A", false, 45, 68, false], ["band-male-1", "Band Male 1", false, 45, 66, false],
       ["band-male-2", "Band Male 2", false, 45, 65, false], ["vocalset-male3", "Lyric Tenor", false, 47, 70, true],
       ["vocalset-male8", "Basso Profundo", false, 41, 66, true]
-    ].map(([id, name, female, low, high, classical]) => ({ id, name, female, low, high, classical }));
+    ].map(([id, name, female, low, high, classical]) => ({ id, name, female, low, high, classical, shareable: classical }));
     const ai = { enabled: false, perSection: 2, chosen: [[], [], [], []] };
     const aiAuto = [["studio-female-a", "band-female-3", "band-female-1"], ["studio-female-blend", "studio-female-b", "band-female-2"],
                     ["studio-male-a", "band-male-1", "band-male-2"], ["vocalset-male8", "band-male-2", "vocalset-male3"]];
     function aiStatus() {
       const byId = (id) => aiSingers.find((x) => x.id === id);
       return { enabled: ai.enabled, perSection: ai.perSection, maxPerSection: 3, searched: true, words: Math.round(values.vocalType) === 6,
-               engine: true, engineText: "AI engine ready", encoder: true, singers: aiSingers,
+               engine: true, engineText: "AI engine ready", encoder: true, singers: aiSingers, voxaversa: true, shareable: 4,
+               job: ai.job, jobProgress: ai.jobProgress,
+               sanctuaryFolder: "C:\\Users\\you\\AppData\\Roaming\\Sanctuary Choir\\AI Singers\\Voices",
                folder: "C:\\Users\\you\\AppData\\Roaming\\VoxaVersa\\Voices",
                cast: ai.chosen.map((c, i) => ({ chosen: c.length > 0,
                    singers: (c.length ? c : aiAuto[i]).slice(0, ai.perSection).map((id) => ({ id, name: byId(id).name })) })) };
@@ -408,7 +410,16 @@
           case "aiPerSection": ai.perSection = msg.count; ai.chosen = ai.chosen.map((c) => c.slice(0, msg.count)); status(); break;
           case "aiAuto": ai.chosen = [[], [], [], []]; status(); break;
           case "aiRefresh": status(); break;
-          case "aiFolder": emit("toast", { text: "In the plugin this opens VoxaVersa's Voices folder" }); break;
+          case "aiFolder": emit("toast", { text: "In the plugin this opens the singers' folder" }); break;
+          case "aiSharePack": case "aiInstall": {
+            ai.job = msg.name === "aiSharePack" ? "MAKING THE PACK" : "INSTALLING VOICES"; ai.jobProgress = 0; status();
+            const t = setInterval(() => {
+              ai.jobProgress += 0.2; status();
+              if (ai.jobProgress >= 1) { clearInterval(t); ai.job = ""; status();
+                emit("toast", { text: msg.name === "aiSharePack" ? "Made Sanctuary AI Singers.zip: 4 singers a friend can install" : "Installed 4 singers into Sanctuary" }); }
+            }, 300);
+            break;
+          }
           case "aiSinger": {
             const c = ai.chosen[msg.section].length ? ai.chosen[msg.section] : aiAuto[msg.section].slice(0, ai.perSection);
             if (msg.id) c[msg.slot] = msg.id; else c.splice(msg.slot, 1);

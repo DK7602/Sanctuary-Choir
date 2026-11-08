@@ -232,7 +232,9 @@ ${go("passes", "Show me Multi-Take")}`,
 <li>Press ${ui("RENDER")}. Each AI singer sings their section's notes, in the octave that suits them, wherever you sang, with your words and timing. The section's singers then sing from those voices, each with their own timing and tuning, on the stage and in the room.</li>
 </ol>
 <p>The first render takes minutes: about as long as the song for each AI singer, or less on a fast computer. Every voice is kept, so rendering again after a mix change is quick; change a singer or the notes, and only that part is sung again. Live playing uses your own voice: the AI singers are heard once rendered.</p>
-${tip("Nothing to set up if VoxaVersa is installed and your voices imported: Sanctuary uses its AI engine and singers where they are. If the page says the content encoder is missing, use VoxaVersa's Import Voices.")}
+<h4>Share singers with a friend</h4>
+<p>Sanctuary comes with the AI engine, so a friend without VoxaVersa only needs the singers. ${ui("SHARE PACK…")} makes one file of the singers you may give away: those trained on VocalSet's recordings (CC BY 4.0), with the content encoder and the credits. Singers trained on sample packs, or on recordings whose singers never agreed, are never put in. Your friend presses ${ui("INSTALL VOICES…")} and chooses the file; a VoxaVersa ${ui(".vxpack")} installs the same way.</p>
+${tip("With VoxaVersa installed and your voices imported, there is nothing to set up: Sanctuary finds your singers where they are. If the page says the content encoder is missing, install a singers pack or use VoxaVersa's Import Voices.")}
 ${go("ai", "Show me AI Singers")}`,
     },
     {

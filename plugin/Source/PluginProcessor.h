@@ -9,6 +9,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <thread>
+
 namespace sanctuary
 {
 class SanctuaryProcessor : public juce::AudioProcessor,
@@ -106,6 +108,13 @@ public:
     void refreshAiSingers();
     /** { enabled, perSection, auto, cast: [[{id, name}...] x4], singers: [...], engine, engineText, ... } */
     juce::var getAiStatus();
+    /** Writes a pack of the singers that may be shared, for a friend without VoxaVersa (in the background). */
+    void makeAiSharePack (const juce::File& zipFile);
+    /** Installs singers from a pack, a VoxaVersa .vxpack or a folder into Sanctuary (in the background). */
+    void installAiVoices (const juce::File& source);
+    /** Message thread, often: finishes a pack or install that is done. Returns what to tell the user, if anything. */
+    juce::String pollAiJob();
+    void cancelAiJob() { aiJobCancel = true; }
 
 private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
@@ -144,6 +153,13 @@ private:
     juce::var aiAvailability;
     bool aiSearched = false;
     void aiSettingsChanged();
+    // A pack or install running in the background.
+    void startAiJob (const juce::String& what, std::function<juce::String (const std::function<void (float)>&, const std::atomic<bool>*)> job);
+    std::unique_ptr<std::thread> aiJob;
+    std::atomic<bool> aiJobCancel { false }, aiJobDone { false };
+    std::atomic<float> aiJobProgress { 0.0f };
+    juce::String aiJobWhat, aiJobResult;
+    int aiJobShownPercent = -1;
 
     juce::String lyricsText;
     sc::Lyrics lyricsParsed;
