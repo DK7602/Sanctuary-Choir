@@ -86,8 +86,9 @@ struct Plan
 };
 
 /** Sings the cast's parts for a take: each voice from the cache on disk if it was sung before (same take,
-    same notes, same singer), else through the singer's model (minutes for a song: the content of the take
-    is heard once per singer). Thread-safe; one render at a time. */
+    same notes, same singer), else through the singer's model where its part is sung (minutes for a song:
+    the content of the take is heard once per singer; two sing at once on a CPU with six cores or more).
+    Thread-safe; one render at a time. */
 class Renderer
 {
 public:
@@ -109,8 +110,12 @@ public:
     /** Deletes the oldest cached voices beyond `maxBytes`. */
     static void trimCache (int64_t maxBytes = (int64_t) 3 << 30);
 
+    /** How many singers sing at once: 0 (the default) is two on a CPU with six cores or more, else one. */
+    void setSingersAtOnce (int n) noexcept { singersAtOnce = n; }
+
 private:
     std::mutex lock;
+    int singersAtOnce = 0;
 };
 
 /** Status for the UI: the engine, the singers found and where VoxaVersa keeps them. */

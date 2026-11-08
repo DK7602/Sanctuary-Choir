@@ -1024,6 +1024,100 @@ static void setEnv (const char* name, const String& value)
    #endif
 }
 
+static void aiSingersSkipTheSilences()
+{
+    std::printf ("AI singers sing only where the part is sung, and the same as when the whole take is sung\n");
+    const auto ortLib = SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_ORT_LIB", {});
+    const auto modelsDir = File (SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_MODELS_DIR", "/nonexistent"));
+    if (ortLib.isEmpty() || ! modelsDir.getChildFile ("generator_40k.onnx").existsAsFile())
+    {
+        std::printf ("  skipped: set SANCTUARY_TEST_ORT_LIB and SANCTUARY_TEST_MODELS_DIR\n");
+        return;
+    }
+    const auto root = File::getSpecialLocation (File::tempDirectory).getNonexistentChildFile ("SanctuaryAiGaps", {}, false);
+    const auto pack = root.getChildFile ("VoxaVersa").getChildFile ("Voices").getChildFile ("band-male-1");
+    pack.createDirectory();
+    root.getChildFile ("VoxaVersa").getChildFile ("Encoders").createDirectory();
+    modelsDir.getChildFile ("encoder_768.onnx").copyFileTo (root.getChildFile ("VoxaVersa").getChildFile ("Encoders").getChildFile ("contentvec-768.onnx"));
+    modelsDir.getChildFile ("generator_40k.onnx").copyFileTo (pack.getChildFile ("model_e100.onnx"));
+    pack.getChildFile ("voice.json").replaceWithText ("{ \"id\": \"band-male-1\", \"name\": \"band-male-1\", \"gender\": \"male\", \"range\": [45, 66], "
+                                                      "\"model\": { \"file\": \"model_e100.onnx\", \"encoder\": \"contentvec-768\", \"sampleRate\": 40000 } }");
+    setEnv ("SANCTUARY_VOXAVERSA_DIR", root.getChildFile ("VoxaVersa").getFullPathName());
+    setEnv ("SANCTUARY_ONNXRUNTIME_PATH", ortLib);
+    setEnv ("SANCTUARY_AI_CACHE_DIR", root.getChildFile ("cache").getFullPathName());
+    setEnv ("SANCTUARY_AI_DIR", root.getChildFile ("Sanctuary").getFullPathName());
+
+    // Two lines with 3.5 s of silence between them; the second starts on an odd 10 ms frame.
+    const double rate = 48000.0;
+    auto take = melody (rate, 0.0f, 1);
+    const size_t gapStart = take.size();
+    take.resize (take.size() + (size_t) (3.5 * rate) + 480, 0.0f);
+    const size_t gapEnd = take.size();
+    const auto second = melody (rate, 2.0f, 1);
+    take.insert (take.end(), second.begin(), second.end());
+    const auto analysis = sc::analyseTake (take.data(), (int64_t) take.size(), rate);
+    sc::HarmonySettings hs;
+    hs.wordsMode = true;
+    hs.style = sc::Style::Gospel;
+    const auto score = sc::harmoniseTake (analysis, hs);
+    const auto singers = sanctuary::ai::findSingers();
+    check (singers.size() == 1, "the singer is found");
+    if (singers.size() != 1)
+        return;
+    // Four parts, sung two at a time.
+    sanctuary::ai::Cast cast;
+    for (int s = 0; s < sc::NumSections; ++s)
+        cast[(size_t) s].add ("band-male-1");
+    sanctuary::ai::Renderer renderer;
+    renderer.setSingersAtOnce (2);
+    sanctuary::ai::Renderer::Result result;
+    check (renderer.render (take, rate, analysis, score, cast, singers, 440.0f, result, {}, nullptr) && result.sung == 4,
+           "four parts sung, two at a time");
+
+    String error;
+    const auto model = sanctuary::ai::NeuralVoiceModel::load (singers[0].folder, error);
+    for (int s = 0; s < sc::NumSections && model != nullptr; ++s)
+    {
+        if (result.voices[(size_t) s].empty())
+            continue;
+        const auto& v = result.voices[(size_t) s][0];
+        // The same part sung over the whole take in one go.
+        const auto f0 = sanctuary::ai::partPitch (score, analysis, (int64_t) take.size(), rate, s, 0, singers[0]);
+        AudioBuffer<float> input (1, (int) take.size()), whole;
+        input.copyFrom (0, 0, take.data(), (int) take.size());
+        check (model->convert (input, rate, f0, 100.0, whole, nullptr, error), "the whole take sung in one go");
+
+        const int hop = (int) (0.04 * rate);
+        double worst = 0.0;
+        int compared = 0;
+        for (size_t i = 0; i + (size_t) hop <= take.size(); i += (size_t) hop)
+        {
+            double a = 0.0, b = 0.0;
+            for (int k = 0; k < hop; ++k)
+            {
+                a += std::pow ((double) (*v.pcm)[i + (size_t) k] * v.scale, 2.0);
+                b += std::pow ((double) whole.getSample (0, (int) i + k), 2.0);
+            }
+            if (b / hop < 1.0e-5)
+                continue;   // only where it sings
+            worst = std::max (worst, std::abs (10.0 * std::log10 ((a + 1.0e-12) / (b + 1.0e-12))));
+            ++compared;
+        }
+        float inGap = 0.0f;
+        for (size_t i = gapStart + (size_t) rate; i < gapEnd - (size_t) rate; ++i)
+            inGap = std::max (inGap, std::abs ((float) (*v.pcm)[i] * v.scale));
+        std::printf ("  section %d: %d stretches of 40 ms compared, at most %.2f dB apart; the silence peaks at %g\n",
+                     s, compared, worst, (double) inGap);
+        check (compared > 50 && worst < 0.5, "where it sings, it sings as the whole take does");
+        check (inGap == 0.0f, "and the silence between the lines is silent");
+    }
+
+    setEnv ("SANCTUARY_VOXAVERSA_DIR", {});
+    setEnv ("SANCTUARY_AI_CACHE_DIR", {});
+    setEnv ("SANCTUARY_AI_DIR", {});
+    root.deleteRecursively();
+}
+
 static void aiSingersShareAndInstall()
 {
     std::printf ("AI singers: a pack of the singers that may be shared, installed on a computer without VoxaVersa\n");
@@ -1266,6 +1360,7 @@ int main (int argc, char** argv)
     chordLaneAndDragOut();
     passesMakeAMultiTakeChoir();
     aiSingersSingTheParts();
+    aiSingersSkipTheSilences();
     aiSingersShareAndInstall();
     std::printf ("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

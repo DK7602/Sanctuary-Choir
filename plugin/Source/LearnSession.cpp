@@ -1470,6 +1470,7 @@ void LearnSession::finishExport()
 //==============================================================================
 void LearnSession::timerCallback()
 {
+
     // Keep capture memory allocated ahead of the audio thread.
     if (phase.load() == Phase::Recording)
     {
@@ -1600,7 +1601,7 @@ String LearnSession::describe() const
                 activity = aiActivity;
             }
             return "RENDERING " + String (roundToInt (progress.load() * 100.0f)) + "%"
-                   + (activity.isNotEmpty() ? "  -  AI SINGER: " + activity.toUpperCase() : String());
+                   + (activity.isNotEmpty() ? (activity.contains (" + ") ? "  -  AI SINGERS: " : "  -  AI SINGER: ") + activity.toUpperCase() : String());
         }
         case Phase::Failed:
             return lastError;

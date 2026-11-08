@@ -548,6 +548,80 @@ void Renderer::trimCache (int64_t maxBytes)
     }
 }
 
+/** Sings a part where it is sung: each stretch of it with half a second either side (breaths and
+    consonants by the notes stay in), and nothing in the silences of more than about 1.5 s between
+    them, where the choir does not sing anyway. A part sung nearly throughout is sung in one go. */
+static bool singParts (const NeuralVoiceModel& model, const std::vector<float>& take, double sampleRate,
+                       const std::vector<float>& f0, std::vector<float>& out, const std::atomic<bool>* cancel,
+                       juce::String& error, const std::function<void (float)>& progress)
+{
+    constexpr double fps = 100.0;
+    constexpr int margin = 50, bridge = 50;   // frames: 0.5 s either side; gaps under 0.5 s more are sung through
+    const int numFrames = (int) f0.size();
+    std::vector<std::pair<int, int>> stretches;
+    int first = -1, last = -1, sungFrames = 0;
+    for (int f = 0; f < numFrames; ++f)
+    {
+        if (f0[(size_t) f] <= 0.0f)
+            continue;
+        if (first < 0)
+            first = f;
+        else if (f - last > 2 * margin + bridge)
+        {
+            stretches.push_back ({ first, last + 1 });
+            first = f;
+        }
+        last = f;
+    }
+    if (first >= 0)
+        stretches.push_back ({ first, last + 1 });
+    for (auto& [a, b] : stretches)
+    {
+        a = std::max (0, a - margin) & ~1;   // on the content encoder's 20 ms grid, as when the whole take is sung
+        b = std::min (numFrames, b + margin);
+        sungFrames += b - a;
+    }
+    if (sungFrames > numFrames * 9 / 10)
+    {
+        stretches.assign (1, { 0, numFrames });
+        sungFrames = numFrames;
+    }
+
+    out.assign (take.size(), 0.0f);
+    const int fade = std::max (1, (int) std::lround (0.01 * sampleRate));
+    double done = 0.0;
+    for (const auto& [fa, fb] : stretches)
+    {
+        const auto a = (int64_t) std::llround (fa * sampleRate / fps);
+        const auto b = std::min ((int64_t) take.size(), (int64_t) std::llround (fb * sampleRate / fps));
+        if (b <= a)
+            continue;
+        juce::AudioBuffer<float> input (1, (int) (b - a));
+        input.copyFrom (0, 0, take.data() + a, (int) (b - a));
+        const std::vector<float> part (f0.begin() + fa, f0.begin() + fb);
+        juce::AudioBuffer<float> sung;
+        const double share = (double) (fb - fa) / (double) std::max (1, sungFrames);
+        if (! model.convert (input, sampleRate, part, fps, sung, cancel, error,
+                             [&] (float p) { if (progress) progress ((float) (done + share * p)); }))
+            return false;
+        // A stretch that starts or ends inside the take fades in and out over 10 ms (it is quiet there).
+        const auto len = std::min<int64_t> (sung.getNumSamples(), b - a);
+        const float* src = sung.getReadPointer (0);
+        for (int64_t i = 0; i < len; ++i)
+        {
+            float g = 1.0f;
+            if (a > 0 && i < fade)
+                g = (float) i / (float) fade;
+            if (b < (int64_t) take.size() && i >= len - fade)
+                g = std::min (g, (float) (len - 1 - i) / (float) fade);
+            out[(size_t) (a + i)] = src[i] * g;
+        }
+        done += share;
+    }
+    if (progress) progress (1.0f);
+    return true;
+}
+
 bool Renderer::render (const std::vector<float>& take, double sampleRate, const sc::TakeAnalysis& analysis,
                        const sc::LearnedScore& score, const Cast& cast, const std::vector<Singer>& singers, float a4,
                        Result& result, const std::function<void (float, const juce::String&)>& progress,
@@ -640,74 +714,112 @@ bool Renderer::render (const std::vector<float>& take, double sampleRate, const 
         }
     }
 
-    std::shared_ptr<NeuralVoiceModel> previous;   // kept until the next loads: they share the content encoder
-    juce::AudioBuffer<float> input (1, (int) take.size());
-    input.copyFrom (0, 0, take.data(), (int) take.size());
-    for (size_t n = 0; n < toSing.size(); ++n)
+    // The rest are sung two at a time on a CPU with cores to spare (one model doesn't keep six or more
+    // busy); that takes twice the memory while it lasts, so not on smaller ones.
+    const int atOnce = singersAtOnce > 0 ? singersAtOnce : (juce::SystemStats::getNumPhysicalCpus() >= 6 ? 2 : 1);
+    const int workers = (int) std::min<size_t> (toSing.size(), (size_t) atOnce);
+    std::mutex shared;   // result, placed and the progress below
+    std::vector<float> jobProgress (toSing.size(), 0.0f);
+    std::vector<juce::String> singing (toSing.size());
+    std::atomic<size_t> next { 0 };
+    auto report = [&] (size_t n, float f, bool done)
     {
-        if (cancelled())
-            return false;
-        const auto& job = jobs[toSing[n]];
-        const juce::String what = job.singer->name + " (" + sectionNames[job.section] + ")";
-        const float base = (float) n / (float) toSing.size();
-        const float span = 1.0f / (float) toSing.size();
-        if (progress) progress (base, what);
-
-        juce::String error;
-        auto model = NeuralVoiceModel::load (job.singer->folder, error, cancel);
-        if (model == nullptr)
+        const std::lock_guard<std::mutex> g (shared);
+        jobProgress[n] = juce::jlimit (0.0f, 1.0f, f);
+        if (done)
+            singing[n].clear();
+        float total = 0.0f;
+        juce::StringArray who;
+        for (size_t k = 0; k < toSing.size(); ++k)
         {
-            if (cancelled())
-                return false;
-            result.problems.add (job.singer->name + ": " + error);
-            continue;
+            total += jobProgress[k];
+            if (singing[k].isNotEmpty())
+                who.add (singing[k]);
         }
-        juce::AudioBuffer<float> sung;
-        const bool ok = model->convert (input, sampleRate, job.f0, 100.0, sung, cancel, error,
-                                        [&] (float f) { if (progress) progress (base + span * juce::jlimit (0.0f, 1.0f, f), what); });
-        previous = model;
-        if (! ok)
-        {
-            if (cancelled())
-                return false;
-            result.problems.add (job.singer->name + ": " + error);
-            continue;
-        }
+        if (progress) progress (total / (float) toSing.size(), who.joinIntoString (" + "));
+    };
 
-        Voice v;
-        v.singerName = job.singer->name;
-        auto pcm = std::make_shared<std::vector<int16_t>> (take.size(), (int16_t) 0);
-        const float* src = sung.getReadPointer (0);
-        const int len = std::min (sung.getNumSamples(), (int) take.size());
-        float peak = 1.0e-6f;
-        for (int i = 0; i < len; ++i)
-            peak = std::max (peak, std::abs (src[i]));
-        const float toInt = peak > 1.0f ? 32767.0f / peak : 32767.0f;   // never clips; the scale undoes it
-        for (int i = 0; i < len; ++i)
-            (*pcm)[(size_t) i] = (int16_t) std::round (src[i] * toInt);
-        v.pcm = pcm;
-        v.scale = 1.0f / toInt;
-        placed[(size_t) job.section].push_back ({ job.slot, v });
-        ++result.sung;
-
-        // Kept for the next render (the file holds the voice at its true level).
-        getCacheDirectory().createDirectory();
-        juce::AudioBuffer<float> out (1, (int) pcm->size());
-        for (size_t i = 0; i < pcm->size(); ++i)
-            out.setSample (0, (int) i, (float) (*pcm)[i] * v.scale);
-        const auto tmp = job.file.getSiblingFile (job.file.getFileNameWithoutExtension() + ".part");
-        if (std::unique_ptr<juce::OutputStream> stream = tmp.createOutputStream())
+    auto sing = [&]
+    {
+        std::shared_ptr<NeuralVoiceModel> previous;   // kept until the next loads: they share the content encoder
+        for (;;)
         {
-            auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (sampleRate)
-                                                           .withNumChannels (1).withBitsPerSample (24));
-            if (writer != nullptr && writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples()))
+            const size_t n = next.fetch_add (1);
+            if (n >= toSing.size() || cancelled())
+                return;
+            const auto& job = jobs[toSing[n]];
             {
-                writer.reset();
-                tmp.moveFileTo (job.file);
+                const std::lock_guard<std::mutex> g (shared);
+                singing[n] = job.singer->name + " (" + sectionNames[job.section] + ")";
             }
+            report (n, 0.0f, false);
+
+            juce::String error;
+            std::vector<float> sung;
+            const auto model = NeuralVoiceModel::load (job.singer->folder, error, cancel);
+            const bool ok = model != nullptr
+                            && singParts (*model, take, sampleRate, job.f0, sung, cancel, error, [&] (float f) { report (n, f, false); });
+            if (model != nullptr)
+                previous = model;
+            if (! ok)
+            {
+                report (n, 1.0f, true);
+                if (cancelled())
+                    return;
+                const std::lock_guard<std::mutex> g (shared);
+                result.problems.add (job.singer->name + ": " + error);
+                continue;
+            }
+
+            Voice v;
+            v.singerName = job.singer->name;
+            auto pcm = std::make_shared<std::vector<int16_t>> (take.size(), (int16_t) 0);
+            float peak = 1.0e-6f;
+            for (float x : sung)
+                peak = std::max (peak, std::abs (x));
+            const float toInt = peak > 1.0f ? 32767.0f / peak : 32767.0f;   // never clips; the scale undoes it
+            for (size_t i = 0; i < sung.size() && i < pcm->size(); ++i)
+                (*pcm)[i] = (int16_t) std::round (sung[i] * toInt);
+            v.pcm = pcm;
+            v.scale = 1.0f / toInt;
+
+            // Kept for the next render (the file holds the voice at its true level).
+            getCacheDirectory().createDirectory();
+            juce::AudioBuffer<float> out (1, (int) pcm->size());
+            for (size_t i = 0; i < pcm->size(); ++i)
+                out.setSample (0, (int) i, (float) (*pcm)[i] * v.scale);
+            const auto tmp = job.file.getSiblingFile (job.file.getFileNameWithoutExtension() + ".part");
+            if (std::unique_ptr<juce::OutputStream> stream = tmp.createOutputStream())
+            {
+                juce::WavAudioFormat format;
+                auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (sampleRate)
+                                                                  .withNumChannels (1).withBitsPerSample (24));
+                if (writer != nullptr && writer->writeFromAudioSampleBuffer (out, 0, out.getNumSamples()))
+                {
+                    writer.reset();
+                    tmp.moveFileTo (job.file);
+                }
+            }
+            tmp.deleteFile();
+
+            {
+                const std::lock_guard<std::mutex> g (shared);
+                placed[(size_t) job.section].push_back ({ job.slot, v });
+                ++result.sung;
+            }
+            report (n, 1.0f, true);
         }
-        tmp.deleteFile();
+    };
+    {
+        std::vector<std::thread> helpers;
+        for (int w = 1; w < workers; ++w)
+            helpers.emplace_back (sing);
+        sing();
+        for (auto& t : helpers)
+            t.join();
     }
+    if (cancelled())
+        return false;
 
     for (int sec = 0; sec < sc::NumSections; ++sec)
     {
