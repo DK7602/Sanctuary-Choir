@@ -466,6 +466,15 @@ static int chordToneBelow (int note, const Chord& c)
     return note - 12;
 }
 
+// A close stack under a high melody can climb far above a section (altos at A5, tenors at F5
+// under a soprano's C6): no singer sings there, and a recording stretched that far sounds like a
+// child's toy. A part more than two semitones above its range sings the same note an octave down.
+static void keepInRange (int& note, const SectionRange& r)
+{
+    while (note > r.high + 2 && note - 12 >= r.low - 5)
+        note -= 12;
+}
+
 static void fitBelow (int& note, int ceiling, const SectionRange& r)
 {
     while (note >= ceiling && note - 12 >= r.low - 5)
@@ -551,11 +560,12 @@ Voicing voiceChord (const VoicingRequest& req)
             const int top = haveMelody ? sopMel : placeInRange (chord.tones[1], R[Soprano], R[Soprano].centre());
             if (active (Soprano)) v.set (Soprano, top);
             int a = req.scale.stepDiatonic (top, -2);
-            if (active (Alto)) { fitBelow (a, top, R[Alto]); v.set (Alto, a); }
+            if (active (Alto)) { fitBelow (a, top, R[Alto]); keepInRange (a, R[Alto]); v.set (Alto, a); }
             if (active (Tenor))
             {
                 int t = req.scale.stepDiatonic (top, -5);
                 fitBelow (t, std::min (a, top), R[Tenor]);
+                keepInRange (t, R[Tenor]);
                 v.set (Tenor, t);
             }
             if (active (Bass))
@@ -568,8 +578,10 @@ Voicing voiceChord (const VoicingRequest& req)
             // SSAA close stack down from the melody.
             const int s1 = haveMelody ? sopMel : placeInRange (chord.tones[1], R[Soprano], R[Soprano].centre());
             const int s2 = chordToneBelow (s1, chord);
-            const int a1 = chordToneBelow (s2, chord);
-            const int a2 = chordToneBelow (a1, chord);
+            int a1 = chordToneBelow (s2, chord);
+            int a2 = chordToneBelow (a1, chord);
+            keepInRange (a1, R[Alto]);
+            keepInRange (a2, R[Alto]);
             if (active (Soprano)) v.setDivisi (Soprano, s1, s2);
             if (active (Alto)) v.setDivisi (Alto, a1, a2);
             return v;
@@ -595,6 +607,8 @@ Voicing voiceChord (const VoicingRequest& req)
             const int s = haveMelody ? sopMel : placeInRange (chord.tones[1], R[Soprano], R[Soprano].centre());
             int a = chordToneBelow (s, chord);
             int t = chordToneBelow (a, chord);
+            keepInRange (a, R[Alto]);
+            keepInRange (t, R[Tenor]);
             if (active (Soprano)) v.set (Soprano, s);
             if (active (Alto)) v.set (Alto, a);
             if (active (Tenor)) { if (t < R[Tenor].low - 3) t += 12; v.set (Tenor, t); }

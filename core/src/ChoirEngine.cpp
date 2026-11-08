@@ -221,6 +221,7 @@ struct ChoirEngine::Singer
     bool doublesMelody = false;
     float octaveShift = 0.0f;
     float lastFollow = 1.0f;
+    bool naturalForRange = false;   // the take has nothing near this note: the natural voice sings it
 
     // amplitude
     float amp = 0.0f, ampTarget = 0.0f, gate = 0.0f;
@@ -889,6 +890,7 @@ void ChoirEngine::configureSinger (Singer& s, int section, int index, int)
     s.scoop = 0.0f;
     s.expr = 0.0f;
     s.lastFollow = 1.0f;
+    s.naturalForRange = false;
     s.vowel.reset();
     s.vowel.setPhase (s.rng.uni());
 }
@@ -1904,6 +1906,23 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
                 {
                     setSingerVowel (s, params.vocalType == VocalType::Words ? VocalType::Ah : params.vocalType);
                     s.vowelOverride = -1;
+                }
+
+                // A breathy, belted or classical take with nothing near this note would be stretched
+                // far (up to 7 semitones at the edges of a range, which changes the vowel and the
+                // voice): the singer's natural voice sings it when that has a nearer note.
+                if (layer != nullptr && takeFor (s) != Take::Natural && sampleSet != nullptr && (s.targetMidi >= 0.0f || s.sampleNote.hz > 20.0f))
+                {
+                    const float at = (s.targetMidi >= 0.0f ? s.targetMidi : hzToMidi (s.sampleNote.hz)) + ens.zoneOffset;
+                    const SampleLayer* natural = entry != nullptr ? sampleSet->layerFor (formantSection (s.section), entry->vowel, Take::Natural)
+                                                                  : sampleLayers[(size_t) s.section][(size_t) Take::Natural];
+                    if (natural != nullptr && natural != layer)
+                    {
+                        const float own = layer->distanceTo (at);
+                        s.naturalForRange = s.naturalForRange ? own > 1.5f : (own > 2.5f && natural->distanceTo (at) + 1.0f < own);
+                        if (s.naturalForRange)
+                            layer = natural;
+                    }
                 }
 
                 if (layer != nullptr)

@@ -49,6 +49,8 @@ struct SampleLayer
         the recordings close enough to it, so different members sing different singers' notes;
         singer (if >= 0) is preferred among those, so one member stays one voice. */
     int nearest (float midi, int variant, int singer = -1) const noexcept;
+    /** How far (semitones) the nearest held note is from a pitch: how far it must be re-pitched. */
+    float distanceTo (float midi) const noexcept;
     /** Index of an onset for a pitch, or -1 if none is close enough. */
     int nearestOnset (float midi, int variant, int singer = -1) const noexcept;
     /** Index of a move from about `from` to `to` over the same interval, or -1 if none. */

@@ -3322,6 +3322,160 @@ TEST (leadUnclearIsFlagged)
     CHECK (whisper);
 }
 
+TEST (closeStacksStayInRange)
+{
+    // A close stack under a high melody (Amazing Grace a third up, the sopranos on the melody)
+    // put the altos on A5 and the tenors on F5: far above any recording, stretched until they
+    // sounded like toys. Inner parts now stay within two semitones of their section's range.
+    const double sr = 48000.0;
+    const auto x = test::singMelody (test::amazingGrace (3.0f), sr, Soprano);
+    const auto ranges = defaultSectionRanges();
+    for (auto mode : { HarmonyMode::GospelStack, HarmonyMode::ThirdsAndSixths, HarmonyMode::UpperVoices })
+    {
+        ChoirEngine e;
+        e.prepare (sr, 960);
+        EngineParams p;
+        p.harmonyMode = mode;
+        p.vocalType = VocalType::Ah;
+        p.reverb = 0.0f;
+        p.choirSize = 70.0f;
+        e.setParams (p);
+        std::vector<float> l (960), r (960);
+        int topAlto = -1, topTenor = -1;
+        for (size_t i = 0; i + 960 <= x.size(); i += 960)
+        {
+            e.process (x.data() + i, x.data() + i, l.data(), r.data(), 960);
+            const auto snap = e.takeSnapshot();
+            for (int k = 0; k < 2; ++k)
+            {
+                topAlto = std::max (topAlto, snap.sectionNotes[Alto][(size_t) k]);
+                topTenor = std::max (topTenor, snap.sectionNotes[Tenor][(size_t) k]);
+            }
+        }
+        std::printf ("  %s: altos up to %d, tenors up to %d\n", getHarmonyModeNames()[(int) mode], topAlto, topTenor);
+        CHECK (topAlto <= ranges[Alto].high + 2);
+        CHECK (topTenor <= ranges[Tenor].high + 2);
+    }
+}
+
+TEST (recordedVoicesKeepTheirTop)
+{
+    // A recording of white noise at the pack's 32 kHz, held by one singer a little sharp: what
+    // comes out of the player shows what reading between the samples does to every recorded
+    // voice. Read in a straight line it lost 2.6 dB at 10 kHz and 3.9 at 12 kHz (the choir's air),
+    // and added images above 16 kHz at -12 dB.
+    SampleSet set;
+    Rng rng (7);
+    std::vector<float> noise (32000 * 3);
+    for (auto& v : noise)
+        v = 0.3f * rng.bi();
+    set.addNote (Tenor, 0, noise.data(), (int64_t) noise.size(), 32000.0, 57.0f);
+    set.finalise();
+    const auto* layer = set.layerFor (Tenor, VocalType::Ah);
+    CHECK (layer != nullptr);
+    if (layer == nullptr)
+        return;
+    SamplePlayer player;
+    const int n = 48000 * 2;
+    std::vector<float> amp ((size_t) n, 1.0f), out ((size_t) n);
+    for (int i = 0; i < n; i += 480)
+        player.render (*layer, midiToHz (57.37f), amp.data() + i, out.data() + i, 480, 48000.0, 0, 0.3f, 0.0f);
+    FFT fft (12);
+    const int size = fft.getSize();
+    std::vector<double> power ((size_t) size / 2, 0.0);
+    std::vector<std::complex<float>> buf ((size_t) size);
+    for (int start = 24000; start + size <= n; start += size / 2)
+    {
+        for (int i = 0; i < size; ++i)
+            buf[(size_t) i] = out[(size_t) (start + i)] * (0.5f - 0.5f * std::cos (kTwoPi * (float) i / (float) (size - 1)));
+        fft.forward (buf.data());
+        for (int k = 0; k < size / 2; ++k)
+            power[(size_t) k] += std::norm (buf[(size_t) k]);
+    }
+    auto bandDb = [&] (double lo, double hi)
+    {
+        double e = 0.0;
+        int count = 0;
+        for (int k = 0; k < size / 2; ++k)
+            if (const double hz = k * 48000.0 / size; hz >= lo && hz < hi)
+            {
+                e += power[(size_t) k];
+                ++count;
+            }
+        return 10.0 * std::log10 (e / count);
+    };
+    const double ref = bandDb (1000.0, 3000.0);
+    const double at10 = bandDb (9000.0, 11000.0) - ref, at12 = bandDb (11000.0, 13000.0) - ref, images = bandDb (17000.0, 23000.0) - ref;
+    std::printf ("  10 kHz %+.1f dB, 12 kHz %+.1f dB, images above 16 kHz %+.1f dB\n", at10, at12, images);
+    CHECK (at10 > -0.7);
+    CHECK (at12 > -2.0);
+    CHECK (images < -15.0);
+}
+
+TEST (farNotesSungInTheNaturalVoice)
+{
+    // The breathy, belted and classical takes have fewer notes than the natural voice: at the
+    // edges of a range the nearest one can be 7 semitones away, and stretched that far it changes
+    // vowel and voice. Then the singer's natural voice sings the note, if it has one nearer.
+    // Here the natural take (a bright tone) has every note, the breathy one (a pure tone) only a
+    // G3: a breathy tenor singing C#4 must sound bright.
+    const double sr = 48000.0;
+    auto tone = [] (float midi, bool bright)
+    {
+        std::vector<float> x (32000 * 2);
+        const double hz = 440.0 * std::pow (2.0, (midi - 69.0) / 12.0);
+        for (size_t i = 0; i < x.size(); ++i)
+        {
+            const double t = (double) i / 32000.0;
+            for (int h = 1; h <= (bright ? 10 : 1); ++h)
+                x[i] += (float) (0.2 * std::sin (2.0 * kPi * hz * h * t) / h);
+        }
+        return x;
+    };
+    SampleSet set;
+    for (int m = 52; m <= 66; ++m)
+    {
+        const auto x = tone ((float) m, true);
+        set.addNote (Tenor, 0, x.data(), (int64_t) x.size(), 32000.0, (float) m);
+    }
+    SampleSet::NoteInfo breathy;
+    breathy.take = Take::Breathy;
+    const auto pure = tone (55.0f, false);
+    set.addNote (Tenor, 0, pure.data(), (int64_t) pure.size(), 32000.0, 55.0f, breathy);
+    set.finalise();
+
+    ChoirEngine eng;
+    eng.prepare (sr, 256);
+    eng.setSampleSet (&set);
+    auto p = dryParams (VocalType::Ah, HarmonyMode::FullChoir);
+    p.midiParts = true;
+    p.singing = Singing::Breathy;
+    eng.setParams (p);
+    std::array<NoteSet, NumSections> parts;
+    parts[Tenor].add (61);
+    eng.setMidiParts (parts, 0.8f);
+    std::vector<float> silence ((size_t) (2.5 * sr), 0.0f);
+    auto st = runStems (eng, silence);
+    const auto& y = st[(size_t) Tenor * 2];
+    FFT fft (14);
+    const int size = fft.getSize();
+    std::vector<std::complex<float>> buf ((size_t) size);
+    for (int i = 0; i < size; ++i)
+        buf[(size_t) i] = y[(size_t) (int) (1.0 * sr) + (size_t) i] * (0.5f - 0.5f * std::cos (kTwoPi * (float) i / (float) (size - 1)));
+    fft.forward (buf.data());
+    auto peak = [&] (double hz)
+    {
+        float m = 0.0f;
+        for (int k = (int) (hz * 0.97 * size / sr); k <= (int) (hz * 1.03 * size / sr); ++k)
+            m = std::max (m, std::abs (buf[(size_t) k]));
+        return 20.0 * std::log10 (m + 1.0e-12);
+    };
+    const double f0 = 440.0 * std::pow (2.0, (61.0 - 69.0) / 12.0);
+    const double second = peak (2.0 * f0) - peak (f0);
+    std::printf ("  breathy tenor on C#4: second harmonic %.1f dB under the first (a pure tone: none)\n", second);
+    CHECK (second > -15.0);
+}
+
 TEST (performanceBudget)
 {
     const double sr = 48000.0;
