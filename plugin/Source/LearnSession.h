@@ -185,8 +185,16 @@ private:
     std::atomic<bool> stopRequested { false };
     std::atomic<int64_t> lastCapturePos { 0 };
     int64_t armedLoudSamples = 0;
+    // The last few seconds the song played through here, so LEARN pressed while it plays still
+    // has the start of the phrase being sung (audio thread only; sized by prepare()).
+    static constexpr double kPrerollSeconds = 3.0;
+    std::vector<float> preroll, prerollBand;
+    int prerollWrite = 0;
+    int64_t prerollFill = 0, prerollNext = -1;
+    void keepPreroll (float* const* channels, int numChannels, int n, const BlockInfo& info);
+    int64_t startWithPreroll (const BlockInfo& info);
     double captureSampleRate = 48000.0;
-    bool recordingPass = false;   // the capture is another pass of the take, not a new take
+    std::atomic<bool> recordingPass { false };   // the capture is another pass of the take, not a new take (read by the audio thread)
     bool passAlongPreview = false; // ... sung along with the take playing from its start
     bool aligningPass = false;
 

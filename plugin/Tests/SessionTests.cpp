@@ -259,6 +259,69 @@ static void reloadWaitsForVoicesAndSkipsSameTake()
     check (phaseName (rig.session) == "rendered", "restoring the same take keeps the render");
 }
 
+static void learnPressedWhileTheSongPlays()
+{
+    std::printf ("LEARN pressed while the song plays keeps the phrase that had already begun\n");
+    const double rate = 48000.0, bpm = 120.0;
+    const int64_t songStart = (int64_t) (10.0 * rate);   // the host plays from 0:10
+    // Silence, then a phrase from 2.5 s; LEARN is pressed at 4.0 s, in the middle of it.
+    std::vector<float> stream ((size_t) (2.5 * rate), 0.0f);
+    const auto phrase = melody (rate, 0.0f, 1);
+    stream.insert (stream.end(), phrase.begin(), phrase.end());
+    stream.resize ((size_t) (8.0 * rate), 0.0f);
+    auto play = [&] (Rig& rig, size_t from, size_t to, bool playing)
+    {
+        std::vector<float> block (512);
+        for (size_t pos = from; pos < to; pos += block.size())
+        {
+            const size_t n = std::min (block.size(), to - pos);
+            std::copy_n (stream.begin() + (long) pos, n, block.begin());
+            float* ch[] = { block.data() };
+            LearnSession::BlockInfo info;
+            info.hostPlaying = playing;
+            info.hasPosition = true;
+            info.hostPosition = songStart + (int64_t) pos;
+            info.bpm = bpm;
+            info.ppq = (double) info.hostPosition / rate * bpm / 60.0;
+            rig.session.processInput (ch, 1, (int) n, info);
+            if ((pos / block.size()) % 64 == 0)
+                pump (1);
+        }
+    };
+    {
+        Rig rig (rate);
+        rig.session.standalone = false;
+        play (rig, 0, (size_t) (4.0 * rate), true);
+        rig.session.startRecording();
+        play (rig, (size_t) (4.0 * rate), stream.size(), true);
+        play (rig, stream.size() - 512, stream.size(), false);   // the song stops: so does LEARN
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned");
+        const var lane = rig.session.getChordLane();
+        const double start = (double) lane.getProperty ("songStart", -1.0);
+        const auto* notes = lane.getProperty ("melody", var()).getArray();
+        const double firstNote = notes != nullptr && ! notes->isEmpty() ? (double) (int64) (*notes)[0].getProperty ("s", 0) / rate : -1.0;
+        std::printf ("  the take starts at %.2f s in the song (bar %d beat %d), its first note %.2f s in\n", start,
+                     (int) lane.getProperty ("bar", 0), (int) lane.getProperty ("beat", 0), firstNote);
+        check (std::abs (start - 11.0) < 0.02, "the take starts 3 s before LEARN was pressed");
+        check ((int) lane.getProperty ("bar", 0) == 6 && (int) lane.getProperty ("beat", 0) == 3, "and its MIDI lines up with the song there");
+        // The phrase starts 1.5 s into the take (its first vowel after a short consonant); LEARN was pressed at 3 s.
+        check (firstNote > 1.5 && firstNote < 1.75, "the phrase that had begun is learned from its first note");
+    }
+    {
+        // LEARN pressed with the song stopped waits for play and starts right there, as before.
+        Rig rig (rate);
+        rig.session.standalone = false;
+        play (rig, 0, (size_t) (2.0 * rate), true);
+        play (rig, (size_t) (2.0 * rate), (size_t) (2.0 * rate) + 512, false);
+        rig.session.startRecording();
+        play (rig, (size_t) (2.0 * rate), stream.size(), true);
+        play (rig, stream.size() - 512, stream.size(), false);
+        check (waitFor (rig.session, [&] { return phaseName (rig.session) == "learned"; }), "learned from play");
+        const double start = (double) rig.session.getChordLane().getProperty ("songStart", -1.0);
+        check (std::abs (start - 12.0) < 0.001, "a take started from play begins where play began");
+    }
+}
+
 static void learnRecordsTheBand()
 {
     std::printf ("LEARN records the band on the side-chain, harmonises with it and keeps it with the project\n");
@@ -1198,6 +1261,7 @@ int main (int argc, char** argv)
     settingsChangedWhileRendering();
     projectReopenedAtAnotherRate();
     reloadWaitsForVoicesAndSkipsSameTake();
+    learnPressedWhileTheSongPlays();
     learnRecordsTheBand();
     chordLaneAndDragOut();
     passesMakeAMultiTakeChoir();

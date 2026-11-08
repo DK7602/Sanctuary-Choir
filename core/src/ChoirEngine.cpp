@@ -1169,6 +1169,9 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
         cf.syllable[(size_t) s] = lyrics == nullptr ? -1 : (params.midiParts ? partSyllable[(size_t) s] : chordSyllable);
 
     const bool frozen = params.freeze;
+    // A learned take knows where the lead begins a note before its pitch is clear: the choir
+    // comes in with it there, on that note's chord.
+    const bool entering = scoreSource != nullptr && ! g.voiced && scoreSource->enteringAt (f.centre);
     if (scoreSource != nullptr)
     {
         Voicing v;
@@ -1229,7 +1232,8 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
 
     // Envelope and gate: sing while the lead sings, hold briefly through consonants.
     const float level = std::pow (clampv ((f.rmsDb + 48.0f) / 33.0f, 0.0f, 1.0f), 0.8f);
-    if (g.voiced)
+    const bool singing = g.voiced || entering;
+    if (singing)
     {
         unvoicedTime = 0.0f;
         lastLevel = std::max (level, 0.05f);
@@ -1297,7 +1301,7 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
 
     // On a voice onset, open the gate slightly early on frames not yet played (the
     // output runs behind the analysis), so leading consonants and breaths come through.
-    if (g.voiced && ! lastVoiced && ! frozen)
+    if (singing && ! lastVoiced && ! frozen)
     {
         const int64_t lookahead = std::min<int64_t> ((int64_t) (0.03 * sr), (int64_t) (choirLatency() - tracker.getAnalysisDelay() - 2 * kChunk));
         for (int64_t i = controlCount - 1; i >= 0 && i > controlCount - 32; --i)
@@ -1312,7 +1316,7 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
             prev.sopShift = cf.sopShift;
         }
     }
-    lastVoiced = g.voiced;
+    lastVoiced = singing;
 
     control[(size_t) (controlCount & controlMask)] = cf;
     ++controlCount;

@@ -159,6 +159,58 @@ TakeAnalysis analyseTake (const float* x, int64_t n, double sampleRate, float a4
         t.notes = std::move (kept);
     }
 
+    // Entries. The tracker calls a voice pitched once its pitch is clear, but a singer's entry is
+    // often not, for its first 50-200 ms: a breathy attack, a scoop up to the note, the band under
+    // the voice. A choir that waits for the clear part comes in late, so a note reaches back over
+    // the sound just before it that is loud (within 12 dB of the note and well above what plays
+    // between notes) and has some pitch in it: at most 0.4 s, and never over a breath or a
+    // consonant, which have none.
+    {
+        const int ahead = std::max (1, (int) std::lround (0.1 * sampleRate / hop));
+        const int before = std::max (1, (int) std::lround (1.0 * sampleRate / hop));
+        const int maxBack = std::max (1, (int) std::lround (0.4 * sampleRate / hop));
+        int64_t previousEnd = 0;
+        int f = 0;
+        for (auto& note : t.notes)
+        {
+            while (f < numFrames && t.frames[(size_t) f].centre < note.start)
+                ++f;
+            const int a = f;   // the note's first frame
+            if (a > 0 && a < numFrames)
+            {
+                float level = -200.0f, quiet = 200.0f;
+                for (int k = a; k < std::min (numFrames, a + ahead); ++k)
+                    level = std::max (level, t.frames[(size_t) k].rmsDb);
+                for (int k = std::max (0, a - before); k < a; ++k)
+                    quiet = std::min (quiet, t.frames[(size_t) k].rmsDb);
+                const float loud = std::max ({ level - 12.0f, quiet + 8.0f, -50.0f });
+                int first = a, unclear = 0;
+                for (int k = a - 1; k >= 0 && a - k <= maxBack; --k)
+                {
+                    const auto& fr = t.frames[(size_t) k];
+                    if (fr.centre - (int64_t) (hop * 0.5) < previousEnd || fr.rmsDb < loud)
+                        break;
+                    if (fr.clarity >= 0.3f)
+                    {
+                        first = k;
+                        unclear = 0;
+                    }
+                    else if (++unclear > 2)
+                    {
+                        break;
+                    }
+                }
+                const int64_t start = std::max (previousEnd, t.frames[(size_t) first].centre - (int64_t) (hop * 0.5));
+                if (first < a && start < note.start)
+                {
+                    t.entries.push_back ({ start, note.start });
+                    note.start = start;
+                }
+            }
+            previousEnd = note.end;
+        }
+    }
+
     // Phrases: separated by gaps of more than 300 ms.
     const int64_t phraseGap = (int64_t) (0.3 * sampleRate);
     for (size_t k = 0; k < t.notes.size(); ++k)
@@ -213,6 +265,13 @@ std::string LearnedScore::describe() const
                    secs / 60, secs % 60, keyName().c_str(), numPhrases, numPhrases == 1 ? "" : "S", numNotes,
                    followsBand ? " \xC2\xB7 WITH THE BAND" : "");
     return buf;
+}
+
+bool LearnedScore::enteringAt (int64_t t) const
+{
+    // The last entry starting at or before t.
+    auto it = std::upper_bound (entries.begin(), entries.end(), t, [] (int64_t v, const NoteEntry& e) { return v < e.start; });
+    return it != entries.begin() && t < std::prev (it)->clear;
 }
 
 bool LearnedScore::voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopShift) const
@@ -396,6 +455,7 @@ std::vector<ChordSpan> LearnedScore::chordLane() const
 LearnedScore harmoniseTake (const TakeAnalysis& take, const HarmonySettings& hs)
 {
     LearnedScore score;
+    score.entries = take.entries;
     score.numNotes = (int) take.notes.size();
     score.numPhrases = (int) take.phrases.size();
     score.durationSeconds = (float) ((double) take.length / take.sampleRate);

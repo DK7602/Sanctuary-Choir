@@ -25,6 +25,13 @@ struct LearnedPhrase
     int firstNote = 0, lastNote = 0;
 };
 
+/** The start of a note that was sung before its pitch was clear enough to read (see analyseTake):
+    the note starts at `start`, its pitch reads from `clear` on. */
+struct NoteEntry
+{
+    int64_t start = 0, clear = 0;
+};
+
 /** Stage 1: everything that depends only on the audio. */
 struct TakeAnalysis
 {
@@ -33,6 +40,7 @@ struct TakeAnalysis
     std::vector<PitchFrame> frames;
     std::vector<LearnedNote> notes;
     std::vector<LearnedPhrase> phrases;
+    std::vector<NoteEntry> entries;      // notes that began before their pitch was clear, in order
     std::array<float, 12> pcHistogram {};
     float voicedSeconds = 0.0f;
     std::vector<BandChord> bandChords;   // what the band played during the take (side-chain), if anything
@@ -105,7 +113,10 @@ public:
     float durationSeconds = 0.0f;
     double sampleRate = 48000.0;
 
+    std::vector<NoteEntry> entries;    // from the take: where notes begin before their pitch is clear
+
     bool voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopShift) const override;
+    bool enteringAt (int64_t t) const override;
     /** e.g. "LEARNED 0:43 · Ab MAJOR · 4 PHRASES · 105 NOTES" */
     std::string describe() const;
     /** e.g. "G MAJOR", or "G MAJOR → A MAJOR" when the key changes. */

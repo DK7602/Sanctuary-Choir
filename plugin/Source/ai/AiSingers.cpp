@@ -475,8 +475,9 @@ std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnaly
             n += 12;
     }
 
-    // Where the lead sings: its voiced frames, and the pitched ones the tracker was unsure of (a run, a
-    // slide); its consonants and breaths stay unpitched, so the singer says them as the lead does.
+    // Where the lead sings: its voiced frames, the pitched ones the tracker was unsure of (a run, a
+    // slide) and the start of a note sung before its pitch was clear (the singer comes in with the
+    // lead); its consonants and breaths stay unpitched, so the singer says them as the lead does.
     std::vector<uint8_t> sung ((size_t) numFrames, 0);
     const auto& frames = analysis.frames;
     size_t k = 0;
@@ -488,7 +489,7 @@ std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnaly
         if (frames.empty())
             break;
         const auto& fr = frames[k];
-        sung[(size_t) f] = (fr.voiced || (fr.clarity > 0.45f && fr.rmsDb > -45.0f)) ? 1 : 0;
+        sung[(size_t) f] = (fr.voiced || (fr.clarity > 0.45f && fr.rmsDb > -45.0f) || score.enteringAt (at)) ? 1 : 0;
     }
 
     // A new note is reached in 40 ms (a sung step, not a jump).

@@ -196,7 +196,7 @@ ${go("settings", "Show me Monitoring")}`,
       body: `
 <ol class="m-steps">
 <li>Press ${ui("LEARN")}. It glows: <i>LEARN ARMED</i>.</li>
-<li>Press play in your DAW. Sanctuary records your vocal as it plays (<i>LEARNING 0:12</i>).</li>
+<li>Press play in your DAW. Sanctuary records your vocal as it plays (<i>LEARNING 0:12</i>). Pressed ${ui("LEARN")} while the song was already playing? The take still starts 3 seconds earlier, so a phrase that had already begun is learned from its start.</li>
 <li>Press ${ui("LEARN")} again, or stop your DAW. Sanctuary studies the whole take: every note, the key, and where each phrase starts and ends. The plaque in the church shows what it found, such as <i>LEARNED 0:43 · G MAJOR · 4 PHRASES · 105 NOTES</i>. From now on, when the song plays, the choir uses this smarter harmony: it sees each phrase coming, lands cadences on the right chord and keeps the voices moving smoothly.</li>
 <li>Press ${ui("RENDER")}. Every singer is sung at the highest quality. Playback then uses the rendered choir, in time with your song, and costs almost no CPU.</li>
 </ol>

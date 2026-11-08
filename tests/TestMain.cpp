@@ -1896,6 +1896,63 @@ TEST (learnAndRender)
     maybeWrite ("amazing_grace_choir", mix[0], mix[1], sr);
 }
 
+TEST (learnedChoirEntersWithTheLead)
+{
+    // A note whose first 120 ms is sung under noise (a breathy entry, the band under the voice):
+    // the tracker only reads its pitch once it is clear, about 0.1 s late. The learned choir still
+    // comes in where the note is sung. A breath before the second note is not sung.
+    const double sr = 48000.0;
+    const auto first = test::singMelody ({ { 57.0f, 1.2f, 0.0f } }, sr, Tenor, 25.0f, 3);
+    const auto second = test::singMelody ({ { 60.0f, 1.0f, 0.0f } }, sr, Tenor, 25.0f, 4);
+    float peak = 0.0f;
+    for (float v : first) peak = std::max (peak, std::abs (v));
+    std::vector<float> x ((size_t) (sr * 4.0), 0.0f);
+    uint32_t seed = 5;
+    auto noise = [&seed] { seed = seed * 1664525u + 1013904223u; return ((float) (seed >> 8) / 16777216.0f - 0.5f) * 3.46f; };
+    const size_t a = (size_t) (sr * 0.5), vowel = a + (size_t) (sr * 0.157);
+    for (size_t i = 0; i < first.size(); ++i) x[a + i] = first[i];
+    for (size_t i = 0; i < (size_t) (sr * 0.12); ++i) x[vowel + i] += 0.48f * peak * noise();
+    const size_t breath = (size_t) (sr * 2.3), b = breath + (size_t) (sr * 0.25);
+    for (size_t i = 0; i < (size_t) (sr * 0.25); ++i) x[breath + i] = 0.075f * peak * noise();
+    for (size_t i = 0; i < second.size() && b + i < x.size(); ++i) x[b + i] = second[i];
+
+    const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+    CHECK (take.notes.size() == 2);
+    if (take.notes.size() != 2)
+        return;
+    int64_t clear = take.notes[0].start;
+    for (const auto& e : take.entries)
+        if (e.start == take.notes[0].start) clear = e.clear;
+    std::printf ("  first note sung from %.3f s, its pitch clear from %.3f s; second note from %.3f s\n",
+                 (double) take.notes[0].start / sr, (double) clear / sr, (double) take.notes[1].start / sr);
+    CHECK ((double) take.notes[0].start < (double) vowel + 0.02 * sr);   // where it is sung
+    CHECK ((double) (clear - take.notes[0].start) > 0.06 * sr);           // well before the tracker heard it
+    CHECK ((double) take.notes[1].start > (double) b);                    // not over the breath
+
+    const auto score = harmoniseTake (take, HarmonySettings {});
+    CHECK (score.enteringAt ((take.notes[0].start + clear) / 2) && ! score.enteringAt (clear + 10));
+    EngineParams p;
+    p.vocalType = VocalType::Words;
+    p.choirSize = 40.0f;
+    RenderedStems stems;
+    CHECK (renderTake (x.data(), (int64_t) x.size(), sr, p, score, stems));
+    auto rmsDb = [&] (const std::vector<float>& s, double from, double to) {
+        double e = 0.0;
+        const auto i0 = (size_t) (from * sr), i1 = (size_t) (to * sr);
+        for (size_t i = i0; i < i1 && i < s.size(); ++i) e += (double) s[i] * s[i];
+        return 10.0 * std::log10 (e / (double) (i1 - i0) + 1e-20);
+    };
+    // Between the sung start and the moment the pitch is clear, every section already sings.
+    const double from = (double) take.notes[0].start / sr + 0.02, to = (double) clear / sr - 0.035;
+    for (int s = 0; s < NumSections; ++s)
+    {
+        const double entering = rmsDb (stems.channels[(size_t) s * 2], from, to);
+        const double held = rmsDb (stems.channels[(size_t) s * 2], 1.0, 1.5);
+        std::printf ("  section %d: %.1f dB while entering, %.1f dB on the note\n", s, entering, held);
+        CHECK (entering > held - 15.0);
+    }
+}
+
 TEST (badInputAndParametersNeverStick)
 {
     // One NaN or infinite input sample (a glitching host or plug-in upstream) and nonsense

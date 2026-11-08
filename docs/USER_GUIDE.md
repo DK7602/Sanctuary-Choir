@@ -64,6 +64,8 @@ To re-pitch your voice, the choir has to hear a little of it first, so it runs a
 
 1. Press **LEARN**. It glows: "LEARN ARMED".
 2. Press play in your DAW. Sanctuary records your vocal track as it plays ("LEARNING 0:12").
+   - Pressed LEARN while the song was already playing? The take still starts 3 seconds before you pressed it, so a phrase that had already begun is learned from its start.
+   - The choir comes in where each note is sung, even when the first moment of a note is breathy or scooped and its pitch only becomes clear a little later.
 3. Press **LEARN** again, or stop the DAW. Sanctuary studies the whole take: every note, the key, and where each phrase starts and ends. The plaque shows something like *LEARNED 0:43 · G MAJOR · 4 PHRASES · 105 NOTES*.
    - From now on, when the song plays, the choir uses this smarter harmony. It sees each phrase in advance, lands cadences on the right chord, and keeps the voices moving smoothly.
    - If the song changes key, for example a last chorus a step up, Sanctuary follows it: the plaque shows *G MAJOR → A MAJOR*. One phrase with a few odd notes doesn't count as a key change. Choosing a Key yourself turns this off.

@@ -45,6 +45,11 @@ struct LearnSession::ScoreAdapter : public sc::ScoreSource
     {
         return score != nullptr && score->voicingAt (t + offset.load (std::memory_order_relaxed), out, lead, sop);
     }
+
+    bool enteringAt (int64_t t) const override
+    {
+        return score != nullptr && score->enteringAt (t + offset.load (std::memory_order_relaxed));
+    }
 };
 
 static std::shared_ptr<StemSet> toStemSet (const sc::RenderedStems& r)
@@ -131,6 +136,59 @@ void LearnSession::prepare (double sampleRate)
         ch.assign (16384, 0.0f);
     for (auto& ch : passScratch)
         ch.assign (16384, 0.0f);
+    preroll.assign ((size_t) std::max (1.0, sampleRate * kPrerollSeconds), 0.0f);
+    prerollBand.assign (preroll.size(), 0.0f);
+    prerollWrite = 0;
+    prerollFill = 0;
+    prerollNext = -1;
+}
+
+void LearnSession::keepPreroll (float* const* channels, int numChannels, int n, const BlockInfo& info)
+{
+    if (preroll.empty() || ! info.hostPlaying || ! info.hasPosition)
+    {
+        prerollFill = 0;
+        prerollNext = -1;
+        return;
+    }
+    if (info.hostPosition != prerollNext)
+        prerollFill = 0;   // the song started or jumped: what came before is somewhere else
+    const int size = (int) preroll.size();
+    for (int i = 0; i < n; ++i)
+    {
+        float v = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch)
+            v += channels[ch][i];
+        preroll[(size_t) prerollWrite] = numChannels > 0 ? v / (float) numChannels : 0.0f;
+        const float l = info.sidechainL != nullptr ? info.sidechainL[i] : 0.0f;
+        prerollBand[(size_t) prerollWrite] = info.sidechainR != nullptr ? 0.5f * (l + info.sidechainR[i]) : l;
+        prerollWrite = prerollWrite + 1 < size ? prerollWrite + 1 : 0;
+    }
+    prerollFill = std::min<int64_t> (prerollFill + n, size);
+    prerollNext = info.hostPosition + n;
+}
+
+int64_t LearnSession::startWithPreroll (const BlockInfo& info)
+{
+    // LEARN pressed while the song plays: the take starts a few seconds back, so a phrase that had
+    // already begun is learned (and sung by the choir) from its start.
+    if (recordingPass.load (std::memory_order_relaxed) || prerollNext != info.hostPosition)
+        return 0;
+    const int64_t pre = std::min ({ prerollFill, (int64_t) chunkSize * kChunksAhead, std::max<int64_t> (0, info.hostPosition) });
+    const int size = (int) preroll.size();
+    const bool band = captureBand.load (std::memory_order_relaxed);
+    for (int64_t k = 0; k < pre; ++k)
+    {
+        const int r = (int) ((prerollWrite - pre + k + 2 * (int64_t) size) % size);
+        float* chunk = chunks[(size_t) (k / chunkSize)].load (std::memory_order_acquire);
+        if (chunk == nullptr)
+            return 0;
+        chunk[k % chunkSize] = preroll[(size_t) r];
+        if (band)
+            if (float* bc = bandChunks[(size_t) (k / chunkSize)].load (std::memory_order_acquire))
+                bc[k % chunkSize] = prerollBand[(size_t) r];
+    }
+    return pre;
 }
 
 //==============================================================================
@@ -141,12 +199,15 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
         bool write = true;
         if (! captureStarted.load())
         {
+            int64_t pre = 0;   // samples from before this block (see startWithPreroll)
             if (captureStart.load() == -2)           // armed: wait for the host transport
             {
                 write = info.hostPlaying && info.hasPosition;
                 if (write)
                 {
-                    captureStart = info.hostPosition;
+                    pre = startWithPreroll (info);
+                    captured = pre;
+                    captureStart = info.hostPosition - pre;
                 }
                 else
                 {
@@ -173,7 +234,7 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
                 lastCapturePos = info.hostPosition;
                 // Where the take starts in the song, so its MIDI lines up with the song.
                 captureBpm = info.bpm;
-                capturePpq = captureStart.load() >= 0 ? info.ppq : -1.0;
+                capturePpq = captureStart.load() >= 0 ? info.ppq - (double) pre / captureSampleRate * info.bpm / 60.0 : -1.0;
                 captureSigNum = info.sigNum;
                 captureSigDen = info.sigDen;
             }
@@ -218,6 +279,8 @@ void LearnSession::processInput (float* const* channels, int numChannels, int n,
             lastCapturePos = info.hostPosition + n;
         }
     }
+
+    keepPreroll (channels, numChannels, n, info);
 
     // Preview: feed the learned take through the choir instead of the live input.
     if (previewPlaying.load (std::memory_order_relaxed))
@@ -585,7 +648,7 @@ void LearnSession::finishRecording()
                 std::memcpy (band.data() + i, src, sizeof (float) * (size_t) len);
     }
     releaseCapture();
-    if (std::exchange (recordingPass, false))
+    if (recordingPass.exchange (false))
     {
         previewPlaying = false;
         const int64_t start = captureStart.load();

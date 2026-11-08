@@ -168,6 +168,9 @@ public:
     virtual ~ScoreSource() = default;
     /** Voicing in force at input-timeline sample t; returns false if none (silence). */
     virtual bool voicingAt (int64_t t, Voicing& out, int& leadNote, int& sopShift) const = 0;
+    /** True where the lead has begun a note whose pitch is not clear yet (a breathy entry, a
+        scoop): the choir comes in there, with the lead, rather than when the pitch is clear. */
+    virtual bool enteringAt (int64_t t) const { (void) t; return false; }
 };
 
 const char* const* getResponseNames(); // 2 entries
