@@ -199,6 +199,7 @@ void SanctuaryEditor::sendMeters()
     o->setProperty ("singers", snap.totalSingers);
     o->setProperty ("leadMidi", snap.leadMidi);
     o->setProperty ("leadVoiced", snap.leadVoiced);
+    o->setProperty ("leadUnclear", snap.leadUnclear);
     o->setProperty ("leadNote", snap.leadNote);
     o->setProperty ("keyTonic", snap.keyTonic);
     o->setProperty ("keyMinor", snap.keyMinor);

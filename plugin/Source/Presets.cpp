@@ -23,6 +23,7 @@ namespace
     std::vector<PresetManager::Entry> factoryPresets()
     {
         using namespace ParamIDs;
+        const String bassMute = sectionParamID (sc::Bass, "Mute");
         const char* category = "";
         auto p = [&category] (const char* name, V values)
         {
@@ -96,8 +97,10 @@ namespace
             p ("Backing Stack",     { { harmonyMode, Thirds }, { style, Worship }, { vocalType, Words }, { choirSize, 12 }, { space, 40 }, { reverb, 20 }, { presence, 55 }, { humanize, 60 }, { venue, Studio } }),
             p ("Pop Doubles",       { { harmonyMode, Unison }, { style, Worship }, { vocalType, Words }, { choirSize, 10 }, { space, 50 }, { reverb, 15 }, { vibrato, 50 }, { venue, Studio } }),
             p ("Oohs & Aahs",       { { harmonyMode, Full }, { style, Worship }, { vocalType, Oo }, { choirSize, 20 }, { space, 45 }, { reverb, 30 }, { presence, 35 }, { singing, Breathy }, { venue, Studio } }),
-            p ("Soul Harmonies",    { { harmonyMode, Thirds }, { style, Gospel }, { vocalType, Words }, { choirSize, 15 }, { space, 40 }, { reverb, 25 }, { presence, 50 }, { warmth, 20 }, { venue, Studio } }),
-            p ("R&B Stack",         { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 14 }, { space, 35 }, { reverb, 22 }, { presence, 52 }, { venue, Studio } }),
+            // Backing stacks sing around the lead, with no bass singer under them (it held the
+            // chord's root as a low drone).
+            p ("Soul Harmonies",    { { harmonyMode, Thirds }, { style, Gospel }, { vocalType, Words }, { choirSize, 15 }, { space, 40 }, { reverb, 25 }, { presence, 50 }, { warmth, 20 }, { venue, Studio }, { bassMute, 1 } }),
+            p ("R&B Stack",         { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 14 }, { space, 35 }, { reverb, 22 }, { presence, 52 }, { venue, Studio }, { bassMute, 1 } }),
             p ("Wide Octaves",      { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Words }, { choirSize, 30 }, { space, 100 }, { reverb, 35 }, { presence, 40 }, { venue, Hall } }),
         });
 

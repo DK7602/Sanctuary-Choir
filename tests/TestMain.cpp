@@ -3110,6 +3110,218 @@ TEST (leadStandsOnTheStage)
     CHECK (lagOf (x, stem.l, 200) == 0);
 }
 
+//==============================================================================
+// A vocal that isn't a clean solo voice (the band leaking into the mic, a stem with other parts),
+// as in a user's song in C# minor: the choir must follow the singer as far as it can, not drop
+// out mid-phrase, find the key though another was remembered, and say when it can't follow.
+namespace
+{
+    // A tune in C# minor (phrases end on C# or G#), with its true pitch per sample (-1 near note
+    // edges and between notes).
+    std::vector<float> cSharpMinorTune (double sr, std::vector<float>& truth)
+    {
+        std::vector<test::SungNote> m;
+        const int ph[4][7] = { { 61, 64, 68, 66, 64, 63, 61 }, { 59, 61, 64, 63, 61, 59, 56 }, { 64, 66, 68, 69, 68, 66, 64 }, { 63, 64, 63, 61, 59, 60, 61 } };
+        for (auto& p : ph)
+            for (int k = 0; k < 7; ++k)
+                m.push_back ({ (float) p[k], k == 6 ? 0.9f : 0.35f, k == 6 ? 0.45f : 0.03f });
+        auto x = test::singMelody (m, sr, Tenor, 25.0f);
+        truth.assign (x.size(), -1.0f);
+        size_t pos = (size_t) (0.15 * sr);
+        for (const auto& n : m)
+        {
+            const size_t len = (size_t) (n.seconds * sr), edge = (size_t) (0.07 * sr);
+            for (size_t i = edge; i + edge < len; ++i)
+                truth[pos + i] = n.midi;
+            pos += len + (size_t) (n.gapAfter * sr);
+        }
+        return x;
+    }
+
+    // Adds a held C# minor chord (C#3 G#3 B3 E4) and noise under x, relDb below (above) it.
+    void addBed (std::vector<float>& x, double sr, float relDb)
+    {
+        Biquad lp;
+        lp.lowPass (sr, 2500.0, 0.7);
+        Rng rng (5);
+        std::vector<float> bed (x.size());
+        double ex = 0.0, eb = 0.0;
+        for (size_t i = 0; i < x.size(); ++i)
+        {
+            const double t = (double) i / sr;
+            float c = 0.0f;
+            for (double hz : { 138.59, 207.65, 246.94, 329.63 })
+                for (int h = 1; h <= 10; ++h)
+                    c += (float) (std::sin (kTwoPi * hz * h * t + h) / h);
+            bed[i] = 0.5f * c + 2.0f * lp.process (rng.bi());
+            ex += (double) x[i] * x[i];
+            eb += (double) bed[i] * bed[i];
+        }
+        const float g = (float) std::sqrt (ex / eb * std::pow (10.0, relDb / 10.0));
+        for (size_t i = 0; i < x.size(); ++i)
+            x[i] += g * bed[i];
+    }
+
+    // Share of the sung frames the tracker reads within a semitone of the true note.
+    double readRight (const std::vector<float>& x, const std::vector<float>& truth, double sr)
+    {
+        int sung = 0, right = 0;
+        for (const auto& f : PitchTracker::analyse (x.data(), (int64_t) x.size(), sr))
+        {
+            if (f.centre < 0 || f.centre >= (int64_t) truth.size() || truth[(size_t) f.centre] < 0.0f)
+                continue;
+            ++sung;
+            right += f.voiced && std::abs (f.midi - truth[(size_t) f.centre]) < 1.0f;
+        }
+        return (double) right / std::max (1, sung);
+    }
+}
+
+TEST (trackerFollowsTheVoiceOverABed)
+{
+    // Over a loud held chord the deepest match is often the chord's low note or an octave down:
+    // the tracker must keep to the voice (it read 3% of the notes right over the -3 dB bed).
+    const double sr = 48000.0;
+    std::vector<float> truth;
+    auto quiet = cSharpMinorTune (sr, truth), loud = quiet;
+    addBed (quiet, sr, -9.0f);
+    addBed (loud, sr, -3.0f);
+    const double q = readRight (quiet, truth, sr), l = readRight (loud, truth, sr);
+    std::printf ("  notes read right: bed -9 dB %.0f%%, bed -3 dB %.0f%%\n", 100.0 * q, 100.0 * l);
+    CHECK (q > 0.95);
+    CHECK (l > 0.25);
+}
+
+TEST (choirHoldsWhileTheVoiceStaysLoud)
+{
+    // A held note whose pitch can't be read for 0.6 s (loud noise in its place, as in a fast run
+    // over the band): the choir stays on its notes instead of fading out mid-phrase. When the
+    // singer really stops, it stops.
+    const double sr = 48000.0;
+    auto x = test::singMelody ({ { 57, 3.0f, 1.2f } }, sr, Tenor, 25.0f);
+    Biquad bp;
+    bp.bandPass (sr, 900.0, 0.7);
+    Rng rng (3);
+    const size_t a = (size_t) (1.0 * sr), b = (size_t) (1.6 * sr);
+    double ev = 0.0, en = 0.0;
+    for (size_t i = a - 9600; i < a; ++i) ev += (double) x[i] * x[i];
+    std::vector<float> noise (b - a);
+    for (auto& v : noise) { v = bp.process (rng.bi()); en += (double) v * v; }
+    const float g = (float) std::sqrt (ev / 9600.0 / (en / (double) noise.size()));
+    for (size_t i = a; i < b; ++i)
+        x[i] = noise[i - a] * g;
+
+    ChoirEngine e;
+    e.prepare (sr, 480);
+    EngineParams p;
+    p.vocalType = VocalType::Ah;
+    p.reverb = 0.0f;
+    p.leadDb = -60.0f;
+    p.key = 1;
+    e.setParams (p);
+    std::vector<float> l (x.size()), r (x.size());
+    for (size_t i = 0; i < x.size(); i += 480)
+        e.process (x.data() + i, x.data() + i, l.data() + i, r.data() + i, (int) std::min<size_t> (480, x.size() - i));
+    const int lat = e.getLatencySamples();
+    auto levelDb = [&] (double t0, double t1)
+    {
+        double s = 0.0;
+        const size_t i0 = (size_t) (t0 * sr) + (size_t) lat, i1 = (size_t) (t1 * sr) + (size_t) lat;
+        for (size_t i = i0; i < i1; ++i) s += (double) l[i] * l[i];
+        return 10.0 * std::log10 (s / (double) (i1 - i0) + 1e-12);
+    };
+    const double before = levelDb (0.7, 0.95), during = levelDb (1.4, 1.5), after = levelDb (3.15 + 1.0, 3.15 + 1.1);
+    std::printf ("  choir before %.1f dB, 0.4-0.5 s into the unreadable stretch %.1f dB, 1 s after the note %.1f dB\n", before, during, after);
+    CHECK (during > before - 2.0);   // it was 4-5 dB down and falling
+    CHECK (after < before - 12.0);   // fading out as it always did (15 dB down by then), not held on
+}
+
+TEST (rememberedKeyGivesWay)
+{
+    // The key Auto heard last time in the project is only a starting guess: a song in another key
+    // takes over within a few notes (a remembered A major held a C# minor song for over 3 s, and a
+    // real vocal for 10 s). The right key, remembered, is kept from the first note.
+    const double sr = 48000.0;
+    std::vector<float> truth;
+    const auto x = cSharpMinorTune (sr, truth);
+    for (const int remembered : { 9, 13 })   // A major, C# minor
+    {
+        ChoirEngine e;
+        e.prepare (sr, 480);
+        EngineParams p;
+        p.vocalType = VocalType::Ah;
+        p.reverb = 0.0f;
+        p.key = 0;
+        p.scaleAuto = true;
+        e.setParams (p);
+        e.seedKey (remembered % 12, remembered >= 12);
+        std::vector<float> l (480), r (480);
+        double reached = -1.0;
+        bool leftAgain = false;
+        for (size_t i = 0; i + 480 <= x.size(); i += 480)
+        {
+            e.process (x.data() + i, x.data() + i, l.data(), r.data(), 480);
+            const auto s = e.takeSnapshot();
+            const bool cSharpMinor = s.keyTonic == 1 && s.keyMinor;
+            if (cSharpMinor && reached < 0.0)
+                reached = (double) i / sr;
+            leftAgain = leftAgain || (! cSharpMinor && reached >= 0.0);
+        }
+        std::printf ("  remembered %s: C# minor from %.2f s\n", remembered == 9 ? "A major" : "C# minor", reached);
+        CHECK (reached >= 0.0 && reached < (remembered == 9 ? 1.5 : 0.01));
+        CHECK (! leftAgain);
+    }
+}
+
+TEST (leadUnclearIsFlagged)
+{
+    // Loud input whose pitch can't be read most of the time (more than a solo voice comes in)
+    // raises the flag the UI explains; a clean voice, or one over a quieter band, never does.
+    const double sr = 48000.0;
+    std::vector<float> truth;
+    const auto tune = cSharpMinorTune (sr, truth);
+    auto run = [sr] (std::vector<float> x)
+    {
+        auto three = x;
+        for (int k = 0; k < 2; ++k) three.insert (three.end(), x.begin(), x.end());
+        ChoirEngine e;
+        e.prepare (sr, 480);
+        EngineParams p;
+        p.vocalType = VocalType::Ah;
+        p.reverb = 0.0f;
+        e.setParams (p);
+        std::vector<float> l (480), r (480);
+        bool flagged = false;
+        for (size_t i = 0; i + 480 <= three.size(); i += 480)
+        {
+            e.process (three.data() + i, three.data() + i, l.data(), r.data(), 480);
+            flagged = flagged || e.takeSnapshot().leadUnclear;
+        }
+        return flagged;
+    };
+    auto overBand = tune;
+    addBed (overBand, sr, -9.0f);
+    // Unreadable: noise that follows the sung line's loudness (a whispered line), over a quieter bed.
+    auto unreadable = tune;
+    {
+        Biquad bp;
+        bp.bandPass (sr, 1000.0, 0.6);
+        Rng rng (9);
+        float env = 0.0f;
+        for (auto& v : unreadable)
+        {
+            env = std::max (std::abs (v), env * 0.9995f);
+            v = env * 2.5f * bp.process (rng.bi());
+        }
+        addBed (unreadable, sr, -12.0f);
+    }
+    const bool clean = run (tune), band = run (overBand), whisper = run (unreadable);
+    std::printf ("  flagged: clean %d, over a band at -9 dB %d, unreadable %d\n", (int) clean, (int) band, (int) whisper);
+    CHECK (! clean);
+    CHECK (! band);
+    CHECK (whisper);
+}
+
 TEST (performanceBudget)
 {
     const double sr = 48000.0;

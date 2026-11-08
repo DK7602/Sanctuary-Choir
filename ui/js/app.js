@@ -39,6 +39,8 @@
   const state = { info: {}, tab: "perform", meters: null, status: null, detectedKey: 0, detectedMinor: false, scaleType: 0, keyConfidence: 0, sections: [], built: false, lastSizeChange: 0, lastActivity: 0 };
   // The Scale parameter's last choice is Auto (listen for major or minor); it is listed first.
   const scaleAuto = () => { const d = Params.def("scale"); return !!d && Math.round(Params.get("scale")) === d.choices.length - 1; };
+  // Auto is sure of the key it hears (a key set by hand always is).
+  const keySure = () => state.keyConfidence >= 0.3;
   const scaleName = (type) => { const d = Params.def("scale"); return (d && d.choices[type]) || ""; };
 
   //==========================================================================
@@ -425,10 +427,11 @@
         opts.label = () => {
           const v = Math.round(Params.get("key"));
           if (v > 0) return Params.format("key");
-          return { main: "Auto", extra: "\u00b7 " + KEY_NAMES[state.detectedKey] + (state.detectedMinor ? "m" : "") };
+          // A question mark while Auto is still listening (or hearing a different key coming).
+          return { main: "Auto", extra: "\u00b7 " + KEY_NAMES[state.detectedKey] + (state.detectedMinor ? "m" : "") + (keySure() ? "" : "?") };
         };
         // One click locks the key Auto has found, so the harmony is right from the first note.
-        const canLock = () => Math.round(Params.get("key")) === 0 && state.keyConfidence >= 0.3;
+        const canLock = () => Math.round(Params.get("key")) === 0 && keySure();
         const lockKey = () => {
           Params.set("key", state.detectedKey + 1);
           if (scaleAuto()) Params.set("scale", state.scaleType);   // and the scale it heard
@@ -440,7 +443,7 @@
         };
       }
       if (el.dataset.param === "scale") {
-        opts.label = () => scaleAuto() ? { main: "Auto", extra: "\u00b7 " + (state.scaleType === 0 ? "Major" : scaleName(state.scaleType)) } : Params.format("scale");
+        opts.label = () => scaleAuto() ? { main: "Auto", extra: "\u00b7 " + (state.scaleType === 0 ? "Major" : scaleName(state.scaleType)) + (keySure() ? "" : "?") } : Params.format("scale");
         opts.order = (() => { const n = Params.def("scale").choices.length; return [n - 1, ...Array.from({ length: n - 1 }, (_, i) => i)]; })();
       }
       const dd = new Dropdown(el, opts);
@@ -607,7 +610,14 @@
       if (state.scaleDropdown) state.scaleDropdown.render();
     }
     state.keyConfidence = m.keyConfidence || 0;
-    $("keyReadout").textContent = "KEY " + KEY_NAMES[m.keyTonic] + " " + scaleName(scaleType).toUpperCase();
+    // More than a solo voice comes in (the band in the headphones, a stem with other parts): say
+    // once why the choir can't follow every note.
+    if (m.leadUnclear && !state.unclearSaid) {
+      state.unclearSaid = true;
+      toast("Sanctuary hears more than a solo voice on this track (music or other singers under the vocal), so the choir can't follow every note. It follows a solo vocal best: keep the band out of the mic, or use the cleanest vocal stem.", 12000);
+    }
+    $("keyReadout").textContent = "KEY " + KEY_NAMES[m.keyTonic] + " " + scaleName(scaleType).toUpperCase() + (keySure() ? "" : "?");
+    $("keyReadout").title = keySure() ? "" : "Still listening: not sure of the key yet. Set it by hand to fix it.";
     // Following the band: its chord (with the bass note), marked BAND.
     const band = !!m.followingBand && !!m.bandChord;
     $("chordReadout").textContent = band ? "\u00b7  " + m.bandChord : (m.chord ? "\u00b7  " + m.chord : "");

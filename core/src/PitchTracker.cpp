@@ -1,5 +1,7 @@
 #include "sanctuary/PitchTracker.h"
 
+#include <algorithm>
+
 namespace sc
 {
 void PitchTracker::prepare (double sampleRate, Settings s)
@@ -43,6 +45,11 @@ void PitchTracker::reset()
     latest = {};
     lastMidi = 0.0f;
     voicedRun = 0;
+    sinceVoiced = 1000;
+    backgroundDb = 1000.0f;
+    minRing.assign (60, 1000.0f);   // 6 s in tenths
+    minPos = minFilled = blockFrames = 0;
+    blockMin = 1000.0f;
 }
 
 int PitchTracker::push (const float* x, int n)
@@ -124,9 +131,19 @@ void PitchTracker::analyseWindow()
         }
         if (best < 0)
         {
+            // Nothing that clean: a voice over other sound (the band in the headphones, a pad).
+            // The deepest dip is then often at twice the period, an octave down: take the first
+            // dip nearly as deep as the deepest.
             float m = 1e9f;
             for (int tau = tauMin; tau < tauMax; ++tau)
                 if (cmnd[(size_t) tau] < m) { m = cmnd[(size_t) tau]; best = tau; }
+            for (int tau = tauMin + 1; tau < best; ++tau)
+                if (cmnd[(size_t) tau] <= cmnd[(size_t) tau - 1] && cmnd[(size_t) tau] <= cmnd[(size_t) tau + 1]
+                    && cmnd[(size_t) tau] < m + 0.1f)
+                {
+                    best = tau;
+                    break;
+                }
         }
 
         auto refine = [this] (int tau)
@@ -164,8 +181,26 @@ void PitchTracker::analyseWindow()
         const float voicedLimit = latest.voiced ? settings.threshold * 2.2f : settings.threshold * 1.6f;
         f.clarity = clampv (1.0f - aperiodicity, 0.0f, 1.0f);
         f.hz = (float) (dsr / refine (best));
-        f.voiced = rmsDb > settings.gateDb && aperiodicity < voicedLimit
+        // Other sound under the voice makes it look less periodic than it is. Once the voice is
+        // found, keep it while the reading stays near the note it was on and it is clearly
+        // louder than what plays without it.
+        const bool continuing = sinceVoiced <= 2 && lastMidi > 0.0f && aperiodicity < 0.5f
+                                && std::abs (hzToMidi (f.hz) - lastMidi) < 1.5f && rmsDb > backgroundDb + 6.0f;
+        f.voiced = rmsDb > settings.gateDb && (aperiodicity < voicedLimit || continuing)
                    && f.hz >= settings.minHz * 0.95f && f.hz <= settings.maxHz * 1.05f;
+    }
+
+    // The level of what plays when nobody sings (the band in the headphones, room noise): the
+    // quietest moment of the last few seconds, kept as the minimum of each tenth of a second.
+    blockMin = std::min (blockMin, rmsDb);
+    if (++blockFrames * hop >= (int) (dsr * 0.1))
+    {
+        minRing[(size_t) minPos] = blockMin;
+        minPos = (minPos + 1) % (int) minRing.size();
+        minFilled = std::min (minFilled + 1, (int) minRing.size());
+        backgroundDb = *std::min_element (minRing.begin(), minRing.begin() + minFilled);
+        blockMin = 1000.0f;
+        blockFrames = 0;
     }
 
     if (f.voiced)
@@ -173,11 +208,13 @@ void PitchTracker::analyseWindow()
         f.midi = hzToMidi (f.hz);
         lastMidi = f.midi;
         ++voicedRun;
+        sinceVoiced = 0;
     }
     else
     {
         f.hz = 0.0f;
         voicedRun = 0;
+        ++sinceVoiced;
     }
 
     latest = f;

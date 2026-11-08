@@ -24,10 +24,12 @@ Pro Tools (AAX) isn't supported yet.
 
 **Use a stereo track.** The choir is spread across a stereo stage. On a mono track it gets folded to mono, and Sanctuary shows a reminder when that happens.
 
+**Give it a solo vocal.** The choir follows the notes of one voice. If the track has more in it (the band leaking from headphones or speakers, or a vocal stem with backing parts or instruments left in), Sanctuary can't always tell which notes are yours: the choir drops out or sings odd notes, and Sanctuary shows a reminder. Keep the band out of the mic, use the cleanest stem, and keep any gate or noise reduction in front of Sanctuary from cutting into soft or fast notes.
+
 ## 3. Sing
 
 - **Turn up Choir Size** to add singers. You'll see each one walk into the loft. While your song plays, the singers move with its beat (each a touch loose, like real people); when the transport stops they sway on their own.
-- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right. If you already know the key, set it yourself for perfect harmony from the very first note. Once Auto has found it, click the small **lock** next to *Auto · Eb* to keep it.
+- **Key** is *Auto* by default: Sanctuary listens to your melody and works out the key, usually within the first phrase or two. It remembers the key with your project, so the next playback starts right (and leaves it within a few notes if the song is in another key). A question mark, as in *Auto · Eb?*, means it isn't sure yet. If you already know the key, set it yourself for perfect harmony from the very first note. Once Auto has found it, click the small **lock** next to *Auto · Eb* to keep it.
 - **Scale** is *Auto* by default too: Sanctuary hears whether your song is major or minor, and in a minor song whether you sing the raised seventh (harmonic minor) or not (natural minor). The field shows what it heard, e.g. *Auto · Minor*. With the key set by hand, Auto still decides major or minor for it. Locking the key also locks the scale it heard. Choose a scale yourself for the modes (Dorian, Mixolydian...), Gospel (blues) or Chromatic.
 - **Harmony Mode** chooses the arrangement. *Full Choir* is the classic four-part hymn sound.
 - **Style** changes how the choir performs. *Gospel* adds 7th chords, scoops and more vibrato; *Gregorian* gives pure, still voices.

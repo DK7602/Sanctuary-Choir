@@ -44,6 +44,8 @@ public:
     /** Delay (full-rate samples) between the newest input and the centre of the newest frame. */
     int getAnalysisDelay() const noexcept { return analysisDelay; }
     int getHop() const noexcept { return hop * decimation; }
+    /** Level (dB) of what plays when nobody sings: the quietest moment of the last 6 s. */
+    float getBackgroundDb() const noexcept { return backgroundDb; }
 
     /** Offline helper: analyse a whole buffer, one frame per hop. */
     static std::vector<PitchFrame> analyse (const float* x, int64_t n, double sampleRate, Settings s = {});
@@ -72,5 +74,10 @@ private:
     PitchFrame latest;
     float lastMidi = 0.0f;
     int voicedRun = 0;
+    int sinceVoiced = 1000;        // frames since the last voiced one
+    float backgroundDb = 1000.0f;  // level of what plays without the voice (see analyseWindow)
+    std::vector<float> minRing;    // quietest level of each tenth of a second, the last 6 s
+    int minPos = 0, minFilled = 0, blockFrames = 0;
+    float blockMin = 1000.0f;
 };
 } // namespace sc

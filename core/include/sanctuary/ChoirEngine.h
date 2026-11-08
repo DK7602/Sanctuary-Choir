@@ -152,6 +152,7 @@ struct EngineSnapshot
     bool followingBand = false;    // ... and the choir is singing the band's chord
     char bandChord[16] {};         // e.g. "G/B", empty if none
     int lyricIndex = -1;           // typed words: the syllable the MIDI choir is on (-1 = none)
+    bool leadUnclear = false;      // more than a solo voice comes in: the lead's notes can't be followed
 };
 
 /** Pre-rendered section stems to play instead of live singers (learned + rendered takes). */
@@ -457,6 +458,9 @@ private:
 
     // Envelope / gate state used when building control frames
     float lastLevel = 0.0f, unvoicedTime = 10.0f, frozenLevel = 0.0f;
+    float lastVoicedDb = -120.0f;   // input level the last time the lead's pitch was read
+    float readableShare = 1.0f, loudTime = 0.0f;   // of the loud input, how much the pitch can be read
+    bool leadUnclear = false;
     bool lastVoiced = false;
 };
 } // namespace sc

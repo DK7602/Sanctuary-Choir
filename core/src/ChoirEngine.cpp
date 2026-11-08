@@ -5,6 +5,11 @@
 
 namespace sc
 {
+// How much the key remembered from last time counts, in seconds of singing: enough to start in
+// it, little enough that a different song moves it within a few notes (at 3 s a song in C# minor
+// started in a remembered A major went on in A major for 10 s).
+constexpr float kRememberedKeyWeight = 1.0f;
+
 static constexpr int kSingersPerSection = 20;
 // Sub-octave: the oktavists, basses an octave below the bass part, take the top bass places
 // (a full choir has at most 12 basses, and they get one oktavist for every two).
@@ -407,6 +412,10 @@ void ChoirEngine::reset()
     processedSinceReset = false;
     limiter.reset();
     lastLevel = 0.0f;
+    lastVoicedDb = -120.0f;
+    readableShare = 1.0f;
+    loudTime = 0.0f;
+    leadUnclear = false;
     unvoicedTime = 10.0f;
     lastVoiced = false;
     wasFrozen = false;
@@ -1218,12 +1227,27 @@ void ChoirEngine::handlePitchFrame (const PitchFrame& f)
     {
         unvoicedTime = 0.0f;
         lastLevel = std::max (level, 0.05f);
+        lastVoicedDb = f.rmsDb;
     }
     else
     {
         unvoicedTime += hop;
     }
-    cf.sounding = unvoicedTime < 0.15f;
+    // A voice still about as loud as it was, well above what plays without it, is still singing:
+    // only its pitch can't be read for a moment (a fast run, the band under the voice). The
+    // choir stays on its notes a while longer then, rather than dropping out mid-phrase.
+    const bool stillSinging = f.rmsDb > lastVoicedDb - 10.0f && f.rmsDb > tracker.getBackgroundDb() + 8.0f;
+    cf.sounding = unvoicedTime < (stillSinging ? 0.5f : 0.15f);
+
+    // How much of the loud input is a voice whose pitch can be read (over the last 8 s or so).
+    // Little of it means more than a solo voice comes in: the band in the headphones, a vocal
+    // stem with other parts in it. The choir can't follow every note then, and the UI says why.
+    if (f.rmsDb > tracker.getBackgroundDb() + 8.0f && f.rmsDb > -50.0f)
+    {
+        readableShare += ((g.voiced ? 1.0f : 0.0f) - readableShare) * (1.0f - std::exp (-hop / 8.0f));
+        loudTime += hop;
+    }
+    leadUnclear = loudTime > 4.0f && readableShare < (leadUnclear ? 0.65f : 0.5f);
     cf.level = cf.sounding ? (g.voiced ? lastLevel : std::max (level, lastLevel * 0.8f)) : 0.0f;
 
     // Phrase boundaries (for echo / call & response).
@@ -1484,7 +1508,7 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
 
     if (const int seed = pendingKeySeed.exchange (-1); seed >= 0)
     {
-        keyTracker.seed (seed % 12, seed >= 12, 3.0f);
+        keyTracker.seed (seed % 12, seed >= 12, kRememberedKeyWeight);
         keyTonic = seed % 12;
         autoScale = seed >= 12 ? ScaleType::NaturalMinor : ScaleType::Major;
     }
@@ -2160,6 +2184,7 @@ void ChoirEngine::publishSnapshot()
                                           on && cf.voicing.count[(size_t) s] > 1 ? cf.voicing.notes[(size_t) s][1] : -1 };
     }
     snap.leadVoiced = cf.voiced;
+    snap.leadUnclear = leadUnclear;
     snap.leadMidi = cf.inputMidi;
     snap.leadNote = cf.leadNote;
     const Scale scale = currentScale();

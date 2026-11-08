@@ -366,6 +366,8 @@ int KeyTracker::update (float seconds, KeyFamily family, int fixedTonic)
         pendingCount = 0;
         return tonic;
     }
+    // The notes point to another key than the one in use: not sure of this one.
+    confidence = std::min (confidence, 0.2f);
     if (totalWeight < 2.5f)
     {
         tonic = est.tonic; // early on, follow the evidence quickly

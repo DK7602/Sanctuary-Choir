@@ -133,7 +133,7 @@ ${tip("The <b>Energy</b> plaque at the top right of the church is a seventh knob
 </dl>
 <h4>${ui("KEY")} and ${ui("SCALE")}</h4>
 <ul>
-<li>Both start on <b>Auto</b>: Sanctuary listens and works out the key (usually within a phrase or two) and whether the song is major or minor. The field shows what it heard, such as <i>Auto · Eb</i>.</li>
+<li>Both start on <b>Auto</b>: Sanctuary listens and works out the key (usually within a phrase or two) and whether the song is major or minor. The field shows what it heard, such as <i>Auto · Eb</i>. A question mark (<i>Auto · Eb?</i>) means it isn't sure yet, or is hearing a different key coming.</li>
 <li>Click the small <b>padlock</b> beside the key once it's right, to keep it. The key is remembered with your project.</li>
 <li>Know the key? Set it yourself and the harmony is right from the very first note.</li>
 <li>Choose a scale yourself for the modes (Dorian, Mixolydian, Lydian, Phrygian), Harmonic Minor, Gospel (blues) or Chromatic.</li>
@@ -419,7 +419,8 @@ ${go("settings", "Show me Settings")}`,
 <dt>The choir is in mono</dt><dd>The track is mono. Use a stereo track, or an FX channel fed by a send.</dd>
 <dt>I hear myself late while recording</dt><dd>Switch ${ui("MONITORING")} to ${ui("LIVE")}, and use a buffer of 128 or 256 samples.</dd>
 <dt>The choir is slightly off the beat when I mix</dt><dd>Switch ${ui("MONITORING")} back to ${ui("STUDIO")}.</dd>
-<dt>The harmony is in the wrong key</dt><dd>Set the ${ui("KEY")} (and ${ui("SCALE")}) yourself, or wait a phrase for Auto and then lock it. LEARN gives the most reliable result.</dd>
+<dt>The harmony is in the wrong key</dt><dd>Set the ${ui("KEY")} (and ${ui("SCALE")}) yourself, or wait a phrase for Auto and then lock it. LEARN gives the most reliable result. Auto starts from the key it heard last time in the project, and leaves it within a few notes when the song is in another key.</dd>
+<dt>The choir drops out or sings odd notes</dt><dd>The choir follows the notes of one voice. If the vocal track has more than a solo voice in it (the band leaking from headphones or speakers, or a vocal stem with backing parts or instruments left in), Sanctuary can't always tell which notes are yours, and says so. Record with the band out of the mic, use the cleanest vocal stem, or switch off any gate or noise reduction in front of Sanctuary that cuts into soft or fast notes.</dd>
 <dt>The chords change too often, or too slowly</dt><dd>Turn ${ui("CHORD SPEED")} (MIX) down or up. With a band, route it to the side-chain so the choir sings its chords.</dd>
 <dt>Clicks, crackles or dropouts</dt><dd>Usually your computer running out of time: raise the audio buffer, lower ${ui("CHOIR SIZE")}, or LEARN and RENDER (rendered playback costs almost nothing). In Words mode the choir no longer copies your mouth clicks.</dd>
 <dt>The choir gets quieter when it gets big</dt><dd>A very loud choir (a big ${ui("CHOIR SIZE")} at high Energy, with lots of ${ui("REVERB")} and a long Decay) goes past full scale, and the output limiter turns it down smoothly so it never distorts. For more headroom, turn ${ui("VOLUME")} down a few dB.</dd>
