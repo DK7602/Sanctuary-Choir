@@ -936,7 +936,7 @@ void LearnSession::render()
                                               progress = 0.85f * f;
                                               const std::lock_guard<std::mutex> sl (aiTextLock);
                                               aiActivity = who;
-                                          }, &cancel))
+                                          }, &cancel, params.style))
             {
                 workDone = true;   // cancelled
                 return;

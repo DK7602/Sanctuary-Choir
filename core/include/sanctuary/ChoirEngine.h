@@ -406,6 +406,7 @@ private:
     std::vector<float> mono, sectionBuf, choirL, choirR, revInL, revInR, revOutL, revOutR, scratch;
     ToneStage tone;
     GlueCompressor glue;
+    DeEsser deEsser;   // Words: the stack's consonants tamed, as on backing vocals
     ChoirReverb reverb;
     // The measured room, when there is one: the algorithmic reverb hands over to it (and back)
     // over 80 ms; a room replaced by another fades out over 300 ms.

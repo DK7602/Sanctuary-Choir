@@ -3033,6 +3033,97 @@ static std::vector<test::SungNote> minorTune (bool harmonic)
     };
 }
 
+TEST (deEsserTamesSibilantsAndSparesVowels)
+{
+    // A sung vowel (harmonics falling off above 3 kHz) goes through as it was; an "s" (hiss above
+    // 5 kHz) comes out several dB quieter.
+    const double sr = 48000.0;
+    const int n = (int) sr;
+    std::vector<float> vowelL (n), sL (n);
+    uint32_t seed = 9;
+    Biquad sh1, sh2, sl1, sl2;   // an "s": hiss from 4.5 to 11 kHz
+    sh1.highPass (sr, 4500.0); sh2.highPass (sr, 4500.0); sl1.lowPass (sr, 11000.0); sl2.lowPass (sr, 11000.0);
+    for (int i = 0; i < n; ++i)
+    {
+        double v = 0.0;
+        for (int h = 1; h <= 30; ++h)
+            v += std::sin (2.0 * M_PI * 220.0 * h * i / sr) / (h * (1.0 + std::pow (220.0 * h / 3000.0, 4.0)));
+        vowelL[(size_t) i] = (float) (0.3 * v);
+        seed = seed * 1664525u + 1013904223u;
+        const float white = (float) (seed >> 8) / 16777216.0f - 0.5f;
+        sL[(size_t) i] = sl2.process (sl1.process (sh2.process (sh1.process (white))));
+    }
+    auto energyAbove = [&] (const std::vector<float>& x, int from)
+    {
+        double e = 0.0;
+        Biquad a, b;
+        a.highPass (sr, 5000.0); b.highPass (sr, 5000.0);
+        for (int i = 0; i < n; ++i) { const float h = b.process (a.process (x[(size_t) i])); if (i >= from) e += h * h; }
+        return e;
+    };
+    auto run = [&] (std::vector<float> x)
+    {
+        DeEsser d;
+        d.prepare (sr);
+        std::vector<float> r = x;
+        d.process (x.data(), r.data(), n, 0.5f);
+        return x;
+    };
+    const auto vowelOut = run (vowelL), sOut = run (sL);
+    double vIn = 0.0, vOut = 0.0;
+    for (int i = n / 4; i < n; ++i) { vIn += vowelL[(size_t) i] * vowelL[(size_t) i]; vOut += vowelOut[(size_t) i] * vowelOut[(size_t) i]; }
+    const double vowelDb = 10.0 * std::log10 (vOut / vIn);
+    const double sDb = 10.0 * std::log10 (energyAbove (sOut, n / 4) / energyAbove (sL, n / 4));
+    std::printf ("  vowel %+.2f dB, sibilant band %+.1f dB\n", vowelDb, sDb);
+    CHECK (std::abs (vowelDb) < 0.2);
+    CHECK (sDb < -3.0 && sDb > -6.0);
+}
+
+TEST (aiSingersAreHeardAsTheySang)
+{
+    // Two AI singers on the tenors' part, in a choir so small it has no tenor of its own: both are
+    // heard, each exactly as they sang (no pitch shift, no added vibrato or detune).
+    const double sr = 48000.0;
+    const auto x = test::singMelody ({ { 57.0f, 2.5f, 0.3f }, { 55.0f, 2.5f, 0.3f } }, sr, Tenor, 20.0f);
+    const auto take = analyseTake (x.data(), (int64_t) x.size(), sr);
+    const auto score = harmoniseTake (take, HarmonySettings {});
+    std::vector<int16_t> a (x.size()), b (x.size());
+    for (size_t i = 0; i < x.size(); ++i)
+    {
+        a[i] = (int16_t) std::lround (8000.0 * std::sin (2.0 * M_PI * 220.0 * (double) i / sr));
+        b[i] = (int16_t) std::lround (8000.0 * std::sin (2.0 * M_PI * 277.18 * (double) i / sr));
+    }
+    SectionVoices voices;
+    voices[Tenor] = { { a.data(), (int64_t) a.size(), 1.0f / 32767.0f }, { b.data(), (int64_t) b.size(), 1.0f / 32767.0f } };
+    EngineParams p;
+    p.vocalType = VocalType::Words;
+    p.style = Style::Gospel;
+    p.choirSize = 5.0f;   // two singers in all: an alto and a bass
+    RenderedStems stems;
+    CHECK (renderTake (x.data(), (int64_t) x.size(), sr, p, score, stems, {}, nullptr, nullptr, {}, &voices));
+    // One second inside the first note: all the tenors' sound is in the two singers' own pitches.
+    const auto& t = stems.channels[Tenor * 2];
+    const size_t from = (size_t) (0.8 * sr), n = (size_t) sr;
+    std::vector<std::complex<float>> spec;
+    std::vector<float> seg (t.begin() + (long) from, t.begin() + (long) (from + n));
+    for (size_t i = 0; i < n; ++i)
+        seg[i] *= 0.5f - 0.5f * std::cos (2.0f * (float) M_PI * (float) i / (float) n);
+    double total = 0.0, onA = 0.0, onB = 0.0;
+    for (int k = 1; k < 2000; ++k)   // 1 Hz bins
+    {
+        std::complex<double> s = 0.0;
+        for (size_t i = 0; i < n; i += 2)
+            s += (double) seg[i] * std::polar (1.0, -2.0 * M_PI * (double) k * (double) i / sr);
+        const double e = std::norm (s);
+        total += e;
+        if (std::abs (k - 220) <= 2) onA += e;
+        if (std::abs (k - 277) <= 2) onB += e;
+    }
+    std::printf ("  tenors: %.0f%% of their sound within 2 Hz of 220 Hz, %.0f%% of 277 Hz\n", 100.0 * onA / total, 100.0 * onB / total);
+    CHECK (onA / total > 0.3 && onB / total > 0.3);   // both singers, each on their own steady pitch
+    CHECK ((onA + onB) / total > 0.9);                // and nothing pitch-shifted or wobbling besides
+}
+
 TEST (minorKeysKeepTheirNaturalTonicChord)
 {
     // Harmonic minor raises the seventh for the dominant only: a gospel choir in C# minor sings
@@ -3065,6 +3156,17 @@ TEST (minorKeysKeepTheirNaturalTonicChord)
     CHECK (autoScaleType (h, 1, true, ScaleType::HarmonicMinor) == ScaleType::NaturalMinor);
     h[0] = 2.0f;                                                                       // 7 %: sung
     CHECK (autoScaleType (h, 1, true) == ScaleType::HarmonicMinor);
+    // Trap's dark minor: D natural sung over C#, not D#.
+    h[0] = 0.0f;
+    std::array<float, 12> phrygian = h, dorian = h;
+    phrygian[2] = 3.0f; phrygian[3] = 0.5f;
+    CHECK (autoScaleType (phrygian, 1, true) == ScaleType::Phrygian);
+    // R&B's brighter minor: A# (the major sixth), not A.
+    dorian[10] = 3.0f; dorian[9] = 0.4f;
+    CHECK (autoScaleType (dorian, 1, true) == ScaleType::Dorian);
+    // A note or two of either is not enough.
+    phrygian[2] = 0.4f;
+    CHECK (autoScaleType (phrygian, 1, true) == ScaleType::NaturalMinor);
 }
 
 TEST (scaleAutoHearsMajorOrMinor)

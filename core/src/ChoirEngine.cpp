@@ -239,6 +239,8 @@ struct ChoirEngine::Singer
     bool wasSinging = false;
 
     int source = 0;              // Words mode: 0 sings the input, k the k-th extra pass
+    bool direct = false;         // the pass is another singer (an AI singer) and this is their own voice:
+                                 // heard as they sang, not pitch-shifted (the others on that pass are copies)
 
     // Words mode: the real singer this one sounds like (a voice print)
     int print = -1, printRound = 0;
@@ -331,6 +333,7 @@ void ChoirEngine::prepare (double sampleRate, int maxBlockSize)
     bandScratch.assign (kChunk, 0.0f);
     tone.prepare (sr);
     glue.prepare (sr);
+    deEsser.prepare (sr);
     reverb.prepare (sr);
     limiter.prepare (sr);
 
@@ -406,6 +409,7 @@ void ChoirEngine::reset()
     leadStage.reset();
     subLevel = 0.0f;
     glue.reset();
+    deEsser.reset();
     reverb.reset();
     reverbIdle = true;
     room = fadingRoom = nullptr;   // the owner hands a fresh one back
@@ -945,6 +949,9 @@ void ChoirEngine::allocateSingers()
 
     for (int s = 0; s < NumSections; ++s)
     {
+        // AI singers on a section's part: each of them sings, however small the choir.
+        if (singersApplied && activePasses > 0 && activeSec[(size_t) s])
+            counts[(size_t) s] = std::max (counts[(size_t) s], activePasses);
         counts[(size_t) s] = std::min (counts[(size_t) s], s == Bass ? kSubFirst : kSingersPerSection);
         sectionCount[(size_t) s] = counts[(size_t) s];
         // The oktavists stand with the basses: one for every two (at least one).
@@ -1087,9 +1094,12 @@ void ChoirEngine::spreadOverPasses()
         const int source = activePasses <= 0 ? 0
                          : passesAreSingers ? 1 + (s.index + s.section) % activePasses
                                             : (s.index + s.section) % (activePasses + 1);
-        if (source == s.source)
+        // The first singer on each AI singer's voice is that singer: their voice as it was sung.
+        const bool direct = passesAreSingers && activePasses > 0 && ! s.sub && s.index < activePasses;
+        if (source == s.source && direct == s.direct)
             continue;
         s.source = source;
+        s.direct = direct;
         int64_t base = 0;
         const auto& an = sourceOf (s, base);
         s.psola.reset ((double) (an.getWritten() - latency - activeEchoOffset - s.delay));
@@ -1542,6 +1552,8 @@ void ChoirEngine::process (const float* inL, const float* inR, float* outL, floa
         activePasses = wantedPasses;
         const bool printsChanged = passesAreSingers != singersApplied;
         singersApplied = passesAreSingers;
+        lastSingerTarget = -1;   // every AI singer gets a place: count the sections again
+        allocateSingers();
         spreadOverPasses();
         if (printsChanged)
             for (auto& sp : singers)
@@ -1845,7 +1857,18 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             {
                 int64_t base = 0;
                 const auto& source = sourceOf (s, base);
-                s.psola.render (source, tSinger - base, c, scratch.data(), s.pctl, s.rng);
+                if (s.direct)
+                {
+                    // An AI singer's own voice: no shifting, no added vibrato or detune (they have their own).
+                    const float* ring = source.getRing();
+                    const int64_t mask = source.getRingMask(), from = tSinger - base;
+                    for (int i = 0; i < c; ++i)
+                        scratch[(size_t) i] = ring[(from + i) & mask];
+                }
+                else
+                {
+                    s.psola.render (source, tSinger - base, c, scratch.data(), s.pctl, s.rng);
+                }
                 const float gateTarget = cf.sounding && ! silent ? 1.0f : 0.0f;
                 float peak = 0.0f;
                 for (int i = 0; i < c; ++i)
@@ -2049,6 +2072,8 @@ void ChoirEngine::processChunk (const float* inL, const float* inR, float* outL,
             choirR[(size_t) i] = choirR[(size_t) i] * (1.0f - warmth) + softSaturate (choirR[(size_t) i], warmth) * warmth;
         }
     }
+    // A stack of sung words: their sibilants would pile up and flam against the lead's.
+    deEsser.process (choirL.data(), choirR.data(), c, params.vocalType == VocalType::Words ? 0.5f : 0.0f);
     glue.process (choirL.data(), choirR.data(), c, clampv (params.glue / 100.0f, 0.0f, 1.0f));
 
     const float cg = choirGain.advance (c), lg = leadGain.advance (c), ls = leadSend.advance (c);

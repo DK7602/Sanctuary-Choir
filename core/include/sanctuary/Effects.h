@@ -211,6 +211,27 @@ private:
     float att = 0, rel = 0, env = 0, gain = 1, gainSmooth = 0;
 };
 
+/** De-esser for a stack of voices: their "s" and "t" sounds pile up and flam against the lead's, so
+    the band above about 5 kHz is turned down while it outweighs the rest of the sound (a consonant),
+    and left alone under a vowel - what an engineer does to backing vocals. l and r are processed
+    in place. */
+class DeEsser
+{
+public:
+    void prepare (double sampleRate);
+    void reset();
+    /** amount 0..1: up to 10 dB off a hiss at 1. */
+    void process (float* l, float* r, int n, float amount) noexcept;
+    float getReductionDb() const noexcept { return gainToDb (gain); }
+
+private:
+    float envHigh = 0, envAll = 0, gain = 1;
+    float att = 0, rel = 0, gainAtt = 0, gainRel = 0;
+    Biquad detect1, detect2;   // what is up there, heard through a steep high-pass
+    // A Linkwitz-Riley crossover at 4.5 kHz: its two halves are in phase and add up flat.
+    std::array<Biquad, 2> lowL, lowR, highL, highR;
+};
+
 /** Output limiter (ceiling about -0.3 dBFS) that looks ahead: it sees each peak 1.5 ms before
     it plays and turns the gain down in a straight ramp that arrives at the peak's level with the
     peak, holds it while the peaks keep coming, then lets it back up slowly. A choir pushed far

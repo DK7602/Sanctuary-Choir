@@ -897,6 +897,18 @@ ScaleType autoScaleType (const std::array<float, 12>& h, int tonic, bool minor, 
     float total = 0.0f;
     for (float v : h)
         total += v;
+    // The darker and the brighter minors of trap and R&B: the lowered second (Phrygian) or the
+    // raised sixth (Dorian), when the tune clearly sings it rather than the natural minor's note.
+    auto clearly = [&] (int heard, int instead, ScaleType type)
+    {
+        const float a = h[(size_t) wrapPc (tonic + heard)], b = h[(size_t) wrapPc (tonic + instead)];
+        const bool keep = current == type;
+        return a > (keep ? 0.025f : 0.04f) * total && a > (keep ? 1.2f : 2.0f) * b + 1.0e-6f;
+    };
+    if (clearly (1, 2, ScaleType::Phrygian))
+        return ScaleType::Phrygian;
+    if (clearly (9, 8, ScaleType::Dorian))
+        return ScaleType::Dorian;
     // The leading tone has to be sung for real: a slide up into the tonic passes through it too,
     // and pop, R&B and gospel tunes in minor rarely touch either seventh.
     const bool sung = raised > 0.04f * total, stillSung = raised > 0.025f * total;

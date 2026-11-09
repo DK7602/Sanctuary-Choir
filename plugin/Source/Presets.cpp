@@ -104,6 +104,22 @@ namespace
             p ("Wide Octaves",      { { harmonyMode, Unison }, { style, Cinematic }, { vocalType, Words }, { choirSize, 30 }, { space, 100 }, { reverb, 35 }, { presence, 40 }, { venue, Hall } }),
         });
 
+        // Made for AI singers (Settings > AI SINGERS on): they are the front of the group, each heard
+        // as they sang; with your own voice the same settings make a smaller, tighter choir.
+        category = "AI Singers";
+        add ({
+            // A session group behind a pop or R&B lead: close and dry, the lows and the "s" sounds
+            // tamed so they sit under the lead, no bass singer droning the root.
+            p ("Session Singers",   { { harmonyMode, GospelStack }, { style, Worship }, { vocalType, Words }, { choirSize, 8 }, { space, 45 }, { reverb, 18 },
+                                      { presence, 50 }, { lowCut, 140 }, { glue, 40 }, { micClose, 0 }, { micTree, -8 }, { venue, Studio }, { bassMute, 1 } }),
+            p ("Session Thirds",    { { harmonyMode, Thirds }, { style, Worship }, { vocalType, Words }, { choirSize, 8 }, { space, 40 }, { reverb, 18 },
+                                      { presence, 50 }, { lowCut, 140 }, { glue, 40 }, { micClose, 0 }, { micTree, -8 }, { venue, Studio }, { bassMute, 1 } }),
+            p ("Gospel Section",    { { harmonyMode, GospelStack }, { style, Gospel }, { vocalType, Words }, { choirSize, 20 }, { space, 55 }, { reverb, 28 },
+                                      { presence, 50 }, { lowCut, 90 }, { glue, 45 }, { venue, GospelChurch } }),
+            p ("Real Choir",        { { harmonyMode, Full }, { style, Worship }, { vocalType, Words }, { choirSize, 45 }, { space, 65 }, { reverb, 45 },
+                                      { presence, 38 }, { glue, 35 }, { venue, Hall } }),
+        });
+
         category = "Pads & Drones";
         add ({
             p ("Midnight Hum",      { { harmonyMode, Full }, { style, Sacred }, { vocalType, Mm }, { choirSize, 50 }, { space, 65 }, { reverb, 60 }, { presence, 10 }, { tone, -3 }, { venue, Abbey } }),

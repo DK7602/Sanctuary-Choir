@@ -459,7 +459,7 @@ Cast completeCast (const std::vector<Singer>& singers, const Cast& chosen, int p
 
 //==============================================================================
 std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnalysis& analysis, int64_t length,
-                              double sampleRate, int section, int slot, const Singer& singer, float a4)
+                              double sampleRate, int section, int slot, const Singer& singer, float a4, sc::Style style)
 {
     constexpr double fps = 100.0;
     const int numFrames = (int) std::ceil ((double) length / sampleRate * fps);
@@ -537,10 +537,32 @@ std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnaly
         sung[(size_t) f] = (fr.voiced || (fr.clarity > 0.45f && fr.rmsDb > -45.0f) || score.enteringAt (at)) ? 1 : 0;
     }
 
-    // A new note is reached in 40 ms (a sung step, not a jump).
+    // How this singer sings, from the style, their own and the same every time (a seed per singer and
+    // place): nobody in a real group sings dead straight or exactly like the next one.
+    uint64_t seed = 1469598103934665603ull;
+    for (auto ch : singer.id + "/" + juce::String (section) + "/" + juce::String (slot))
+        seed = (seed ^ (uint64_t) ch) * 1099511628211ull;
+    auto uni = [&seed]
+    {
+        seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+        return (float) ((seed >> 11) & 0xffffff) / 16777216.0f;
+    };
+    auto between = [&uni] (float lo, float hi) { return lo + (hi - lo) * uni(); };
+    const auto profile = sc::getStyleProfile (style);
+    const float vibRate = profile.vibratoRateHz * between (0.92f, 1.08f);
+    const float vibDepth = std::min (45.0f, profile.vibratoCents * 0.6f * between (0.7f, 1.3f));     // cents, peak
+    const float vibOnset = profile.vibratoOnsetS * between (0.8f, 1.3f);
+    const int glideFrames = std::max (3, (int) std::lround (profile.glideMs * between (0.8f, 1.4f) / 10.0f));
+    const float scoopCents = profile.scoopCents * between (0.5f, 1.1f);
+    const float driftCents = std::max (2.0f, profile.driftCents) * between (0.6f, 1.2f);
+    const float tuning = between (-4.0f, 4.0f);                                                       // cents
+    float vibPhase = uni(), drift = 0.0f, wobble = 0.0f, noteAge = 0.0f, scoop = 0.0f;
+    constexpr float dt = 1.0f / (float) fps;
+
     float previous = 0.0f;
     int glideLeft = 0;
     float glideFrom = 0.0f;
+    bool wasSung = false;
     for (int f = 0; f < numFrames; ++f)
     {
         const int n = notes[(size_t) f];
@@ -549,22 +571,42 @@ std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnaly
             f0[(size_t) f] = 0.0f;
             if (n < 0)
                 previous = 0.0f;
+            wasSung = false;
             continue;
         }
         const float target = (float) n;
         if (previous > 0.0f && std::abs (previous - target) > 0.01f && glideLeft == 0)
         {
             glideFrom = previous;
-            glideLeft = 4;
+            glideLeft = glideFrames;   // a new note is reached in this singer's own time
+            noteAge = 0.0f;
+        }
+        if (! wasSung)
+        {
+            scoop = -scoopCents;       // after a breath or a consonant: up into the note
+            if (previous <= 0.0f)
+                noteAge = 0.0f;
         }
         float midi = target;
         if (glideLeft > 0)
         {
-            const float t = 1.0f - (float) glideLeft / 4.0f;
+            const float t = 1.0f - (float) glideLeft / (float) glideFrames;
             midi = glideFrom + (target - glideFrom) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * t));
             --glideLeft;
         }
+        // Vibrato on a held note: it comes in after a moment and grows, a little uneven.
+        wobble += (between (-1.0f, 1.0f) - wobble) * 0.05f;
+        const float grow = juce::jlimit (0.0f, 1.0f, (noteAge - vibOnset) / 0.3f);
+        vibPhase += vibRate * (1.0f + 0.06f * wobble) * dt;
+        vibPhase -= std::floor (vibPhase);
+        const float vib = vibDepth * grow * grow * (1.0f + 0.15f * wobble) * std::sin (juce::MathConstants<float>::twoPi * vibPhase);
+        drift += (between (-1.0f, 1.0f) * driftCents - drift) * 0.02f;   // ~0.5 s: a slow wander
+        scoop *= std::exp (-dt / 0.05f);
+        midi += (vib + drift + scoop + tuning) / 100.0f;
+
         previous = target;
+        wasSung = true;
+        noteAge += dt;
         f0[(size_t) f] = a4 * std::exp2 ((midi - 69.0f) / 12.0f);
     }
     return f0;
@@ -670,7 +712,7 @@ static bool singParts (const NeuralVoiceModel& model, const std::vector<float>& 
 bool Renderer::render (const std::vector<float>& take, double sampleRate, const sc::TakeAnalysis& analysis,
                        const sc::LearnedScore& score, const Cast& cast, const std::vector<Singer>& singers, float a4,
                        Result& result, const std::function<void (float, const juce::String&)>& progress,
-                       const std::atomic<bool>* cancel)
+                       const std::atomic<bool>* cancel, sc::Style style)
 {
     const std::lock_guard<std::mutex> sl (lock);
     result = Result{};
@@ -701,7 +743,7 @@ bool Renderer::render (const std::vector<float>& take, double sampleRate, const 
                 result.problems.add (id + " is not installed in VoxaVersa any more");
                 continue;
             }
-            Job job { sec, slot, it->second, partPitch (score, analysis, (int64_t) take.size(), sampleRate, sec, slot, *it->second, a4), {} };
+            Job job { sec, slot, it->second, partPitch (score, analysis, (int64_t) take.size(), sampleRate, sec, slot, *it->second, a4, style), {} };
             Hash h = takeHash;
             h.bytes (job.f0.data(), job.f0.size() * sizeof (float));
             h.add (job.singer->id);

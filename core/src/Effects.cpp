@@ -491,6 +491,63 @@ void GlueCompressor::process (float* l, float* r, int n, float amount)
 }
 
 //==============================================================================
+void DeEsser::prepare (double sampleRate)
+{
+    att = onePoleCoeff (0.001f, sampleRate);
+    rel = onePoleCoeff (0.030f, sampleRate);
+    gainAtt = onePoleCoeff (0.002f, sampleRate);
+    gainRel = onePoleCoeff (0.050f, sampleRate);
+    detect1.highPass (sampleRate, 5000.0);
+    detect2.highPass (sampleRate, 5000.0);
+    for (int k = 0; k < 2; ++k)
+    {
+        lowL[(size_t) k].lowPass (sampleRate, 4500.0);
+        lowR[(size_t) k].lowPass (sampleRate, 4500.0);
+        highL[(size_t) k].highPass (sampleRate, 4500.0);
+        highR[(size_t) k].highPass (sampleRate, 4500.0);
+    }
+    reset();
+}
+
+void DeEsser::reset()
+{
+    envHigh = envAll = 0.0f;
+    gain = 1.0f;
+    detect1.reset();
+    detect2.reset();
+    for (auto* f : { &lowL, &lowR, &highL, &highR })
+        for (auto& b : *f)
+            b.reset();
+}
+
+void DeEsser::process (float* l, float* r, int n, float amount) noexcept
+{
+    if (amount <= 0.001f)
+    {
+        gain = 1.0f;   // off (vowels): the choir goes straight through
+        return;
+    }
+    const float maxCutDb = 10.0f * std::min (1.0f, std::max (0.0f, amount));
+    for (int i = 0; i < n; ++i)
+    {
+        const float loL = lowL[1].process (lowL[0].process (l[i])), loR = lowR[1].process (lowR[0].process (r[i]));
+        const float hiL = highL[1].process (highL[0].process (l[i])), hiR = highR[1].process (highR[0].process (r[i]));
+        const float sharp = detect2.process (detect1.process (0.5f * (l[i] + r[i])));
+        const float mid = 0.5f * (l[i] + r[i]);
+        const float pHigh = sharp * sharp, pAll = mid * mid;
+        envHigh = pHigh + (envHigh - pHigh) * (pHigh > envHigh ? att : rel);
+        envAll = pAll + (envAll - pAll) * (pAll > envAll ? att : rel);
+        // How much of the sound is up there: a vowel has a few percent, an "s" most of it.
+        const float share = envAll > 1.0e-12f ? envHigh / envAll : 0.0f;
+        const float excess = std::min (1.0f, std::max (0.0f, (share - 0.25f) / 0.3f));
+        const float target = dbToGain (-maxCutDb * excess);
+        gain = target + (gain - target) * (target < gain ? gainAtt : gainRel);
+        l[i] = loL + gain * hiL;
+        r[i] = loR + gain * hiR;
+    }
+}
+
+//==============================================================================
 void SafetyLimiter::prepare (double sampleRate)
 {
     look = std::max (1, (int) std::lround (0.0015 * sampleRate));

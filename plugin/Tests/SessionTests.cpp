@@ -1024,6 +1024,68 @@ static void setEnv (const char* name, const String& value)
    #endif
 }
 
+static void aiSingersSingLikePeople()
+{
+    std::printf ("AI singers' parts are sung like people: vibrato on held notes, scoops, each their own\n");
+    const double rate = 48000.0;
+    const auto take = sc::test::singMelody ({ { 57.0f, 1.6f, 0.6f }, { 60.0f, 1.6f, 0.6f }, { 59.0f, 1.6f, 0.3f } }, rate, 1, 0.0f);
+    const auto analysis = sc::analyseTake (take.data(), (int64_t) take.size(), rate);
+    const auto score = sc::harmoniseTake (analysis, sc::HarmonySettings {});
+    auto singer = [] (const char* id) { sanctuary::ai::Singer s; s.id = id; s.name = id; s.low = 45; s.high = 67; s.median = 56.0f; return s; };
+    const auto one = singer ("tenor-one"), two = singer ("tenor-two");
+    const auto len = (int64_t) take.size();
+    const auto a = sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, one, 440.0f, sc::Style::Gospel);
+    const auto again = sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, one, 440.0f, sc::Style::Gospel);
+    const auto b = sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, two, 440.0f, sc::Style::Gospel);
+    const auto sacred = sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, one, 440.0f, sc::Style::Sacred);
+    check (a == again, "the same singer sings the part the same way every time (a cached voice stays right)");
+
+    // Each held note: its first frames (the scoop) and its last 0.7 s (vibrato), in cents from the note.
+    auto notesOf = [] (const std::vector<float>& f0)
+    {
+        std::vector<std::pair<int, int>> runs;
+        for (int i = 0; i < (int) f0.size();)
+        {
+            if (f0[(size_t) i] <= 0.0f) { ++i; continue; }
+            int j = i;
+            while (j < (int) f0.size() && f0[(size_t) j] > 0.0f) ++j;
+            if (j - i > 100) runs.push_back ({ i, j });
+            i = j;
+        }
+        return runs;
+    };
+    auto centsFrom = [] (float hz, float note) { return 1200.0f * std::log2 (hz / (440.0f * std::exp2 ((note - 69.0f) / 12.0f))); };
+    const auto runs = notesOf (a);
+    check (runs.size() == 3, "three held notes");
+    double worstMean = 0.0, minSpread = 1.0e9, firstA = 0.0, firstSacred = 0.0, apart = 0.0;
+    int compared = 0;
+    for (const auto& [s, e] : runs)
+    {
+        std::vector<float> tail;
+        for (int i = e - 70; i < e; ++i)
+            tail.push_back (a[(size_t) i]);
+        std::vector<float> sorted = tail;
+        std::sort (sorted.begin(), sorted.end());
+        const float note = std::round (12.0f * std::log2 (sorted[sorted.size() / 2] / 440.0f) + 69.0f);
+        double mean = 0.0, sq = 0.0;
+        for (float hz : tail) { const double c = centsFrom (hz, note); mean += c; sq += c * c; }
+        mean /= (double) tail.size();
+        const double spread = std::sqrt (sq / (double) tail.size() - mean * mean);
+        worstMean = std::max (worstMean, std::abs (mean));
+        minSpread = std::min (minSpread, spread);
+        firstA += centsFrom (a[(size_t) s], note) / 3.0;
+        firstSacred += sacred[(size_t) s] > 0.0f ? centsFrom (sacred[(size_t) s], note) / 3.0 : 0.0;
+        for (int i = s; i < e; ++i)
+            if (b[(size_t) i] > 0.0f) { apart += std::abs (centsFrom (a[(size_t) i], note) - centsFrom (b[(size_t) i], note)); ++compared; }
+    }
+    apart /= std::max (1, compared);
+    std::printf ("  held notes: vibrato %.0f cents rms, centred within %.1f cents; scoop in %.0f cents (Sacred %.0f); two singers %.0f cents apart\n",
+                 minSpread, worstMean, firstA, firstSacred, apart);
+    check (minSpread > 6.0 && minSpread < 35.0 && worstMean < 10.0, "held notes have vibrato, centred on the note");
+    check (firstA < -15.0 && std::abs (firstSacred) < 8.0, "a Gospel singer scoops into a note after a rest, a Sacred one doesn't");
+    check (apart > 3.0, "and no two singers sing it alike");
+}
+
 static void aiSingersSkipTheSilences()
 {
     std::printf ("AI singers sing only where the part is sung, and the same as when the whole take is sung\n");
@@ -1387,6 +1449,7 @@ int main (int argc, char** argv)
     chordLaneAndDragOut();
     passesMakeAMultiTakeChoir();
     aiSingersSingTheParts();
+    aiSingersSingLikePeople();
     aiSingersSkipTheSilences();
     aiSingersShareAndInstall();
     std::printf ("\n%d checks, %d failures\n", checks, failures);

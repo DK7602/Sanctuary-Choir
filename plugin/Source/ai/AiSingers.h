@@ -70,9 +70,12 @@ Cast completeCast (const std::vector<Singer>& singers, const Cast& chosen, int p
 /** The pitch (Hz, 100 frames a second, 0 = silent) the singer in place `slot` of `section` sings over the
     take: the section's notes from the score (the slot-th of a divisi), moved by whole octaves into the
     singer's range, wherever the lead sings; unpitched where the lead's sound has no pitch (consonants,
-    breaths), so the singer says them as the lead does. */
+    breaths), so the singer says them as the lead does. Sung as a person sings in the style: their own
+    glide between notes, a scoop into a note after a breath, vibrato that comes in on held notes, a
+    slow drift and their own tuning, the same every time for the same singer and place. */
 std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnalysis& analysis, int64_t length,
-                              double sampleRate, int section, int slot, const Singer& singer, float a4 = 440.0f);
+                              double sampleRate, int section, int slot, const Singer& singer, float a4 = 440.0f,
+                              sc::Style style = sc::Style::Gospel);
 
 /** An AI singer's recording of a part, lined up with the take (16-bit). */
 struct Voice
@@ -108,7 +111,7 @@ public:
     bool render (const std::vector<float>& take, double sampleRate, const sc::TakeAnalysis& analysis,
                  const sc::LearnedScore& score, const Cast& cast, const std::vector<Singer>& singers, float a4,
                  Result& result, const std::function<void (float, const juce::String&)>& progress,
-                 const std::atomic<bool>* cancel);
+                 const std::atomic<bool>* cancel, sc::Style style = sc::Style::Gospel);
 
     /** Where finished voices are kept between renders and sessions. */
     static juce::File getCacheDirectory();
