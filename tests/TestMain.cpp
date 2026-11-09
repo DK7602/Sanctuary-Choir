@@ -3047,7 +3047,7 @@ TEST (deEsserTamesSibilantsAndSparesVowels)
     {
         double v = 0.0;
         for (int h = 1; h <= 30; ++h)
-            v += std::sin (2.0 * M_PI * 220.0 * h * i / sr) / (h * (1.0 + std::pow (220.0 * h / 3000.0, 4.0)));
+            v += std::sin (2.0 * kPiD * 220.0 * h * i / sr) / (h * (1.0 + std::pow (220.0 * h / 3000.0, 4.0)));
         vowelL[(size_t) i] = (float) (0.3 * v);
         seed = seed * 1664525u + 1013904223u;
         const float white = (float) (seed >> 8) / 16777216.0f - 0.5f;
@@ -3090,8 +3090,8 @@ TEST (aiSingersAreHeardAsTheySang)
     std::vector<int16_t> a (x.size()), b (x.size());
     for (size_t i = 0; i < x.size(); ++i)
     {
-        a[i] = (int16_t) std::lround (8000.0 * std::sin (2.0 * M_PI * 220.0 * (double) i / sr));
-        b[i] = (int16_t) std::lround (8000.0 * std::sin (2.0 * M_PI * 277.18 * (double) i / sr));
+        a[i] = (int16_t) std::lround (8000.0 * std::sin (2.0 * kPiD * 220.0 * (double) i / sr));
+        b[i] = (int16_t) std::lround (8000.0 * std::sin (2.0 * kPiD * 277.18 * (double) i / sr));
     }
     SectionVoices voices;
     voices[Tenor] = { { a.data(), (int64_t) a.size(), 1.0f / 32767.0f }, { b.data(), (int64_t) b.size(), 1.0f / 32767.0f } };
@@ -3108,14 +3108,14 @@ TEST (aiSingersAreHeardAsTheySang)
     std::vector<std::complex<float>> spec;
     std::vector<float> seg (t.begin() + (long) from, t.begin() + (long) (from + n));
     for (size_t i = 0; i < n; ++i)
-        seg[i] *= 0.5f - 0.5f * std::cos (2.0f * (float) M_PI * (float) i / (float) n);
+        seg[i] *= 0.5f - 0.5f * std::cos (2.0f * (float) kPiD * (float) i / (float) n);
     double total = 0.0;
     onA = onB = 0.0;
     for (int k = 1; k < 2000; ++k)   // 1 Hz bins
     {
         std::complex<double> s = 0.0;
         for (size_t i = 0; i < n; i += 2)
-            s += (double) seg[i] * std::polar (1.0, -2.0 * M_PI * (double) k * (double) i / sr);
+            s += (double) seg[i] * std::polar (1.0, -2.0 * kPiD * (double) k * (double) i / sr);
         const double e = std::norm (s);
         total += e;
         if (std::abs (k - 220) <= 2) onA += e;
