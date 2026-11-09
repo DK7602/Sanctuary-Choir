@@ -3101,14 +3101,16 @@ TEST (aiSingersAreHeardAsTheySang)
     p.choirSize = 5.0f;   // two singers in all: an alto and a bass
     RenderedStems stems;
     CHECK (renderTake (x.data(), (int64_t) x.size(), sr, p, score, stems, {}, nullptr, nullptr, {}, &voices));
+    auto share = [&] (const std::vector<float>& t, double& onA, double& onB)
+    {
     // One second inside the first note: all the tenors' sound is in the two singers' own pitches.
-    const auto& t = stems.channels[Tenor * 2];
     const size_t from = (size_t) (0.8 * sr), n = (size_t) sr;
     std::vector<std::complex<float>> spec;
     std::vector<float> seg (t.begin() + (long) from, t.begin() + (long) (from + n));
     for (size_t i = 0; i < n; ++i)
         seg[i] *= 0.5f - 0.5f * std::cos (2.0f * (float) M_PI * (float) i / (float) n);
-    double total = 0.0, onA = 0.0, onB = 0.0;
+    double total = 0.0;
+    onA = onB = 0.0;
     for (int k = 1; k < 2000; ++k)   // 1 Hz bins
     {
         std::complex<double> s = 0.0;
@@ -3119,9 +3121,23 @@ TEST (aiSingersAreHeardAsTheySang)
         if (std::abs (k - 220) <= 2) onA += e;
         if (std::abs (k - 277) <= 2) onB += e;
     }
-    std::printf ("  tenors: %.0f%% of their sound within 2 Hz of 220 Hz, %.0f%% of 277 Hz\n", 100.0 * onA / total, 100.0 * onB / total);
-    CHECK (onA / total > 0.3 && onB / total > 0.3);   // both singers, each on their own steady pitch
-    CHECK ((onA + onB) / total > 0.9);                // and nothing pitch-shifted or wobbling besides
+    onA /= total;
+    onB /= total;
+    };
+    double onA = 0.0, onB = 0.0;
+    share (stems.channels[Tenor * 2], onA, onB);
+    std::printf ("  tenors: %.0f%% of their sound within 2 Hz of 220 Hz, %.0f%% of 277 Hz\n", 100.0 * onA, 100.0 * onB);
+    CHECK (onA > 0.3 && onB > 0.3);   // both singers, each on their own steady pitch
+    CHECK (onA + onB > 0.9);          // and nothing pitch-shifted or wobbling besides
+
+    // Singers who sang the part an octave away (to suit their voice) are sung back in place.
+    for (auto& v : voices[Tenor])
+        v.asSung = false;
+    RenderedStems moved;
+    CHECK (renderTake (x.data(), (int64_t) x.size(), sr, p, score, moved, {}, nullptr, nullptr, {}, &voices));
+    share (moved.channels[Tenor * 2], onA, onB);
+    std::printf ("  sung an octave away: %.0f%% left at the pitches they sang\n", 100.0 * (onA + onB));
+    CHECK (onA + onB < 0.3);
 }
 
 TEST (minorKeysKeepTheirNaturalTonicChord)

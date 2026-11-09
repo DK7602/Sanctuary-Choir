@@ -75,7 +75,7 @@ Cast completeCast (const std::vector<Singer>& singers, const Cast& chosen, int p
     slow drift and their own tuning, the same every time for the same singer and place. */
 std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnalysis& analysis, int64_t length,
                               double sampleRate, int section, int slot, const Singer& singer, float a4 = 440.0f,
-                              sc::Style style = sc::Style::Gospel);
+                              sc::Style style = sc::Style::Gospel, bool* asWritten = nullptr);
 
 /** An AI singer's recording of a part, lined up with the take (16-bit). */
 struct Voice
@@ -83,6 +83,7 @@ struct Voice
     std::shared_ptr<const std::vector<int16_t>> pcm;
     float scale = 1.0f / 32767.0f;
     juce::String singerName;
+    bool asSung = true;   // the part at its own pitch (else moved by octaves to suit the singer)
 };
 
 /** What an AI render needs from the session. */

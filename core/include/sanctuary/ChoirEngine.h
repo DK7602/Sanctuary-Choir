@@ -226,6 +226,14 @@ public:
         voices as they are (no voice prints, no change of vocal tract). Offline renders set it once,
         before the first process(). */
     void setPassesAreSingers (bool shouldBe) noexcept { passesAreSingers = shouldBe; }
+    /** Such a singer sang their part at its own pitch (true, the default): heard as they sang. False:
+        they sang it an octave or two away to suit their voice, so the choir sings it back in place
+        (pitch-shifted, like the copies). Set before the first process(). */
+    void setPassAsSung (int pass, bool asSung) noexcept
+    {
+        if (pass >= 0 && pass < kMaxExtraPasses)
+            passAsSung[(size_t) pass] = asSung;
+    }
     /** Side-chain audio for this block (the band, keys or a backing track), or nullptr. Call
         before process(); the pointers are used during that call only. */
     void setSidechain (const float* left, const float* right) noexcept { scL = left; scR = right; }
@@ -327,6 +335,7 @@ private:
     const float* const* passInputs = nullptr;
     int passCount = 0, activePasses = 0;
     bool passesAreSingers = false, singersApplied = false;   // see setPassesAreSingers
+    std::array<bool, kMaxExtraPasses> passAsSung { true, true, true };
     LiveHarmonizer harmonizer;
     KeyTracker keyTracker;
     GlottalTables glottal;

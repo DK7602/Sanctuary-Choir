@@ -974,6 +974,9 @@ bool renderTake (const float* x, int64_t n, double sampleRate, const EngineParam
                                                            && ! (*sectionVoices)[(size_t) section].empty()
                                                          ? &(*sectionVoices)[(size_t) section] : nullptr;
         engine.setPassesAreSingers (singersHere != nullptr);
+        if (singersHere != nullptr)
+            for (size_t k = 0; k < singersHere->size(); ++k)
+                engine.setPassAsSung ((int) k, (*singersHere)[k].asSung);
         const int numPasses = std::min (singersHere != nullptr ? (int) singersHere->size() : (int) passes.size(), kMaxExtraPasses);
         std::vector<std::vector<float>> passBlocks ((size_t) numPasses, std::vector<float> ((size_t) block));
         std::array<const float*, kMaxExtraPasses> passPtrs {};

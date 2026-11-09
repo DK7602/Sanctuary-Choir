@@ -459,7 +459,8 @@ Cast completeCast (const std::vector<Singer>& singers, const Cast& chosen, int p
 
 //==============================================================================
 std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnalysis& analysis, int64_t length,
-                              double sampleRate, int section, int slot, const Singer& singer, float a4, sc::Style style)
+                              double sampleRate, int section, int slot, const Singer& singer, float a4, sc::Style style,
+                              bool* asWritten)
 {
     constexpr double fps = 100.0;
     const int numFrames = (int) std::ceil ((double) length / sampleRate * fps);
@@ -509,16 +510,21 @@ std::vector<float> partPitch (const sc::LearnedScore& score, const sc::TakeAnaly
             bestShift = shift;
         }
     }
+    bool moved = false;
     for (auto& n : notes)
     {
         if (n < 0)
             continue;
+        const int written = n;
         n += bestShift;
         while (n > singer.high + 2 && n - 12 >= singer.low - 2)
             n -= 12;
         while (n < singer.low - 2 && n + 12 <= singer.high + 2)
             n += 12;
+        moved = moved || n != written;
     }
+    if (asWritten != nullptr)
+        *asWritten = ! moved;
 
     // Where the lead sings: its voiced frames, the pitched ones the tracker was unsure of (a run, a
     // slide) and the start of a note sung before its pitch was clear (the singer comes in with the
@@ -728,7 +734,7 @@ bool Renderer::render (const std::vector<float>& take, double sampleRate, const 
     takeHash.add (sampleRate);
     takeHash.bytes (take.data(), take.size() * sizeof (float));
 
-    struct Job { int section; int slot; const Singer* singer; std::vector<float> f0; juce::File file; };
+    struct Job { int section; int slot; const Singer* singer; std::vector<float> f0; juce::File file; bool asSung = true; };
     std::vector<Job> jobs;
     for (int sec = 0; sec < sc::NumSections; ++sec)
     {
@@ -743,7 +749,8 @@ bool Renderer::render (const std::vector<float>& take, double sampleRate, const 
                 result.problems.add (id + " is not installed in VoxaVersa any more");
                 continue;
             }
-            Job job { sec, slot, it->second, partPitch (score, analysis, (int64_t) take.size(), sampleRate, sec, slot, *it->second, a4, style), {} };
+            Job job { sec, slot, it->second, {}, {} };
+            job.f0 = partPitch (score, analysis, (int64_t) take.size(), sampleRate, sec, slot, *it->second, a4, style, &job.asSung);
             Hash h = takeHash;
             h.bytes (job.f0.data(), job.f0.size() * sizeof (float));
             h.add (job.singer->id);
@@ -790,6 +797,7 @@ bool Renderer::render (const std::vector<float>& take, double sampleRate, const 
     {
         Voice v;
         v.singerName = jobs[j].singer->name;
+        v.asSung = jobs[j].asSung;
         if (readCached (jobs[j], v))
         {
             placed[(size_t) jobs[j].section].push_back ({ jobs[j].slot, v });
@@ -860,6 +868,7 @@ bool Renderer::render (const std::vector<float>& take, double sampleRate, const 
 
             Voice v;
             v.singerName = job.singer->name;
+            v.asSung = job.asSung;
             auto pcm = std::make_shared<std::vector<int16_t>> (take.size(), (int16_t) 0);
             float peak = 1.0e-6f;
             for (float x : sung)

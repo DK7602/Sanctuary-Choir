@@ -1039,6 +1039,12 @@ static void aiSingersSingLikePeople()
     const auto b = sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, two, 440.0f, sc::Style::Gospel);
     const auto sacred = sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, one, 440.0f, sc::Style::Sacred);
     check (a == again, "the same singer sings the part the same way every time (a cached voice stays right)");
+    bool written = false, lowWritten = true;
+    auto low = singer ("low-bass");
+    low.low = 28; low.high = 45; low.median = 36.0f;
+    sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, one, 440.0f, sc::Style::Gospel, &written);
+    sanctuary::ai::partPitch (score, analysis, len, rate, sc::Tenor, 0, low, 440.0f, sc::Style::Gospel, &lowWritten);
+    check (written && ! lowWritten, "a part sung at its own pitch says so; one moved an octave down to suit a low voice says it was moved");
 
     // Each held note: its first frames (the scoop) and its last 0.7 s (vibrato), in cents from the note.
     auto notesOf = [] (const std::vector<float>& f0)

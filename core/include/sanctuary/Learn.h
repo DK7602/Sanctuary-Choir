@@ -162,6 +162,7 @@ struct SectionVoice
     const int16_t* pcm = nullptr;
     int64_t length = 0;
     float scale = 1.0f / 32767.0f;
+    bool asSung = true;   // sung at the part's own pitch; else moved by octaves to suit the singer (shifted back)
 };
 using SectionVoices = std::array<std::vector<SectionVoice>, NumSections>;
 

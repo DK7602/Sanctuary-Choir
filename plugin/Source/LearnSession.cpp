@@ -945,7 +945,7 @@ void LearnSession::render()
             for (int s = 0; s < sc::NumSections; ++s)
                 for (const auto& v : aiResult.voices[(size_t) s])
                 {
-                    sectionVoices[(size_t) s].push_back ({ v.pcm->data(), (int64_t) v.pcm->size(), v.scale });
+                    sectionVoices[(size_t) s].push_back ({ v.pcm->data(), (int64_t) v.pcm->size(), v.scale, v.asSung });
                     aiUsed = true;
                 }
             const std::lock_guard<std::mutex> sl (aiTextLock);

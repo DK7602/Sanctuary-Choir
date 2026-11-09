@@ -1095,7 +1095,8 @@ void ChoirEngine::spreadOverPasses()
                          : passesAreSingers ? 1 + (s.index + s.section) % activePasses
                                             : (s.index + s.section) % (activePasses + 1);
         // The first singer on each AI singer's voice is that singer: their voice as it was sung.
-        const bool direct = passesAreSingers && activePasses > 0 && ! s.sub && s.index < activePasses;
+        const bool direct = passesAreSingers && activePasses > 0 && ! s.sub && s.index < activePasses
+                            && passAsSung[(size_t) source - 1];
         if (source == s.source && direct == s.direct)
             continue;
         s.source = source;
