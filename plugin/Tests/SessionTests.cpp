@@ -1301,6 +1301,40 @@ static void aiSingersShareAndInstall()
     const auto one = sanctuary::ai::installVoices (vxpack, error);
     check (one.size() == 1 && sanctuary::ai::findSingers().size() == 3, "a VoxaVersa .vxpack installs as one more singer");
 
+    // A voice from VoxaVersa's trainer: a zip holding the .vxpack, its voice assignment and credits.
+    const auto trained = root.getChildFile ("GTSinger Tenor 1.zip");
+    {
+        MemoryOutputStream packBytes;
+        {
+            ZipFile::Builder inner;
+            const String voiceJson ("{ \"id\": \"gtsinger-en-tenor-1\", \"name\": \"gtsinger-en-tenor-1\", \"gender\": \"male\", "
+                                    "\"license\": \"CC BY-NC-SA 4.0 - GTSinger (Zhang et al., NeurIPS 2024): personal, non-commercial use only\", "
+                                    "\"model\": { \"file\": \"model.onnx\", \"encoder\": \"contentvec-768\", \"sampleRate\": 40000 } }");
+            inner.addEntry (std::make_unique<MemoryInputStream> (voiceJson.toRawUTF8(), voiceJson.getNumBytesAsUTF8(), true), 0, "voice.json", Time::getCurrentTime());
+            inner.addEntry (std::make_unique<MemoryInputStream> ("a model", 7, true), 0, "model.onnx", Time::getCurrentTime());
+            inner.writeToStream (packBytes, nullptr);
+        }
+        ZipFile::Builder outer;
+        outer.addEntry (std::make_unique<MemoryInputStream> (packBytes.getData(), packBytes.getDataSize(), true), 0,
+                        "gtsinger-en-tenor-1.vxpack", Time::getCurrentTime());
+        const String assignment ("{ \"packs\": { \"gtsinger-en-tenor-1\": { \"name\": \"GTSinger Tenor 1\", \"range\": [51, 68], \"median\": 59.8 } } }");
+        outer.addEntry (std::make_unique<MemoryInputStream> (assignment.toRawUTF8(), assignment.getNumBytesAsUTF8(), true), 0,
+                        "voice_assignment.json", Time::getCurrentTime());
+        outer.addEntry (std::make_unique<MemoryInputStream> ("GTSinger credit", 15, true), 0, "CREDITS.txt", Time::getCurrentTime());
+        FileOutputStream out (trained);
+        outer.writeToStream (out, nullptr);
+    }
+    const auto fromTrainer = sanctuary::ai::installVoices (trained, error);
+    const sanctuary::ai::Singer* tenor = nullptr;
+    const auto now = sanctuary::ai::findSingers();
+    for (const auto& s : now)
+        if (s.id == "gtsinger-en-tenor-1") tenor = &s;
+    check (fromTrainer.size() == 1 && now.size() == 4 && tenor != nullptr && tenor->name == "GTSinger Tenor 1" && tenor->low == 51
+               && tenor->median == 59.8f && tenor->nonCommercial,
+           "a voice zipped by VoxaVersa's trainer (.vxpack, assignment, credits) installs with its name, range and licence");
+    check (sanctuary::ai::getSanctuaryAiDirectory().getChildFile ("Credits").getChildFile ("GTSinger Tenor 1.txt").existsAsFile(),
+           "and its credits are kept");
+
     setEnv ("SANCTUARY_VOXAVERSA_DIR", {});
     setEnv ("SANCTUARY_AI_DIR", {});
     root.deleteRecursively();

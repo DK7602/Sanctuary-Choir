@@ -322,6 +322,23 @@ juce::StringArray installVoices (const juce::File& source, juce::String& error)
         file.replaceWithText (juce::JSON::toString (current));
     };
 
+    // One VoxaVersa .vxpack: voice.json and the model at its root.
+    auto installVxpack = [&] (const juce::File& file)
+    {
+        juce::ZipFile pack (file);
+        const auto* entry = pack.getEntry ("voice.json");
+        if (entry == nullptr)
+            return;
+        std::unique_ptr<juce::InputStream> in (pack.createStreamForEntry (*entry));
+        const auto json = juce::JSON::parse (in != nullptr ? in->readEntireStreamAsString() : juce::String());
+        const auto id = json.getProperty ("id", file.getFileNameWithoutExtension()).toString()
+                            .retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ");
+        const auto dest = voicesDir.getChildFile (id.isNotEmpty() ? id : file.getFileNameWithoutExtension());
+        dest.deleteRecursively();
+        if (pack.uncompressTo (dest, true).wasOk())
+            installed.add (dest.getFileName());
+    };
+
     if (source.isDirectory())
     {
         // A pack folder (voice.json inside) or a folder of them.
@@ -349,14 +366,7 @@ juce::StringArray installVoices (const juce::File& source, juce::String& error)
         }
         if (zip.getEntry ("voice.json") != nullptr)
         {
-            // One VoxaVersa .vxpack: voice.json and the model at its root.
-            const auto json = juce::JSON::parse (zip.createStreamForEntry (*zip.getEntry ("voice.json"))->readEntireStreamAsString());
-            const auto id = json.getProperty ("id", source.getFileNameWithoutExtension()).toString()
-                                .retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ");
-            const auto dest = voicesDir.getChildFile (id.isNotEmpty() ? id : source.getFileNameWithoutExtension());
-            dest.deleteRecursively();
-            if (zip.uncompressTo (dest, true).wasOk())
-                installed.add (dest.getFileName());
+            installVxpack (source);
         }
         else
         {
@@ -378,11 +388,21 @@ juce::StringArray installVoices (const juce::File& source, juce::String& error)
                 if (d.moveFileTo (dest))
                     installed.add (d.getFileName());
             }
+            // A voice from VoxaVersa's trainer: a zip of one or more .vxpack files with their voice
+            // assignment (names, measured ranges) and credits beside them.
+            for (const auto& f : staging.findChildFiles (juce::File::findFiles, true, "*.vxpack"))
+                installVxpack (f);
             for (const auto& f : staging.getChildFile ("Encoders").findChildFiles (juce::File::findFiles, false, "*.onnx"))
                 f.moveFileTo (encodersDir.getChildFile (f.getFileName()));
             mergeAssignment (juce::JSON::parse (staging.getChildFile ("Voices").getChildFile ("voice_assignment.json")).getProperty ("packs", {}));
+            mergeAssignment (juce::JSON::parse (staging.getChildFile ("voice_assignment.json")).getProperty ("packs", {}));
             if (staging.getChildFile ("CREDITS.txt").existsAsFile())
-                staging.getChildFile ("CREDITS.txt").moveFileTo (getSanctuaryAiDirectory().getChildFile ("CREDITS.txt"));
+            {
+                // Each pack's credits are kept (installing another must not lose them).
+                const auto credits = getSanctuaryAiDirectory().getChildFile ("Credits");
+                credits.createDirectory();
+                staging.getChildFile ("CREDITS.txt").moveFileTo (credits.getChildFile (source.getFileNameWithoutExtension() + ".txt"));
+            }
             staging.deleteRecursively();
         }
     }
