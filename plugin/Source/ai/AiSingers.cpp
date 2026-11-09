@@ -81,10 +81,18 @@ namespace
 bool isShareable (const juce::String& licenceAndDescription)
 {
     const auto t = licenceAndDescription.toLowerCase();
-    for (auto* no : { "owner's library", "owners library", "personal use", "testing only", "do not share", "military",
-                      "band member", "not for sale", "private" })
+    for (auto* no : { "owner's library", "owners library", "personal", "testing only", "do not share", "military",
+                      "band member", "not for sale", "private", "non-commercial", "noncommercial", "non commercial" })
         if (t.contains (no))
             return false;
+    // Creative Commons with NonCommercial or NoDerivatives terms (CC BY-NC-SA, as GTSinger's): a voice
+    // trained on it may not be given away with something people use to make their songs.
+    juce::String words;
+    for (auto ch : t)
+        words << (juce::CharacterFunctions::isLetterOrDigit (ch) ? juce::String::charToString (ch) : juce::String (" "));
+    const auto terms = juce::StringArray::fromTokens (words, " ", {});
+    if (terms.contains ("nc") || terms.contains ("nd"))
+        return false;
     return t.contains ("vocalset") || t.contains ("cc by") || t.contains ("cc-by") || t.contains ("cc0");
 }
 

@@ -1129,7 +1129,9 @@ static void aiSingersShareAndInstall()
     struct Pack { const char* id; const char* gender; const char* licence; };
     for (const Pack& p : { Pack { "vocalset-female1", "female", "VocalSet: A Singing Voice Dataset, J. Wilkins et al., ISMIR 2018, CC BY 4.0" },
                            Pack { "studio-female-a", "female", "Trained from licence-free studio vocals in the owner's library" },
-                           Pack { "band-male-1", "male", "Public domain recordings: works of US military band members made as part of their duties" } })
+                           Pack { "band-male-1", "male", "Public domain recordings: works of US military band members made as part of their duties" },
+                           Pack { "gtsinger-en-alto-1", "female", "CC BY-NC-SA 4.0 - GTSinger (Zhang et al., NeurIPS 2024): personal, non-commercial use only" },
+                           Pack { "ccby-nd-tenor", "male", "CC BY-ND 4.0 a cappella" } })
     {
         const auto dir = voxa.getChildFile ("Voices").getChildFile (p.id);
         dir.createDirectory();
@@ -1155,21 +1157,25 @@ static void aiSingersShareAndInstall()
     int shareable = 0;
     for (const auto& s : mine)
         shareable += s.shareable ? 1 : 0;
-    check (mine.size() == 3 && shareable == 1, "of the three singers only the VocalSet one may be shared");
+    check (mine.size() == 5 && shareable == 1, "of the five singers only the VocalSet one may be shared");
+    check (! sanctuary::ai::isShareable ("CC BY-NC 4.0") && ! sanctuary::ai::isShareable ("cc-by-nc-sa") && sanctuary::ai::isShareable ("CC BY 4.0")
+           && sanctuary::ai::isShareable ("CC0 1.0"), "CC licences with NonCommercial or NoDerivatives terms are never shared");
     const auto zipFile = root.getChildFile ("Sanctuary AI Singers.zip");
     String error;
     const int packed = sanctuary::ai::makeSharePack (mine, zipFile, {}, nullptr, error);
     check (packed == 1, "the pack holds one singer");
     {
         ZipFile zip (zipFile);
-        bool studio = false, band = false;
+        bool studio = false, band = false, nonCommercial = false;
         for (int i = 0; i < zip.getNumEntries(); ++i)
         {
             const auto name = zip.getEntry (i)->filename;
             studio = studio || name.contains ("studio");
             band = band || name.contains ("band");
+            nonCommercial = nonCommercial || name.contains ("gtsinger") || name.contains ("ccby-nd");
         }
         check (! studio && ! band, "and never a sample-pack or band singer");
+        check (! nonCommercial, "nor a singer trained on non-commercial or no-derivatives recordings (GTSinger)");
         check (zip.getEntry ("Voices/vocalset-female1/voice.json") != nullptr && zip.getEntry ("Encoders/contentvec-768.onnx") != nullptr
                && zip.getEntry ("CREDITS.txt") != nullptr && zip.getEntry ("Voices/voice_assignment.json") != nullptr,
                "with the content encoder, the singer's measured range and the credits");
