@@ -23,7 +23,8 @@ struct Singer
     int low = 48, high = 72;    // the range the singer was trained on (MIDI)
     float median = 60.0f;       // the singer's middle note: the model sounds most like them around it
     bool classical = false;     // classically trained (the VocalSet singers)
-    bool shareable = false;     // trained on recordings that may be shared (VocalSet, CC BY): see isShareable
+    bool shareable = false;     // may be given to a friend (VocalSet, CC BY; or non-commercially): see shareTerms
+    bool nonCommercial = false; // ... but only for non-commercial use (GTSinger, CC BY-NC-SA)
     bool fromVoxaVersa = true;  // in VoxaVersa's Voices folder (else in Sanctuary's own)
     juce::String licence;
     juce::File folder;
@@ -34,13 +35,17 @@ struct Singer
     the names and ranges of their voice assignments, sorted by name. Packs without an AI model are left out. */
 std::vector<Singer> findSingers();
 
-/** May a singer with this licence (and description) be given to someone else? Only voices trained on
-    recordings that allow it (VocalSet, CC BY, CC0); never sample-pack singers or singers who never agreed. */
-bool isShareable (const juce::String& licenceAndDescription);
+/** May a singer with this licence (and description) be given to someone else? Voices trained on recordings
+    that allow it: freely (VocalSet, CC BY, CC0) or for non-commercial use only (CC BY-NC, CC BY-NC-SA, as
+    GTSinger: a friend may use them, not in songs they sell or stream for money). Never sample-pack singers,
+    singers who never agreed, private or testing-only voices, or no-derivatives (ND) recordings. */
+enum class ShareTerms { never, nonCommercial, free };
+ShareTerms shareTerms (const juce::String& licenceAndDescription);
+inline bool isShareable (const juce::String& licenceAndDescription) { return shareTerms (licenceAndDescription) != ShareTerms::never; }
 
 /** Writes a pack of the singers that may be shared (with the content encoder, their names and ranges, and
-    the credits) to `zipFile`, for someone without VoxaVersa to install. Returns how many singers went in
-    (0 and `error` if none could). */
+    the credits and licences, which say which singers are for non-commercial use only) to `zipFile`, for
+    someone without VoxaVersa to install. Returns how many singers went in (0 and `error` if none could). */
 int makeSharePack (const std::vector<Singer>& singers, const juce::File& zipFile,
                    const std::function<void (float)>& progress, const std::atomic<bool>* cancel, juce::String& error);
 

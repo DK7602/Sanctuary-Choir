@@ -78,22 +78,26 @@ namespace
 /** May this singer be given to someone else? Only voices trained on recordings whose licence allows it:
     VocalSet's singers (CC BY 4.0), or a pack whose licence says CC BY or CC0. Never singers from sample packs
     in someone's own library, or from recordings whose singers never agreed (the band singers). */
-bool isShareable (const juce::String& licenceAndDescription)
+ShareTerms shareTerms (const juce::String& licenceAndDescription)
 {
     const auto t = licenceAndDescription.toLowerCase();
-    for (auto* no : { "owner's library", "owners library", "personal", "testing only", "do not share", "military",
-                      "band member", "not for sale", "private", "non-commercial", "noncommercial", "non commercial" })
+    for (auto* no : { "owner's library", "owners library", "testing only", "do not share", "military",
+                      "band member", "not for sale", "private" })
         if (t.contains (no))
-            return false;
-    // Creative Commons with NonCommercial or NoDerivatives terms (CC BY-NC-SA, as GTSinger's): a voice
-    // trained on it may not be given away with something people use to make their songs.
+            return ShareTerms::never;
     juce::String words;
     for (auto ch : t)
         words << (juce::CharacterFunctions::isLetterOrDigit (ch) ? juce::String::charToString (ch) : juce::String (" "));
     const auto terms = juce::StringArray::fromTokens (words, " ", {});
-    if (terms.contains ("nc") || terms.contains ("nd"))
-        return false;
-    return t.contains ("vocalset") || t.contains ("cc by") || t.contains ("cc-by") || t.contains ("cc0");
+    const bool creativeCommons = t.contains ("cc by") || t.contains ("cc-by") || t.contains ("cc0");
+    if (terms.contains ("nd"))
+        return ShareTerms::never;   // NoDerivatives: a voice trained on it may not be passed on
+    // NonCommercial (CC BY-NC-SA, as GTSinger's): a friend may have it, to use as the licence allows.
+    if (terms.contains ("nc") || t.contains ("non-commercial") || t.contains ("noncommercial") || t.contains ("non commercial"))
+        return creativeCommons ? ShareTerms::nonCommercial : ShareTerms::never;
+    if (t.contains ("personal"))
+        return ShareTerms::never;   // personal use only, with no licence that lets it be passed on
+    return t.contains ("vocalset") || creativeCommons ? ShareTerms::free : ShareTerms::never;
 }
 
 static void findSingersIn (const juce::File& voicesDir, bool fromVoxaVersa, std::vector<Singer>& out)
@@ -128,8 +132,10 @@ static void findSingersIn (const juce::File& voicesDir, bool fromVoxaVersa, std:
         s.female = json.getProperty ("gender", "").toString().equalsIgnoreCase ("female");
         s.licence = json.getProperty ("license", "").toString();
         s.fromVoxaVersa = fromVoxaVersa;
-        s.shareable = isShareable (s.licence + " " + json.getProperty ("description", "").toString() + " "
-                                   + (loose (packId).startsWith ("vocalset") ? "VocalSet" : ""));
+        const auto terms = shareTerms (s.licence + " " + json.getProperty ("description", "").toString() + " "
+                                       + (loose (packId).startsWith ("vocalset") ? "VocalSet" : ""));
+        s.shareable = terms != ShareTerms::never;
+        s.nonCommercial = terms == ShareTerms::nonCommercial;
         bool already = false;
         for (const auto& o : out)
             already = already || o.id == s.id;
@@ -169,18 +175,47 @@ std::vector<Singer> findSingers()
 }
 
 //==============================================================================
-static const char* sharePackCredits()
+static juce::String sharePackCredits (const std::vector<const Singer*>& packed)
 {
-    return "Sanctuary Choir - AI singers\n"
-           "============================\n\n"
-           "Singers that may be shared: voice models trained for VoxaVersa on recordings whose licence allows it.\n\n"
-           "VocalSet singers: the models were trained on recordings from\n"
-           "  VocalSet: A Singing Voice Dataset, J. Wilkins, P. Seetharaman, A. Wahl, B. Pardo, ISMIR 2018,\n"
-           "  https://zenodo.org/records/1442513, licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).\n"
-           "  Changed: the recordings were cleaned and used to train a voice conversion model (RVC) of each singer.\n\n"
-           "Content encoder (Encoders/contentvec-768.onnx): RVC's HuBERT/ContentVec base model\n"
-           "  (lj1995/VoiceConversionWebUI, MIT licence), exported to ONNX.\n\n"
-           "To install: in Sanctuary Choir, Settings > AI SINGERS > INSTALL VOICES, and choose this file.\n";
+    juce::StringArray free, nonCommercial;
+    bool vocalSet = false, gtSinger = false;
+    juce::String others;
+    for (const auto* s : packed)
+    {
+        (s->nonCommercial ? nonCommercial : free).add (s->name);
+        const auto what = (s->licence + " " + s->id).toLowerCase();
+        if (what.contains ("vocalset")) vocalSet = true;
+        else if (what.contains ("gtsinger")) gtSinger = true;
+        else others << "  " << s->name << ": " << (s->licence.isNotEmpty() ? s->licence : juce::String ("(no licence given)")) << "\n";
+    }
+    juce::String c;
+    c << "Sanctuary Choir - AI singers\n"
+         "============================\n\n"
+         "Voice models trained for VoxaVersa on recordings whose licence allows them to be passed on.\n\n";
+    if (! nonCommercial.isEmpty())
+        c << "NON-COMMERCIAL USE ONLY: " << nonCommercial.joinIntoString (", ") << ".\n"
+             "  These singers are licensed CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/):\n"
+             "  use them only for things you don't sell or earn from - not in songs sold or streamed for money -\n"
+             "  and pass them on only under the same licence, never for money.\n\n";
+    if (! free.isEmpty())
+        c << "Free to use (credit the recordings below): " << free.joinIntoString (", ") << ".\n\n";
+    if (vocalSet)
+        c << "VocalSet singers: the models were trained on recordings from\n"
+             "  VocalSet: A Singing Voice Dataset, J. Wilkins, P. Seetharaman, A. Wahl, B. Pardo, ISMIR 2018,\n"
+             "  https://zenodo.org/records/1442513, licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).\n"
+             "  Changed: the recordings were cleaned and used to train a voice conversion model (RVC) of each singer.\n\n";
+    if (gtSinger)
+        c << "GTSinger singers: the models were trained on recordings from\n"
+             "  GTSinger: A Global Multi-Technique Singing Corpus with Realistic Music Scores for All Singing Tasks,\n"
+             "  Yu Zhang et al., NeurIPS 2024 (https://github.com/AaronZ345/GTSinger), licensed CC BY-NC-SA 4.0.\n"
+             "  Changed: the recordings were used to train a voice conversion model (RVC) of each singer. The models\n"
+             "  are shared under the same licence, CC BY-NC-SA 4.0, and GTSinger's own terms apply to them.\n\n";
+    if (others.isNotEmpty())
+        c << "Other singers and their licences:\n" << others << "\n";
+    c << "Content encoder (Encoders/contentvec-768.onnx): RVC's HuBERT/ContentVec base model\n"
+         "  (lj1995/VoiceConversionWebUI, MIT licence), exported to ONNX.\n\n"
+         "To install: in Sanctuary Choir, Settings > AI SINGERS > INSTALL VOICES, and choose this file.\n";
+    return c;
 }
 
 int makeSharePack (const std::vector<Singer>& singers, const juce::File& zipFile,
@@ -188,11 +223,13 @@ int makeSharePack (const std::vector<Singer>& singers, const juce::File& zipFile
 {
     juce::ZipFile::Builder zip;
     int count = 0;
+    std::vector<const Singer*> packed;
     auto assignments = std::make_unique<juce::DynamicObject>();
     for (const auto& s : singers)
     {
         if (! s.shareable)
             continue;
+        packed.push_back (&s);
         for (const auto& f : s.folder.findChildFiles (juce::File::findFiles, true))
             zip.addFile (f, 0, "Voices/" + s.id + "/" + f.getRelativePathFrom (s.folder).replaceCharacter ('\\', '/'));
         if (! s.assignment.isVoid())
@@ -201,7 +238,7 @@ int makeSharePack (const std::vector<Singer>& singers, const juce::File& zipFile
     }
     if (count == 0)
     {
-        error = "none of your singers may be shared (only those trained on VocalSet or other CC BY recordings)";
+        error = "none of your singers may be shared (only those trained on VocalSet, GTSinger or other Creative Commons recordings)";
         return 0;
     }
     juce::File encoder;
@@ -221,7 +258,7 @@ int makeSharePack (const std::vector<Singer>& singers, const juce::File& zipFile
     const auto json = juce::JSON::toString (juce::var (root.release()));
     zip.addEntry (std::make_unique<juce::MemoryInputStream> (json.toRawUTF8(), json.getNumBytesAsUTF8(), true), 0,
                   "Voices/voice_assignment.json", juce::Time::getCurrentTime());
-    const juce::String credits (sharePackCredits());
+    const juce::String credits (sharePackCredits (packed));
     zip.addEntry (std::make_unique<juce::MemoryInputStream> (credits.toRawUTF8(), credits.getNumBytesAsUTF8(), true), 0,
                   "CREDITS.txt", juce::Time::getCurrentTime());
 
@@ -871,6 +908,7 @@ juce::var describeAvailability (const std::vector<Singer>& singers)
         e->setProperty ("high", s.high);
         e->setProperty ("classical", s.classical);
         e->setProperty ("shareable", s.shareable);
+        e->setProperty ("nonCommercial", s.nonCommercial);
         list.add (juce::var (e.release()));
     }
     o->setProperty ("singers", list);

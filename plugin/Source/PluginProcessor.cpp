@@ -899,8 +899,12 @@ void SanctuaryProcessor::makeAiSharePack (const File& zipFile)
         if (n == 0)
             return "No pack made: " + error;
         zipFile.revealToUser();
+        int nonCommercial = 0;
+        for (const auto& s : singers)
+            nonCommercial += s.shareable && s.nonCommercial ? 1 : 0;
         return "Made " + zipFile.getFileName() + ": " + String (n) + (n == 1 ? " singer" : " singers")
-               + " a friend can install (Settings > AI SINGERS > INSTALL VOICES)";
+               + " a friend can install (Settings > AI SINGERS > INSTALL VOICES)"
+               + (nonCommercial > 0 ? ". " + String (nonCommercial) + " of them for non-commercial use only: see CREDITS.txt in the pack" : String());
     });
 }
 

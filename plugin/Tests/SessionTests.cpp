@@ -1157,25 +1157,37 @@ static void aiSingersShareAndInstall()
     int shareable = 0;
     for (const auto& s : mine)
         shareable += s.shareable ? 1 : 0;
-    check (mine.size() == 5 && shareable == 1, "of the five singers only the VocalSet one may be shared");
-    check (! sanctuary::ai::isShareable ("CC BY-NC 4.0") && ! sanctuary::ai::isShareable ("cc-by-nc-sa") && sanctuary::ai::isShareable ("CC BY 4.0")
-           && sanctuary::ai::isShareable ("CC0 1.0"), "CC licences with NonCommercial or NoDerivatives terms are never shared");
+    check (mine.size() == 5 && shareable == 2, "of the five singers the VocalSet and the GTSinger ones may be shared");
+    using sanctuary::ai::ShareTerms;
+    using sanctuary::ai::shareTerms;
+    check (shareTerms ("CC BY 4.0") == ShareTerms::free && shareTerms ("CC0 1.0") == ShareTerms::free
+           && shareTerms ("CC BY-NC 4.0") == ShareTerms::nonCommercial && shareTerms ("cc-by-nc-sa") == ShareTerms::nonCommercial
+           && shareTerms ("CC BY-NC-SA 4.0 - GTSinger (Zhang et al., NeurIPS 2024): personal, non-commercial use only") == ShareTerms::nonCommercial
+           && shareTerms ("CC BY-ND 4.0") == ShareTerms::never && shareTerms ("personal use only") == ShareTerms::never
+           && shareTerms ("non-commercial, testing only") == ShareTerms::never,
+           "Creative Commons voices may be shared (NonCommercial ones for non-commercial use), NoDerivatives and private ones never");
     const auto zipFile = root.getChildFile ("Sanctuary AI Singers.zip");
     String error;
     const int packed = sanctuary::ai::makeSharePack (mine, zipFile, {}, nullptr, error);
-    check (packed == 1, "the pack holds one singer");
+    check (packed == 2, "the pack holds two singers");
     {
         ZipFile zip (zipFile);
-        bool studio = false, band = false, nonCommercial = false;
+        bool studio = false, band = false, noDerivatives = false;
         for (int i = 0; i < zip.getNumEntries(); ++i)
         {
             const auto name = zip.getEntry (i)->filename;
             studio = studio || name.contains ("studio");
             band = band || name.contains ("band");
-            nonCommercial = nonCommercial || name.contains ("gtsinger") || name.contains ("ccby-nd");
+            noDerivatives = noDerivatives || name.contains ("ccby-nd");
         }
-        check (! studio && ! band, "and never a sample-pack or band singer");
-        check (! nonCommercial, "nor a singer trained on non-commercial or no-derivatives recordings (GTSinger)");
+        check (! studio && ! band && ! noDerivatives, "and never a sample-pack, band or no-derivatives singer");
+        String credits;
+        if (auto* entry = zip.getEntry ("CREDITS.txt"))
+            if (std::unique_ptr<InputStream> in { zip.createStreamForEntry (*entry) })
+                credits = in->readEntireStreamAsString();
+        check (zip.getEntry ("Voices/gtsinger-en-alto-1/voice.json") != nullptr && credits.contains ("NON-COMMERCIAL USE ONLY: gtsinger-en-alto-1")
+               && credits.contains ("GTSinger: A Global Multi-Technique Singing Corpus") && credits.contains ("CC BY-NC-SA 4.0"),
+               "the GTSinger singer goes in, marked non-commercial, with GTSinger's credit and licence");
         check (zip.getEntry ("Voices/vocalset-female1/voice.json") != nullptr && zip.getEntry ("Encoders/contentvec-768.onnx") != nullptr
                && zip.getEntry ("CREDITS.txt") != nullptr && zip.getEntry ("Voices/voice_assignment.json") != nullptr,
                "with the content encoder, the singer's measured range and the credits");
@@ -1187,14 +1199,23 @@ static void aiSingersShareAndInstall()
     check (sanctuary::ai::findSingers().empty(), "a friend without VoxaVersa has no singers at first");
     const auto installed = sanctuary::ai::installVoices (zipFile, error);
     const auto theirs = sanctuary::ai::findSingers();
-    check (installed.size() == 1 && theirs.size() == 1 && theirs[0].name == "Lyric Soprano" && theirs[0].low == 60 && theirs[0].median == 68.0f,
-           "INSTALL VOICES puts the singer in Sanctuary's own folder, with their name and range");
+    const sanctuary::ai::Singer* lyric = nullptr;
+    const sanctuary::ai::Singer* gts = nullptr;
+    for (const auto& s : theirs)
+    {
+        if (s.name == "Lyric Soprano") lyric = &s;
+        if (s.id == "gtsinger-en-alto-1") gts = &s;
+    }
+    check (installed.size() == 2 && theirs.size() == 2 && lyric != nullptr && lyric->low == 60 && lyric->median == 68.0f,
+           "INSTALL VOICES puts the singers in Sanctuary's own folder, with their names and ranges");
+    check (gts != nullptr && gts->shareable && gts->nonCommercial && lyric != nullptr && ! lyric->nonCommercial,
+           "and the friend's Sanctuary knows which one is for non-commercial use");
     check (sanctuary::ai::getSanctuaryEncodersDirectory().getChildFile ("contentvec-768.onnx").existsAsFile(), "and the content encoder");
     if (realModels)
     {
         setEnv ("SANCTUARY_ONNXRUNTIME_PATH", SystemStats::getEnvironmentVariable ("SANCTUARY_TEST_ORT_LIB", {}));
         String loadError;
-        const auto model = sanctuary::ai::NeuralVoiceModel::load (theirs[0].folder, loadError);
+        const auto model = sanctuary::ai::NeuralVoiceModel::load (lyric != nullptr ? lyric->folder : File(), loadError);
         check (model != nullptr, "and the singer loads from there, encoder and all");
         if (model == nullptr)
             std::printf ("  %s\n", loadError.toRawUTF8());
@@ -1210,7 +1231,7 @@ static void aiSingersShareAndInstall()
         b.writeToStream (out, nullptr);
     }
     const auto one = sanctuary::ai::installVoices (vxpack, error);
-    check (one.size() == 1 && sanctuary::ai::findSingers().size() == 2, "a VoxaVersa .vxpack installs as one more singer");
+    check (one.size() == 1 && sanctuary::ai::findSingers().size() == 3, "a VoxaVersa .vxpack installs as one more singer");
 
     setEnv ("SANCTUARY_VOXAVERSA_DIR", {});
     setEnv ("SANCTUARY_AI_DIR", {});

@@ -1458,7 +1458,8 @@
             const it = Menu.item(m, x.name, x.id === current, () => SC.send({ type: "cmd", name: "aiSinger", section, slot, id: x.id }));
             const r = document.createElement("span");
             r.className = "ai-range";
-            r.textContent = rangeName(x.low, x.high) + (x.classical ? " · classical" : "") + (x.shareable ? " · shareable" : "");
+            r.textContent = rangeName(x.low, x.high) + (x.classical ? " · classical" : "")
+              + (x.shareable ? (x.nonCommercial ? " · shareable, non-commercial" : " · shareable") : "");
             it.appendChild(r);
           });
         });
