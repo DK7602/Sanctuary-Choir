@@ -3033,6 +3033,40 @@ static std::vector<test::SungNote> minorTune (bool harmonic)
     };
 }
 
+TEST (minorKeysKeepTheirNaturalTonicChord)
+{
+    // Harmonic minor raises the seventh for the dominant only: a gospel choir in C# minor sings
+    // C#m7 at home (not C#m(maj7)) and a major III (not augmented), but still G#7 at a cadence.
+    for (ScaleType type : { ScaleType::HarmonicMinor, ScaleType::NaturalMinor })
+    {
+        std::vector<Chord> vocab;
+        buildChordVocabulary (Scale { 1, type }, Style::Gospel, vocab);
+        const Chord* tonic = nullptr;
+        const Chord* relative = nullptr;
+        bool dominant7 = false;
+        for (const auto& c : vocab)
+        {
+            if (c.degree == 0) tonic = &c;
+            if (c.degree == 2) relative = &c;
+            if (c.root == 8 && c.contains (0) && c.contains (6)) dominant7 = true;   // G#7: G# B# D# F#
+        }
+        CHECK (tonic != nullptr && tonic->name == "C#m7" && ! tonic->contains (0));
+        CHECK (relative != nullptr && relative->root == 4 && relative->contains (11) && ! relative->contains (0));
+        if (type == ScaleType::HarmonicMinor)
+            CHECK (dominant7);
+        std::printf ("  %s: tonic %s, III %s\n", type == ScaleType::HarmonicMinor ? "harmonic minor" : "natural minor",
+                     tonic != nullptr ? tonic->name.c_str() : "-", relative != nullptr ? relative->name.c_str() : "-");
+    }
+    // A slide up into the tonic is not a leading tone: harmonic minor needs it sung for real.
+    std::array<float, 12> h {};
+    h[1] = 10.0f; h[4] = 6.0f; h[8] = 5.0f; h[6] = 3.0f; h[3] = 2.0f; h[9] = 1.0f;   // C# minor, no B either way
+    h[0] = 0.4f;                                                                       // 1.4 %: scoops into C#
+    CHECK (autoScaleType (h, 1, true) == ScaleType::NaturalMinor);
+    CHECK (autoScaleType (h, 1, true, ScaleType::HarmonicMinor) == ScaleType::NaturalMinor);
+    h[0] = 2.0f;                                                                       // 7 %: sung
+    CHECK (autoScaleType (h, 1, true) == ScaleType::HarmonicMinor);
+}
+
 TEST (scaleAutoHearsMajorOrMinor)
 {
     // The scale for a key heard as major or minor: harmonic minor once the leading tone is sung.

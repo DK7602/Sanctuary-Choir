@@ -249,13 +249,20 @@ void buildChordVocabulary (const Scale& scale, Style style, std::vector<Chord>& 
 
     const bool sevenths = style == Style::Gospel;
     const bool extraDominant7 = style == Style::Sacred || style == Style::Chamber || style == Style::Spiritual || style == Style::Worship;
+    // Harmonic minor raises the seventh for the dominant (V, vii): the tonic and the relative major
+    // keep the natural one. Otherwise the tonic of a gospel minor key is m(maj7) and III is
+    // augmented: chords that clash with every pop, R&B and gospel song in minor.
+    auto naturalMinor = dia;
+    if (minor && wrapPc (dia[6] - t) == 11)
+        naturalMinor[6] = wrapPc (t + 10);
 
     for (int d = 0; d < 7; ++d)
     {
-        const int root = dia[(size_t) d];
-        const int third = wrapPc (dia[(size_t) ((d + 2) % 7)] - root);
-        const int fifth = wrapPc (dia[(size_t) ((d + 4) % 7)] - root);
-        const int seventh = wrapPc (dia[(size_t) ((d + 6) % 7)] - root);
+        const auto& steps = (d == 0 || d == 2) ? naturalMinor : dia;
+        const int root = steps[(size_t) d];
+        const int third = wrapPc (steps[(size_t) ((d + 2) % 7)] - root);
+        const int fifth = wrapPc (steps[(size_t) ((d + 4) % 7)] - root);
+        const int seventh = wrapPc (steps[(size_t) ((d + 6) % 7)] - root);
 
         float prior = (minor ? minorPriors : majorPriors)[d];
         if (fifth == 6) prior *= 0.5f;   // diminished
@@ -887,9 +894,15 @@ ScaleType autoScaleType (const std::array<float, 12>& h, int tonic, bool minor, 
     if (! minor)
         return ScaleType::Major;
     const float raised = h[(size_t) wrapPc (tonic + 11)], lowered = h[(size_t) wrapPc (tonic + 10)];
-    if (raised > 1.3f * lowered + 1.0e-6f)
+    float total = 0.0f;
+    for (float v : h)
+        total += v;
+    // The leading tone has to be sung for real: a slide up into the tonic passes through it too,
+    // and pop, R&B and gospel tunes in minor rarely touch either seventh.
+    const bool sung = raised > 0.04f * total, stillSung = raised > 0.025f * total;
+    if (sung && raised > 1.3f * lowered + 1.0e-6f)
         return ScaleType::HarmonicMinor;
-    if (lowered > 1.3f * raised + 1.0e-6f || current != ScaleType::HarmonicMinor)
+    if (lowered > 1.3f * raised + 1.0e-6f || current != ScaleType::HarmonicMinor || ! stillSung)
         return ScaleType::NaturalMinor;
     return ScaleType::HarmonicMinor;
 }
